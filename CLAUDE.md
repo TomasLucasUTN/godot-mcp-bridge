@@ -1,7 +1,7 @@
-# mi-godot-mcp — project guide
+# godot-mcp-bridge — project guide
 
 Godot 4 MCP server: a GDScript editor addon (`addons/godot_mcp/`) talking over a
-WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). ~150 tools.
+WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 185 tools.
 Architecture is the converged standard for the space (Node stdio ↔ WS ↔ editor plugin).
 
 ## Two rules that keep the codebase healthy (apply these first)
@@ -45,19 +45,19 @@ context.
 
 ## Dev / test loop
 
-The addon is junctioned into the test project
-(`C:\Users\Tomas Lucas\Documents\mi-juego-2d`), so repo edits are already on disk — no
-copy step. What each kind of change needs:
+If you develop against a real Godot project, symlink or junction its
+`addons/godot_mcp/` to this repo's `addons/godot_mcp/` so repo edits are already
+on disk — no copy step. What each kind of change needs:
 - **Changing an existing tool handler's logic** (the body of a `func` in tools/*.gd) —
   **hot-reloads, no restart.** Edit the file, call `rescan_filesystem`, wait ~1-2s: Godot
-  swaps the @tool node's script in place (the junction makes the res:// change visible;
+  swaps the @tool node's script in place (the link makes the res:// change visible;
   the ToolExecutor's map still points at the same node instance, now running new code).
-  Verified 2026-07-25. This is the fast path; reserve editor restarts for the next case.
+  This is the fast path; reserve editor restarts for the next case.
 - **A brand-new tool, a new dispatch entry, or edits to `tool_executor.gd` / `plugin.gd`**
-  — needs a full editor restart (`pwsh scripts/restart-godot.ps1`, then poll
-  `get_godot_status` until `connected:true`, ~30-35s), because the tool map is built once
-  in `_init_tools` and the plugin's `_enter_tree` ran once. A brand-new tool ALSO needs the
-  Node **server** to restart (it caches `list_tools`) before the MCP client can see it.
+  — needs a full editor restart, then poll `get_runtime_status` until `connected:true`
+  (~30-35s), because the tool map is built once in `_init_tools` and the plugin's
+  `_enter_tree` ran once. A brand-new tool ALSO needs the Node **server** to restart
+  (it caches `list_tools`) before the MCP client can see it.
 - `mcp_runtime.gd` reloads fresh on every `run_scene`.
 
 Confirm a change: `validate_scripts` reports 0 invalid after any GDScript edit, and a
@@ -85,5 +85,4 @@ live (open-scene) mutation leaves the `.tscn` file's md5 unchanged (proving no c
   a broken stub — CreateProcess error 193), and quote the `--path` value so a space in the
   user path doesn't truncate it.
 
-Conversation in Spanish; code and comments in English. `AUDIT.md` and `RESEARCH_SUMMARY.md`
-hold the deep-audit findings and backlog status.
+Code and comments in English.

@@ -111,10 +111,10 @@ These require a running Godot editor with the MCP plugin enabled.
 - [ ] Reconnects after MCP server restart
 
 ### Tool execution (spot check — pick 3-5 tools per release)
-- [ ] `get_godot_status` returns connection info
-- [ ] File tools: `list_dir`, `read_file`, `write_file`
-- [ ] Scene tools: `get_scene_tree`, `get_node_properties`
-- [ ] Script tools: `read_script`, `update_script`
+- [ ] `get_runtime_status` returns connection info
+- [ ] File tools: `list_dir`, `read_file`, `search_project`
+- [ ] Scene tools: `read_scene`, `scene_tree_dump`, `get_node_properties`
+- [ ] Script tools: `create_script`, `edit_script`
 - [ ] Project tools: `get_project_settings`, `map_project`
 
 ### Multi-session

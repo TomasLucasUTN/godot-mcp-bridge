@@ -1,24 +1,28 @@
-# Godot MCP Server
+# godot-mcp-bridge
 
 **Give your AI assistant full access to the Godot editor.**
 
 Build games faster with Claude, Cursor, or any MCP-compatible AI — no copy-pasting, no context switching. The AI reads, writes, and manipulates your scenes, scripts, nodes, and project settings directly inside the running Godot editor.
 
-> Godot 4.x · 32 tools · Interactive project visualizer · MIT license
+> Godot 4.x · 185 tools (35 loaded by default) · Live-tree editing with undo · Interactive project visualizer · MIT license
+
+See the [project README](https://github.com/TomasLucasUTN/godot-mcp-bridge#readme) for the full tool breakdown, architecture, and setup guide. This file is the condensed version shown on npm.
 
 ---
 
 ## Quick Start
 
-### 0. Install Node.js (one-time setup)
-
-Download and run the installer from **[nodejs.org](https://nodejs.org/en/download)** (LTS version). It's a standard installer — no terminal needed.
-
 ### 1. Install the Godot plugin
 
-No cloning or building required — runs directly via npx.
+```bash
+npx godot-mcp-bridge install
+```
 
-**Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Run from inside your Godot project folder — copies the addon into `addons/godot_mcp/` and enables the plugin. Or copy `addons/godot_mcp/` from the [GitHub repo](https://github.com/TomasLucasUTN/godot-mcp-bridge) by hand and enable it under Project Settings → Plugins. (The "Godot AI Assistant tools MCP" AssetLib listing belongs to the upstream project this forked from, not this repo.)
+
+### 2. Add the server to your AI client
+
+**Claude Desktop / Cursor** — add to the client's MCP config:
 ```json
 {
   "mcpServers": {
@@ -30,44 +34,19 @@ No cloning or building required — runs directly via npx.
 }
 ```
 
-**Cursor** — add to MCP settings (Settings → MCP → Add Server):
-```json
-{
-  "mcpServers": {
-    "godot": {
-      "command": "npx",
-      "args": ["-y", "godot-mcp-bridge"]
-    }
-  }
-}
-```
+Windows: use `"command": "cmd", "args": ["/c", "npx", "-y", "godot-mcp-bridge"]`.
 
 Works with any MCP-compatible client (Claude Code, Cline, Windsurf, etc.)
 
-### 2. Install the Godot plugin
-
-Copy the `addons/godot_mcp/` folder from the [GitHub repo](https://github.com/TomasLucasUTN/godot-mcp-bridge) into your Godot project's `addons/` directory. Then enable it: **Project → Project Settings → Plugins → Godot MCP → Enable**.
-
-Or install directly from the **Godot Asset Library**: AssetLib → search "Godot MCP" → Install.
-
 ### 3. Connect
 
-Restart your Godot project. Check the **top-right corner** of the editor — you should see **MCP Connected** in green. You're ready to go.
+Restart your AI client, then restart your Godot project. Check the **top-right corner** of the editor for **MCP Connected** in green.
 
 ---
 
 ## What Can It Do?
 
-### 32 Tools Across 6 Categories
-
-| Category | Tools | Examples |
-|---|---|---|
-| **File Operations** | 4 | Browse directories, read files, search project, create scripts |
-| **Scene Operations** | 11 | Create scenes, add/remove/move nodes, set properties, attach scripts, assign collision shapes and textures |
-| **Script Operations** | 6 | Apply code edits, validate syntax, rename/move files with reference updates |
-| **Project Tools** | 9 | Read project settings, input map, collision layers, console errors, scene tree dumps |
-| **Asset Generation** | 1 | Generate 2D sprites from SVG |
-| **Visualization** | 1 | Interactive browser-based project map |
+185 tools grouped by intent; only `core` (35 tools) loads by default so the agent stays focused. `enable_toolset({ name: "..." })` pulls in more — runtime control, scene editing, project config, animation, physics, analysis, scaffolding, testing, and more. Edits to a scene that's open in the editor go through the **live tree and Godot's undo system** instead of silently overwriting the `.tscn` file on disk.
 
 ### Interactive Visualizer
 
@@ -79,36 +58,12 @@ Run `map_project` and get a browser-based project explorer at `localhost:6510`:
 - Scene view with node property editing
 - Find usages before refactoring
 
-![Godot MCP Visualizer](https://github.com/user-attachments/assets/a9faf163-8b8b-43da-93ec-c7a651e8ac60)
-
----
-
-## How It Works
-
-```
-┌─────────────┐    MCP (stdio)    ┌─────────────┐   WebSocket    ┌──────────────┐
-│  AI Client   │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
-│  (Claude,    │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
-│   Cursor)    │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  32 tool     │
-                                 │  HTTP :6510  │               │  handlers    │
-                                 └──────┬───────┘               └──────────────┘
-                                        │
-                                 ┌──────▼───────┐
-                                 │   Browser     │
-                                 │  Visualizer   │
-                                 └──────────────┘
-```
-
-The MCP server connects to the Godot editor via WebSocket through the Godot plugin. The AI never guesses at your project structure — it reads live state directly from the running editor.
-
 ---
 
 ## Current Limitations
 
 - **Local only** — runs on localhost, no remote connections
 - **Single connection** — one Godot instance at a time
-- **No undo** — changes save directly (use version control)
 - **AI has limited Godot knowledge** — it can help debug, write scripts, and build scenes, but can't create a complete game without guidance
 
 ---
@@ -117,7 +72,7 @@ The MCP server connects to the Godot editor via WebSocket through the Godot plug
 
 ```bash
 git clone https://github.com/TomasLucasUTN/godot-mcp-bridge
-cd godot-mcp/mcp-server
+cd godot-mcp-bridge/mcp-server
 npm install
 npm run build
 ```
