@@ -304,6 +304,12 @@ Narrative write-ups of each release live in [`release-notes/`](./release-notes/)
 
 ---
 
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Security issues: see [`SECURITY.md`](./SECURITY.md) instead of opening a public issue.
+
+---
+
 ## License
 
 MIT
