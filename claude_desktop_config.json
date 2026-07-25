@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "godot": {
+      "command": "node",
+      "args": ["/absolute/path/to/godot-mcp-bridge/mcp-server/dist/index.js"]
+    }
+  }
+}
