@@ -24,12 +24,17 @@ export const navigationTools: ToolDefinition[] = [
   {
     name: 'bake_navigation_mesh',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Bake the navigation mesh/polygon for a NavigationRegion2D/3D from its child geometry (collision shapes/meshes). Runs synchronously.',
+    description: 'Bake the navigation mesh/polygon for a NavigationRegion2D/3D. Runs synchronously. 2D only: child geometry (StaticBody2D colliders, Polygon2D, TileMap) is always parsed as OBSTRUCTION geometry, never the walkable surface, so pass \'outline\' with the walkable boundary\'s points or the bake will (correctly) report an empty result. 3D bakes the navigation mesh directly from child mesh/collision geometry as usual.',
     inputSchema: {
       type: 'object',
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
-        node_path: { type: 'string', description: 'Path to the NavigationRegion2D/3D node' }
+        node_path: { type: 'string', description: 'Path to the NavigationRegion2D/3D node' },
+        outline: {
+          type: 'array',
+          description: '2D only. Walkable boundary as an array of at least 3 {x,y} points in the region\'s local space. Required to get a non-empty bake unless the NavigationPolygon already has an outline from another source (e.g. hand-drawn in the editor).',
+          items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] }
+        }
       },
       required: ['scene_path', 'node_path']
     }

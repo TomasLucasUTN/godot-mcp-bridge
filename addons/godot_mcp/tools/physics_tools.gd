@@ -162,13 +162,21 @@ func setup_collision(args: Dictionary) -> Dictionary:
 # set_physics_layers
 # =============================================================================
 ## Converts a list of 1-based layer indices (1..32) into a 32-bit mask.
-func _layers_to_mask(layers: Array) -> int:
+## Returns [mask: int, error: String]; error non-empty if any entry isn't a
+## valid index — presets have no associated node, so there's no dimension to
+## resolve a layer NAME against (unlike set_physics_layers). Silently treating
+## an unresolvable name as 0 would save a preset with collision fully
+## disabled and no indication why, so this fails loud instead.
+func _layers_to_mask(layers: Array) -> Array:
 	var mask := 0
 	for l in layers:
+		if l is String and not (l as String).is_valid_int():
+			return [0, "Unknown layer '%s': collision presets take indices (1..32), not names — layer names need a node to resolve a 2D/3D dimension against (use set_physics_layers for that)." % l]
 		var idx := int(l)
-		if idx >= 1 and idx <= 32:
-			mask |= 1 << (idx - 1)
-	return mask
+		if idx < 1 or idx > 32:
+			return [0, "Layer index out of range (1..32): %s" % str(l)]
+		mask |= 1 << (idx - 1)
+	return [mask, ""]
 
 # Resolve an array of layer tokens (index 1..32 or a name from Project Settings)
 # into a bitmask. Returns [mask: int, error: String]; error non-empty on any
@@ -337,8 +345,23 @@ func set_collision_preset(args: Dictionary) -> Dictionary:
 	if collision_layer == null and collision_mask == null:
 		return {&"ok": false, &"error": "Provide at least one of 'collision_layer' or 'collision_mask'"}
 
-	var layer_mask: int = _layers_to_mask(collision_layer) if collision_layer is Array else int(collision_layer if collision_layer != null else 0)
-	var mask_mask: int = _layers_to_mask(collision_mask) if collision_mask is Array else int(collision_mask if collision_mask != null else 0)
+	var layer_mask := 0
+	if collision_layer is Array:
+		var r := _layers_to_mask(collision_layer)
+		if not r[1].is_empty():
+			return {&"ok": false, &"error": r[1]}
+		layer_mask = r[0]
+	elif collision_layer != null:
+		layer_mask = int(collision_layer)
+
+	var mask_mask := 0
+	if collision_mask is Array:
+		var r := _layers_to_mask(collision_mask)
+		if not r[1].is_empty():
+			return {&"ok": false, &"error": r[1]}
+		mask_mask = r[0]
+	elif collision_mask != null:
+		mask_mask = int(collision_mask)
 
 	var setting_key := _PRESET_SETTING_PREFIX + preset_name
 	ProjectSettings.set_setting(setting_key, {&"collision_layer": layer_mask, &"collision_mask": mask_mask})

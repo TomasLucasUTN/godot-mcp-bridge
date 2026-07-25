@@ -1775,7 +1775,7 @@ func _run_export_thread(job_id: String, temp_dir: String, preset_name: String, a
 	var argv := ["--path", temp_dir, "--headless", mode_flag, preset_name, artifact_abs, "--quit"]
 	var exit_code := OS.execute(OS.get_executable_path(), argv, out_lines, true, false)
 	_rm_dir_recursive(temp_dir)
-	var log_text := "\n".join(out_lines).strip_edges()
+	var log_text := _sanitize_log_text("\n".join(out_lines).strip_edges())
 	var written := FileAccess.file_exists(artifact_abs)
 	_export_mutex.lock()
 	if _export_jobs.has(job_id):
@@ -1890,6 +1890,23 @@ func _rm_dir_recursive(path: String) -> void:
 		name = da.get_next()
 	da.list_dir_end()
 	DirAccess.remove_absolute(path)
+
+## Strips control characters (keeping newline/tab) from captured subprocess
+## output before it goes into a tool_result. A headless export's stdout can
+## carry raw control bytes (progress-bar carriage returns, terminal color
+## codes) that JSON.stringify() on the Godot side doesn't escape the same way
+## standard JSON.parse() on the receiving end expects — silently corrupting
+## the tool_result message so the caller times out instead of getting the
+## real (already-successful) status. Confirmed by reproduction: the export
+## thread finishes and the Node bridge logs the parse failure and drops the
+## message, so the request just sits until its own client-side timeout fires.
+func _sanitize_log_text(s: String) -> String:
+	var out := ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if c == 9 or c == 10 or (c >= 32 and c != 127):
+			out += s[i]
+	return out
 
 func _tail_text(s: String, n: int) -> String:
 	if s.length() <= n:

@@ -192,10 +192,17 @@ export class GodotBridge {
 
     ws.on('message', (data) => {
       let message: WebSocketMessage;
+      const raw = data.toString();
       try {
-        message = JSON.parse(data.toString()) as WebSocketMessage;
+        message = JSON.parse(raw) as WebSocketMessage;
       } catch (err) {
-        this.log('error', `Failed to parse message: ${err}`);
+        // A tool result carrying unescaped control characters (e.g. ANSI color
+        // codes from a captured subprocess's stdout) produces invalid JSON that
+        // fails here. Previously this just logged and returned, leaving the
+        // caller's pending request to sit until its own timeout with no
+        // indication anything was even received — surface the raw length so a
+        // future occurrence is diagnosable instead of looking like a hang.
+        this.log('error', `Failed to parse message (${raw.length} bytes): ${err}`);
         return;
       }
 

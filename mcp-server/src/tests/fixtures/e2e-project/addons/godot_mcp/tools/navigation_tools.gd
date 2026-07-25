@@ -74,9 +74,21 @@ func setup_navigation_region(args: Dictionary) -> Dictionary:
 ## Bakes from the region's own children (collision shapes / meshes act as
 ## source geometry by default). Runs synchronously (on_thread=false) since
 ## this is a one-shot RPC call that needs the result immediately.
+##
+## 2D gotcha (confirmed against Godot's own docs and by direct testing, both
+## in-editor and in a running game): parsed geometry — StaticBody2D colliders,
+## Polygon2D, TileMap — is ALWAYS parsed as OBSTRUCTION geometry for 2D
+## navigation, never as the walkable surface itself. There is no "floor mesh
+## = walkable" concept in 2D the way there is in 3D. Without a traversable
+## outline already on the NavigationPolygon, baking silently produces an
+## empty result (has_baked_data reads true, but polygon_count is 0) no matter
+## what collision geometry exists as children. `outline` lets the caller
+## supply that walkable boundary directly; without it we still detect and
+## report an empty bake instead of falsely claiming success.
 func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var node_path: String = str(args.get(&"node_path", "."))
+	var outline_arg = args.get(&"outline")
 
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
@@ -101,19 +113,47 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 	if is_2d:
 		if not target.get(&"navigation_polygon"):
 			target.set(&"navigation_polygon", NavigationPolygon.new())
+		var np: NavigationPolygon = target.get(&"navigation_polygon")
+
+		if outline_arg != null:
+			if not (outline_arg is Array) or outline_arg.size() < 3:
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "'outline' must be an array of at least 3 {x,y} points describing the walkable boundary in the region's local space"}
+			var pts := PackedVector2Array()
+			for p in outline_arg:
+				var parsed_p = _parse_value(p)
+				if not (parsed_p is Vector2):
+					_discard_scene(root, is_live)
+					return {&"ok": false, &"error": "Each 'outline' point must be a {x,y} Vector2"}
+				pts.append(parsed_p)
+			np.clear_outlines()
+			np.add_outline(pts)
+
 		target.call(&"bake_navigation_polygon", false)
+
+		if np.get_polygon_count() == 0:
+			_discard_scene(root, is_live)
+			var why := "no traversable outline is defined on this region" if np.get_outline_count() == 0 \
+				else "the defined outline produced no walkable polygon after baking (fully consumed by obstruction geometry, or degenerate)"
+			return {&"ok": false, &"error": "Bake produced an empty navigation mesh: %s. Parsed geometry (StaticBody2D colliders, Polygon2D, TileMap) is always OBSTRUCTION geometry for 2D navigation, never the walkable surface — pass 'outline' with the walkable boundary's points." % why}
 	else:
 		if not target.get(&"navigation_mesh"):
 			target.set(&"navigation_mesh", NavigationMesh.new())
 		target.call(&"bake_navigation_mesh", false)
 
-	# NavigationRegion3D exposes get_bounds() (AABB); NavigationRegion2D does not —
-	# its bounds come from NavigationServer2D by region RID (Rect2).
+	# NavigationRegion3D exposes get_bounds() (AABB) directly on the node.
+	# NavigationRegion2D's bounds are normally read from NavigationServer2D by
+	# region RID, but that RID-keyed data only gets synced by the server on an
+	# actual running SceneTree tick — reading it right after an editor-context
+	# bake reliably returns a stale/empty Rect2 even when the polygon itself
+	# just baked real geometry (confirmed: vertices/polygons present on disk,
+	# region_get_bounds() still {0,0,0,0}). Compute 2D bounds directly from the
+	# baked vertices instead, which has no such dependency.
 	var bounds
 	if is_3d:
 		bounds = target.call(&"get_bounds")
 	else:
-		bounds = NavigationServer2D.region_get_bounds(target.get_region_rid())
+		bounds = _navigation_polygon_bounds(target.get(&"navigation_polygon"))
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -122,6 +162,17 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"bounds": VariantCodec.serialize_value(bounds),
 		&"message": "Baked navigation mesh for '%s'" % node_path}
+
+## Bounding rect over a NavigationPolygon's baked vertices, in the region's
+## local space. See the comment in bake_navigation_mesh for why this is used
+## instead of NavigationServer2D.region_get_bounds().
+func _navigation_polygon_bounds(np: NavigationPolygon) -> Rect2:
+	if not np or np.vertices.is_empty():
+		return Rect2()
+	var r := Rect2(np.vertices[0], Vector2.ZERO)
+	for v: Vector2 in np.vertices:
+		r = r.expand(v)
+	return r
 
 # =============================================================================
 # setup_navigation_agent
@@ -243,16 +294,23 @@ func get_navigation_info(args: Dictionary) -> Dictionary:
 	if target is NavigationRegion2D or target is NavigationRegion3D:
 		info[&"enabled"] = bool(target.get(&"enabled"))
 		info[&"is_baking"] = bool(target.call(&"is_baking"))
-		# get_bounds() only exists on NavigationRegion3D (AABB); for 2D the bounds
-		# live in NavigationServer2D keyed by region RID (Rect2).
+		# get_bounds() only exists on NavigationRegion3D (AABB); for 2D, computed
+		# directly from the baked vertices — see bake_navigation_mesh's comment
+		# on why NavigationServer2D.region_get_bounds() isn't used here.
 		var region_bounds
 		if target is NavigationRegion3D:
 			region_bounds = target.call(&"get_bounds")
 		else:
-			region_bounds = NavigationServer2D.region_get_bounds(target.get_region_rid())
+			region_bounds = _navigation_polygon_bounds(target.get(&"navigation_polygon"))
 		info[&"bounds"] = VariantCodec.serialize_value(region_bounds)
+		# A non-null NavigationPolygon/NavigationMesh doesn't mean it's non-empty —
+		# setup_navigation_region assigns one immediately with nothing baked yet —
+		# so check for actual geometry rather than just resource presence.
 		var mesh_res = target.get(&"navigation_polygon") if target is NavigationRegion2D else target.get(&"navigation_mesh")
-		info[&"has_baked_data"] = mesh_res != null
+		var has_data := false
+		if mesh_res:
+			has_data = not mesh_res.vertices.is_empty() if target is NavigationRegion2D else mesh_res.get_vertices().size() > 0
+		info[&"has_baked_data"] = has_data
 
 	if target is NavigationAgent2D or target is NavigationAgent3D:
 		info[&"radius"] = float(target.get(&"radius"))

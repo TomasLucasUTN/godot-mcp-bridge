@@ -100,6 +100,17 @@ func set_particle_material(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}
 
+	# Validate everything BEFORE mutating anything. On a live (open) scene,
+	# _discard_scene is a no-op — target is the actual node the editor is
+	# displaying, not a copy — so a mutation applied here is not rolled back
+	# by an error returned further down. Parse/validate first, assign last.
+	var parsed_gravity = null
+	if gravity != null:
+		parsed_gravity = _parse_value(gravity)
+		if not (parsed_gravity is Vector3):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'gravity' must be a {x,y,z} Vector3"}
+
 	var material: ParticleProcessMaterial = target.get(&"process_material") as ParticleProcessMaterial
 	if not material:
 		material = ParticleProcessMaterial.new()
@@ -113,11 +124,7 @@ func set_particle_material(args: Dictionary) -> Dictionary:
 		material.initial_velocity_min = float(initial_velocity_min)
 	if initial_velocity_max != null:
 		material.initial_velocity_max = float(initial_velocity_max)
-	if gravity != null:
-		var parsed_gravity = _parse_value(gravity)
-		if not (parsed_gravity is Vector3):
-			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'gravity' must be a {x,y,z} Vector3"}
+	if parsed_gravity != null:
 		material.gravity = parsed_gravity
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
