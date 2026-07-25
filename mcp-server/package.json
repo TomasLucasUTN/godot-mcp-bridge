@@ -2,10 +2,18 @@
   "name": "godot-mcp-bridge",
   "version": "1.0.0",
   "mcpName": "io.github.TomasLucasUTN/godot-mcp-bridge",
-  "description": "MCP server for Godot game engine integration",
+  "description": "MCP server for the Godot 4 editor — live-tree scene editing with undo, runtime game control, and 185 tools over MCP",
+  "author": "Tomas Lucas",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TomasLucasUTN/godot-mcp-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TomasLucasUTN/godot-mcp-bridge/issues"
+  },
+  "homepage": "https://github.com/TomasLucasUTN/godot-mcp-bridge#readme",
+  "engines": {
+    "node": ">=18"
   },
   "type": "module",
   "main": "dist/index.js",
@@ -30,9 +38,14 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "godot",
+    "godot4",
     "game-development",
-    "ai-assistant"
+    "gamedev",
+    "ai-assistant",
+    "claude",
+    "cursor"
   ],
   "license": "MIT",
   "dependencies": {
