@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/TomasLucasUTN/godot-mcp-bridge/security/advisories/new
+    about: Please don't file security issues as public bug reports — see SECURITY.md
