@@ -1,0 +1,388 @@
+@tool
+extends SceneToolBase
+class_name PhysicsTools
+## Physics setup tools for MCP.
+## Handles: add_raycast, setup_collision, set_physics_layers, get_collision_info
+## Scene load/save/find + path guarding are inherited from SceneToolBase.
+
+# =============================================================================
+# add_raycast
+# =============================================================================
+func add_raycast(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var parent_path: String = str(args.get(&"parent_path", "."))
+	var node_name: String = str(args.get(&"node_name", ""))
+	var dimension: String = str(args.get(&"dimension", "2D"))
+	var target_position = args.get(&"target_position")
+	var enabled: bool = bool(args.get(&"enabled", true))
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if dimension not in ["2D", "3D"]:
+		return {&"ok": false, &"error": "Invalid 'dimension': %s. Use '2D' or '3D'." % dimension}
+
+	var node_type: String = "RayCast2D" if dimension == "2D" else "RayCast3D"
+	if node_name.strip_edges().is_empty():
+		node_name = node_type
+
+	var result := _acquire_scene(scene_path)
+	if not result[2].is_empty():
+		return result[2]
+	var root: Node = result[0]
+	var is_live: bool = result[1]
+
+	var parent = _find_node(root, parent_path)
+	if not parent:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+
+	var raycast: Node = ClassDB.instantiate(node_type)
+	if not raycast:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Failed to create node of type: " + node_type}
+	raycast.name = node_name
+	raycast.set(&"enabled", enabled)
+
+	if target_position != null:
+		var parsed = _parse_value(target_position)
+		if dimension == "2D":
+			if not (parsed is Vector2):
+				raycast.free()
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "'target_position' must be a {x,y} Vector2 for RayCast2D"}
+			raycast.set(&"target_position", parsed)
+		else:
+			if not (parsed is Vector3):
+				raycast.free()
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "'target_position' must be a {x,y,z} Vector3 for RayCast3D"}
+			raycast.set(&"target_position", parsed)
+
+	parent.add_child(raycast, true)
+	raycast.owner = root
+
+	var err := _finish_scene_edit(root, scene_path, is_live)
+	if not err.is_empty():
+		return err
+
+	return {&"ok": true, &"scene_path": scene_path, &"node_name": raycast.name, &"node_type": node_type,
+		&"message": "Added %s (%s) to '%s'" % [raycast.name, node_type, parent_path]}
+
+# =============================================================================
+# setup_collision
+# =============================================================================
+const _PHYSICS_BASE_CLASSES: PackedStringArray = [
+	"CharacterBody2D", "CharacterBody3D", "RigidBody2D", "RigidBody3D",
+	"StaticBody2D", "StaticBody3D", "Area2D", "Area3D",
+]
+
+func setup_collision(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var shape_type: String = str(args.get(&"shape_type", ""))
+	var size = args.get(&"size")
+	var node_name: String = str(args.get(&"node_name", "CollisionShape"))
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if shape_type.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'shape_type'. Use 'rectangle' or 'circle' for 2D nodes, 'box' or 'sphere' for 3D nodes."}
+
+	var result := _acquire_scene(scene_path)
+	if not result[2].is_empty():
+		return result[2]
+	var root: Node = result[0]
+	var is_live: bool = result[1]
+
+	var target = _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+
+	var is_physics_node := false
+	for base_class: String in _PHYSICS_BASE_CLASSES:
+		if target.is_class(base_class):
+			is_physics_node = true
+			break
+	if not is_physics_node:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node '%s' (%s) is not a physics body/area (%s)" % [node_path, target.get_class(), ", ".join(_PHYSICS_BASE_CLASSES)]}
+
+	var is_3d: bool = target.is_class("CharacterBody3D") or target.is_class("RigidBody3D") \
+		or target.is_class("StaticBody3D") or target.is_class("Area3D")
+
+	var shape: Shape2D = null
+	var shape3d: Shape3D = null
+
+	if is_3d:
+		match shape_type:
+			"box":
+				var box := BoxShape3D.new()
+				box.size = _parse_value(size) if size != null else Vector3(1, 1, 1)
+				shape3d = box
+			"sphere":
+				var sphere := SphereShape3D.new()
+				sphere.radius = float(size) if size != null else 0.5
+				shape3d = sphere
+			_:
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "Invalid 'shape_type' for a 3D node: %s. Use 'box' or 'sphere'." % shape_type}
+	else:
+		match shape_type:
+			"rectangle":
+				var rect := RectangleShape2D.new()
+				rect.size = _parse_value(size) if size != null else Vector2(32, 32)
+				shape = rect
+			"circle":
+				var circle := CircleShape2D.new()
+				circle.radius = float(size) if size != null else 16.0
+				shape = circle
+			_:
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "Invalid 'shape_type' for a 2D node: %s. Use 'rectangle' or 'circle'." % shape_type}
+
+	var collision_node_type: String = "CollisionShape3D" if is_3d else "CollisionShape2D"
+	var collision_node: Node = ClassDB.instantiate(collision_node_type)
+	collision_node.name = node_name
+	collision_node.set(&"shape", shape3d if is_3d else shape)
+
+	target.add_child(collision_node, true)
+	collision_node.owner = root
+
+	var err := _finish_scene_edit(root, scene_path, is_live)
+	if not err.is_empty():
+		return err
+
+	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
+		&"collision_node_name": collision_node.name, &"collision_node_type": collision_node_type,
+		&"shape_type": shape_type,
+		&"message": "Added %s (%s shape) to '%s'" % [collision_node.name, shape_type, node_path]}
+
+# =============================================================================
+# set_physics_layers
+# =============================================================================
+## Converts a list of 1-based layer indices (1..32) into a 32-bit mask.
+func _layers_to_mask(layers: Array) -> int:
+	var mask := 0
+	for l in layers:
+		var idx := int(l)
+		if idx >= 1 and idx <= 32:
+			mask |= 1 << (idx - 1)
+	return mask
+
+# Resolve an array of layer tokens (index 1..32 or a name from Project Settings)
+# into a bitmask. Returns [mask: int, error: String]; error non-empty on any
+# unknown name or out-of-range index (fail loud rather than silently drop a bit).
+func _resolve_layers(tokens: Array, dim: String) -> Array:
+	var mask := 0
+	for t in tokens:
+		if t is String and not (t as String).is_valid_int():
+			if dim.is_empty():
+				return [0, "Node has no physics dimension; layer names need a CollisionObject2D/3D"]
+			var bit := _layer_name_to_bit(t, dim)
+			if bit < 0:
+				return [0, "Unknown %s_physics layer name '%s'. Defined names: %s" % [dim, t, str(_defined_layer_names(dim))]]
+			mask |= 1 << bit
+		else:
+			var idx := int(t)
+			if idx < 1 or idx > 32:
+				return [0, "Layer index out of range (1..32): %s" % str(t)]
+			mask |= 1 << (idx - 1)
+	return [mask, ""]
+
+# 0-based bit for a named physics layer, -1 if no layer carries that name.
+func _layer_name_to_bit(layer_name: String, dim: String) -> int:
+	var wanted := layer_name.strip_edges().to_lower()
+	for i in range(32):
+		var key := "layer_names/%s_physics/layer_%d" % [dim, i + 1]
+		if ProjectSettings.has_setting(key):
+			if str(ProjectSettings.get_setting(key)).strip_edges().to_lower() == wanted:
+				return i
+	return -1
+
+func _defined_layer_names(dim: String) -> Array:
+	var names: Array = []
+	for i in range(32):
+		var key := "layer_names/%s_physics/layer_%d" % [dim, i + 1]
+		if ProjectSettings.has_setting(key):
+			var v := str(ProjectSettings.get_setting(key)).strip_edges()
+			if not v.is_empty():
+				names.append("%d:%s" % [i + 1, v])
+	return names
+
+func set_physics_layers(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var collision_layer = args.get(&"collision_layer")
+	var collision_mask = args.get(&"collision_mask")
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if collision_layer == null and collision_mask == null:
+		return {&"ok": false, &"error": "Provide at least one of 'collision_layer' or 'collision_mask'"}
+
+	var result := _acquire_scene(scene_path)
+	if not result[2].is_empty():
+		return result[2]
+	var root: Node = result[0]
+	var is_live: bool = result[1]
+
+	var target = _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+	if not (&"collision_layer" in target and &"collision_mask" in target):
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node '%s' (%s) has no collision_layer/collision_mask properties" % [node_path, target.get_class()]}
+
+	# Arrays may hold layer indices (1..32) or layer NAMES defined in Project
+	# Settings (layer_names/{2d,3d}_physics/layer_N). Names are resolved against
+	# the dimension implied by the node's class. A raw (non-array) int stays a
+	# raw bitmask, unchanged from before.
+	var dim := "2d" if target is CollisionObject2D else ("3d" if target is CollisionObject3D else "")
+	if collision_layer != null:
+		if collision_layer is Array:
+			var r := _resolve_layers(collision_layer, dim)
+			if not r[1].is_empty():
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": r[1]}
+			target.set(&"collision_layer", r[0])
+		else:
+			target.set(&"collision_layer", int(collision_layer))
+	if collision_mask != null:
+		if collision_mask is Array:
+			var r := _resolve_layers(collision_mask, dim)
+			if not r[1].is_empty():
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": r[1]}
+			target.set(&"collision_mask", r[0])
+		else:
+			target.set(&"collision_mask", int(collision_mask))
+
+	var err := _finish_scene_edit(root, scene_path, is_live)
+	if not err.is_empty():
+		return err
+
+	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
+		&"message": "Updated physics layers on '%s'" % node_path}
+
+# =============================================================================
+# get_collision_info
+# =============================================================================
+func _mask_to_layers(mask: int) -> Array:
+	var layers: Array = []
+	for i in range(32):
+		if mask & (1 << i):
+			layers.append(i + 1)
+	return layers
+
+func get_collision_info(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+
+	var result := _acquire_scene(scene_path)
+	if not result[2].is_empty():
+		return result[2]
+	var root: Node = result[0]
+	var is_live: bool = result[1]
+
+	var target = _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+	if not (&"collision_layer" in target and &"collision_mask" in target):
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node '%s' (%s) has no collision_layer/collision_mask properties" % [node_path, target.get_class()]}
+
+	var layer_mask: int = int(target.get(&"collision_layer"))
+	var mask_mask: int = int(target.get(&"collision_mask"))
+
+	var shapes: Array = []
+	for child in target.get_children():
+		if child is CollisionShape2D or child is CollisionShape3D:
+			var shape_res = child.get(&"shape")
+			shapes.append({
+				&"node_name": child.name,
+				&"node_type": child.get_class(),
+				&"shape_type": shape_res.get_class() if shape_res else "",
+				&"disabled": bool(child.get(&"disabled")),
+			})
+
+	_discard_scene(root, is_live)
+
+	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
+		&"node_type": target.get_class(),
+		&"collision_layer": layer_mask, &"collision_layer_bits": _mask_to_layers(layer_mask),
+		&"collision_mask": mask_mask, &"collision_mask_bits": _mask_to_layers(mask_mask),
+		&"collision_shapes": shapes}
+
+# =============================================================================
+# set_collision_preset / get_collision_presets / apply_collision_preset
+# =============================================================================
+## Named layer/mask combos ("Player", "Enemy", "Hazard") persisted per-project
+## in ProjectSettings, so they're reusable across nodes without re-toggling
+## bits every time. Not a native Godot concept — this project owns it fully.
+const _PRESET_SETTING_PREFIX := "mcp_presets/collision/"
+
+func set_collision_preset(args: Dictionary) -> Dictionary:
+	var preset_name: String = str(args.get(&"name", "")).strip_edges()
+	var collision_layer = args.get(&"collision_layer")
+	var collision_mask = args.get(&"collision_mask")
+
+	if preset_name.is_empty():
+		return {&"ok": false, &"error": "Missing 'name'"}
+	if collision_layer == null and collision_mask == null:
+		return {&"ok": false, &"error": "Provide at least one of 'collision_layer' or 'collision_mask'"}
+
+	var layer_mask: int = _layers_to_mask(collision_layer) if collision_layer is Array else int(collision_layer if collision_layer != null else 0)
+	var mask_mask: int = _layers_to_mask(collision_mask) if collision_mask is Array else int(collision_mask if collision_mask != null else 0)
+
+	var setting_key := _PRESET_SETTING_PREFIX + preset_name
+	ProjectSettings.set_setting(setting_key, {&"collision_layer": layer_mask, &"collision_mask": mask_mask})
+	ProjectSettings.save()
+
+	return {&"ok": true, &"name": preset_name,
+		&"collision_layer": layer_mask, &"collision_layer_bits": _mask_to_layers(layer_mask),
+		&"collision_mask": mask_mask, &"collision_mask_bits": _mask_to_layers(mask_mask),
+		&"message": "Saved collision preset '%s'" % preset_name}
+
+func get_collision_presets(_args: Dictionary) -> Dictionary:
+	var presets: Array = []
+	for prop: Dictionary in ProjectSettings.get_property_list():
+		var prop_name: String = prop[&"name"]
+		if not prop_name.begins_with(_PRESET_SETTING_PREFIX):
+			continue
+		var preset_name: String = prop_name.substr(_PRESET_SETTING_PREFIX.length())
+		var data: Dictionary = ProjectSettings.get_setting(prop_name, {})
+		var layer_mask: int = int(data.get(&"collision_layer", 0))
+		var mask_mask: int = int(data.get(&"collision_mask", 0))
+		presets.append({
+			&"name": preset_name,
+			&"collision_layer": layer_mask, &"collision_layer_bits": _mask_to_layers(layer_mask),
+			&"collision_mask": mask_mask, &"collision_mask_bits": _mask_to_layers(mask_mask),
+		})
+	return {&"ok": true, &"presets": presets, &"count": presets.size()}
+
+func apply_collision_preset(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var preset_name: String = str(args.get(&"name", "")).strip_edges()
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if preset_name.is_empty():
+		return {&"ok": false, &"error": "Missing 'name'"}
+
+	var setting_key := _PRESET_SETTING_PREFIX + preset_name
+	if not ProjectSettings.has_setting(setting_key):
+		return {&"ok": false, &"error": "Collision preset not found: '%s'. Use get_collision_presets to list defined presets." % preset_name}
+	var data: Dictionary = ProjectSettings.get_setting(setting_key, {})
+
+	return set_physics_layers({
+		&"scene_path": scene_path, &"node_path": node_path,
+		&"collision_layer": int(data.get(&"collision_layer", 0)),
+		&"collision_mask": int(data.get(&"collision_mask", 0)),
+	})
