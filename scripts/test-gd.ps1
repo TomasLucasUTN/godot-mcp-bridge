@@ -8,7 +8,8 @@ param(
     [string]$Godot = $env:GODOT_BIN
 )
 if (-not $Godot) {
-    $Godot = "C:\Users\Tomas Lucas\Documents\Godot\Godot_v4.7-stable_win64.exe"
+    Write-Error "Set GODOT_BIN (or pass -Godot) to your Godot executable path."
+    exit 1
 }
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent

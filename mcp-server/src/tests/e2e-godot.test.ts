@@ -42,8 +42,9 @@ import { GodotBridge, createBridge } from '../godot-bridge.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // The full GUI exe, NOT the _console.exe sibling (a broken 0.2MB stub that dies with
-// CreateProcess error 193). Override with GODOT_BIN for other machines / CI.
-const GODOT_BIN = process.env.GODOT_BIN ?? 'C:\\Users\\Tomas Lucas\\Documents\\Godot\\Godot_v4.7-stable_win64.exe';
+// CreateProcess error 193). Set GODOT_BIN to your Godot executable to run this test;
+// without it, existsSync('') is false and the suite skips below.
+const GODOT_BIN = process.env.GODOT_BIN ?? '';
 const FIXTURE_PROJECT = join(__dirname, 'fixtures', 'e2e-project');
 const SCENE_PATH = 'res://e2e_test_scene.tscn';
 const SCENE_FILE = join(FIXTURE_PROJECT, 'e2e_test_scene.tscn');

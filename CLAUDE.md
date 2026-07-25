@@ -70,11 +70,12 @@ live (open-scene) mutation leaves the `.tscn` file's md5 unchanged (proving no c
 - `node mcp-server/dist/index.js doctor` — checks a real install (addon present, plugin
   enabled in project.godot, port 6505 listening). `install` is the user-facing setup path;
   it stages the addon from `mcp-server/bundled-addon/`, produced by `npm run build`.
-- `pwsh scripts/test-gd.ps1` — headless GDScript logic tests
-  (`.../fixtures/e2e-project/tests/run_tests.gd`): instantiates the tool handlers and
-  exercises their on-disk path (scene create/add/set/remove, SceneToolBase inheritance,
-  validate_script). No editor, no port 6505. Exit 0 = pass. Add a case here when you add
-  or change a tool's disk-path logic — it's the regression net a refactor needs.
+- `GODOT_BIN="C:\path\to\Godot.exe" pwsh scripts/test-gd.ps1` — headless GDScript logic
+  tests (`.../fixtures/e2e-project/tests/run_tests.gd`): instantiates the tool handlers
+  and exercises their on-disk path (scene create/add/set/remove, SceneToolBase
+  inheritance, validate_script). No editor UI, no port 6505. Exit 0 = pass. Add a case
+  here when you add or change a tool's disk-path logic — it's the regression net a
+  refactor needs.
 
 ## Gotchas
 
