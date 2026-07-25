@@ -1,0 +1,50 @@
+{
+  "name": "godot-mcp-bridge",
+  "version": "1.0.0",
+  "mcpName": "io.github.TomasLucasUTN/godot-mcp-bridge",
+  "description": "MCP server for Godot game engine integration",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TomasLucasUTN/godot-mcp-bridge.git"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "godot-mcp-bridge": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "bundled-addon"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/build-visualizer.js && node scripts/bundle-addon.js",
+    "build:visualizer": "node scripts/build-visualizer.js",
+    "prepare": "npm run build",
+    "start": "node dist/index.js",
+    "dev": "tsc && node scripts/build-visualizer.js && node dist/index.js",
+    "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bundle:addon": "node scripts/bundle-addon.js"
+  },
+  "keywords": [
+    "mcp",
+    "godot",
+    "game-development",
+    "ai-assistant"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.25.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "@vitest/coverage-v8": "^4.1.4",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.1.4"
+  }
+}

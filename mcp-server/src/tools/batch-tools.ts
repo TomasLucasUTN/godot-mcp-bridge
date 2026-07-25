@@ -1,0 +1,83 @@
+/**
+ * Batch/refactor/analysis tools for Godot MCP Server
+ * Tools for cross-node bulk edits and project-wide analysis
+ */
+
+import type { ToolDefinition } from '../types.js';
+
+export const batchTools: ToolDefinition[] = [
+  {
+    name: 'batch_execute',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: 'Run a sequence of tool calls in ONE request instead of N separate round-trips. Each operation is {tool, args}. Operations run in order; each is subject to the same read-only-mode gating as a direct call. NOT a transaction — a scene tool inside still does its own load/save, and set stop_on_error to halt on the first failure. Cannot be nested. Returns {count, all_ok, results:[...]} where results[i] is the full response of operation i. Use to cut latency when applying many edits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operations: {
+          type: 'array',
+          items: { type: 'object', description: '{tool: string, args: object}' },
+          description: 'Ordered list of {tool, args} to run. Max 100. e.g. [{"tool":"add_node","args":{...}}, {"tool":"set_node_properties","args":{...}}]'
+        },
+        stop_on_error: { type: 'boolean', description: 'If true, stop at the first operation that returns ok:false. Default: false (run all).' }
+      },
+      required: ['operations']
+    }
+  },
+  {
+    name: 'find_nodes_by_type',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: 'Recursively find all nodes of a given class (or subclass, unless exact_match) in a scene. Returns node_path/node_name/node_type for each match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Path to the scene file' },
+        node_type: { type: 'string', description: 'Class name to match, e.g. "CharacterBody2D"' },
+        exact_match: { type: 'boolean', description: 'If true, match exact class only (not subclasses). Default: false' }
+      },
+      required: ['scene_path', 'node_type']
+    }
+  },
+  {
+    name: 'batch_set_property',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: 'Set the same property to the same value on multiple nodes in one scene, in a single call/save. Nodes that don\'t exist or lack the property are reported in "failed" without aborting the rest.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Path to the scene file' },
+        node_paths: { type: 'array', items: { type: 'string' }, description: 'Node paths (relative to scene root) to update' },
+        property_name: { type: 'string', description: 'Property to set, e.g. "visible" or "floor_snap_length"' },
+        value: { description: 'New value. Same shape as modify_node_property.value' }
+      },
+      required: ['scene_path', 'node_paths', 'property_name', 'value']
+    }
+  },
+  {
+    name: 'get_scene_dependencies',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: 'List a scene\'s resource dependencies (instanced sub-scenes, scripts, external resources) via ResourceLoader.get_dependencies — reads the file\'s dependency table directly, no need to load the scene.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Path to the scene file' }
+      },
+      required: ['scene_path']
+    }
+  },
+  {
+    name: 'rename_symbol_project_wide',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: 'Rename a symbol (variable/function/signal name) across all .gd files in the project using word-boundary matching, updating every reference at once. Defaults to dry_run=true — call once to preview matches (file, line, count), then again with dry_run=false to actually apply. Pass include_scenes=true to also rewrite matching text in .tscn files (e.g. method names in signal connections) — off by default since .tscn edits are riskier.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        old_name: { type: 'string', description: 'Current symbol name (must be a valid identifier)' },
+        new_name: { type: 'string', description: 'New symbol name (must be a valid identifier)' },
+        dry_run: { type: 'boolean', description: 'Preview only, no changes written (default: true)' },
+        include_scenes: { type: 'boolean', description: 'Also rewrite matches in .tscn files (default: false)' },
+        root: { type: 'string', description: 'Root path to search from (default: res://)' }
+      },
+      required: ['old_name', 'new_name']
+    }
+  }
+];

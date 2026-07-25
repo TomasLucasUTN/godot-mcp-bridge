@@ -1,0 +1,59 @@
+<evaluation>
+  <!--
+    Phase-4 evaluations for the Godot MCP server.
+    Target project: the test game in mi-juego-2d (scenes/, its .gd scripts, project settings).
+    Every question is independent, read-only, needs several tool calls, and has one
+    string-comparable, stable answer. Solve each with the read tools (read_scene,
+    read_file, list_scripts, list_settings, classdb_query, get_project_settings, etc.).
+  -->
+
+  <qa_pair>
+    <question>In this Godot project, open the project's configured main scene (the one the game boots into). Inside that scene, exactly one GDScript is attached to more than one node. What is the file name of that script?</question>
+    <answer>checkpoint_flag.gd</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Load the main scene of this Godot project and count every node in the whole tree, including the root and all descendants. How many nodes are there in total?</question>
+    <answer>43</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In the main scene of this project, count how many nodes are of type CollisionShape2D anywhere in the tree. How many are there?</question>
+    <answer>9</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The player character in the main scene has a script that defines its horizontal movement speed as a constant named SPEED. What is the numeric value assigned to that SPEED constant?</question>
+    <answer>250.0</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The player node in the main scene extends one of Godot's physics body base classes. Identify that node's class, then look up its immediate parent class in Godot's ClassDB. What is the name of that direct parent class?</question>
+    <answer>PhysicsBody2D</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>This project ships a multiplayer sample script that opens an ENet peer on a fixed port defined by a constant named PORT. What is the value of that PORT constant?</question>
+    <answer>7777</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The multiplayer sample script in this project defines exactly one method annotated with @rpc. What is the name of that method?</question>
+    <answer>broadcast_ping</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Ignoring anything under the addons/ folder, list the project's own GDScript files (the game scripts). How many such game scripts are there?</question>
+    <answer>8</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>This project has two playable level scenes. Count the total number of nodes in each level's scene tree, then give the difference (larger minus smaller). What is that difference?</question>
+    <answer>11</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In the main scene, find the Area2D node that acts as the exit to the next level (it carries a script whose name refers to exiting toward level 2). What is the file name of the script attached to that node?</question>
+    <answer>exit_to_level2.gd</answer>
+  </qa_pair>
+</evaluation>
