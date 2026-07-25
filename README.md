@@ -1,10 +1,20 @@
-# Godot MCP
+<div align="center">
+
+<img src="./icon.png" width="96" alt="godot-mcp-bridge" />
+
+# godot-mcp-bridge
 
 **Give your AI assistant full access to the Godot editor.**
 
-Build games faster with Claude, Cursor, or any MCP-compatible AI — no copy-pasting, no context switching. AI reads, writes, and manipulates your scenes, scripts, nodes, and project settings directly.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Godot 4.x](https://img.shields.io/badge/Godot-4.x-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
+[![185 tools](https://img.shields.io/badge/tools-185-brightgreen)](#what-can-it-do)
+[![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
+[![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
-> Godot 4.x · 185 tools · One-command setup · Interactive project visualizer · MIT license
+</div>
+
+Build games faster with Claude, Cursor, or any MCP-compatible AI — no copy-pasting, no context switching. AI reads, writes, and manipulates your scenes, scripts, nodes, and project settings directly.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
 licensed) and has since diverged substantially — see [`CHANGELOG.md`](./CHANGELOG.md).
@@ -64,6 +74,24 @@ A few more things that set it apart:
 
 ---
 
+## How it compares
+
+Checked against each project's own README and tool list as of July 2026 — not just
+star count, which tracks age and discoverability more than feature depth.
+
+| | **godot-mcp-bridge** (this repo) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
+|---|---|---|---|
+| Tools | 185 (35 loaded by default) | 42 | ~14 |
+| Live-tree editing + undo | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
+| Drives the running game (input, screenshots, `game_eval`) | ✅ | ❌ | ❌ |
+| Sees what *you* just did (`get_editor_activity`) | ✅ | ❌ | ❌ |
+| Runs your real test suite (GUT) | ✅ | ❌ | ❌ |
+| Async headless export | ✅ | ❌ | ❌ |
+| Path-traversal sandboxing | ✅ | — | — |
+| GitHub stars | — | 397 | 4.9k |
+
+---
+
 ## Quick Start
 
 ### 0. Install Node.js (one-time setup)
@@ -90,11 +118,15 @@ npx godot-mcp-bridge doctor
 ```
 
 <details>
-<summary>Prefer to do it by hand / install from the AssetLib</summary>
+<summary>Prefer to do it by hand</summary>
 
-Inside the Godot editor, click the **AssetLib** tab at the top → search **"mcp"** → find **"Godot AI Assistant tools MCP"** → Install.
+Copy the `addons/godot_mcp/` folder from this repo into your Godot project's
+`addons/` directory. Then go to **Project → Project Settings → Plugins** and
+enable the **Godot MCP** plugin.
 
-Then go to **Project → Project Settings → Plugins** and enable the **Godot MCP** plugin.
+(The "Godot AI Assistant tools MCP" AssetLib listing belongs to the upstream
+project this repo forked from, not this one — installing from there gets you
+the upstream addon, not this fork.)
 </details>
 
 ### 2. Add the server config to your AI client
@@ -214,11 +246,8 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 - Edit code directly in the visualizer — changes sync to Godot in real time
 - Scene view with node property editing
 - Find usages before refactoring
-<img width="1710" height="1107" alt="image" src="https://github.com/user-attachments/assets/a9faf163-8b8b-43da-93ec-c7a651e8ac60" />
 
-### Limitations
-
-AI cannot create 100% of a game by itself — it struggles with complex UI layouts, compositing scenes, and some node property manipulation. It's still in active development, so feedback is very welcome!
+![Interactive project visualizer](./screenshots/visualizer-preview.png)
 
 ---
 
@@ -241,12 +270,12 @@ AI cannot create 100% of a game by itself — it struggles with complex UI layou
 
 ---
 
-## Current Limitations
+## Limitations
 
 - **Local only** — runs on localhost, no remote connections
 - **Single connection** — one Godot instance at a time
 - **Undo covers structural scene edits** — when a scene is open, add/remove/rename/move/duplicate go through Godot's undo history; other writes save directly (use version control), and some destructive tools support `dry_run: true` to preview first
-- **AI is still limited in Godot knowledge** — it can't create 100% of the game alone, but it can help debug, write scripts, and tag along for the journey
+- **AI is still limited in Godot knowledge** — it struggles with complex UI layouts, compositing scenes, and some node property manipulation; it can't create 100% of a game alone, but it can help debug, write scripts, and tag along for the journey. Still in active development — feedback is welcome.
 
 ---
 
@@ -266,7 +295,7 @@ Then point your AI client at `mcp-server/dist/index.js` instead of using `npx`.
 
 ## Release notes
 
-Narrative write-ups of each release live in [`release-notes/`](./release-notes/) (starting with [v0.5.0](./release-notes/v0.5.0.md)). For the full change history, see [`CHANGELOG.md`](./CHANGELOG.md).
+Narrative write-ups of each release live in [`release-notes/`](./release-notes/) (starting with [v1.0.0](./release-notes/v1.0.0.md)). For the full change history, see [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
@@ -276,4 +305,4 @@ MIT
 
 ---
 
-**[npm package](https://www.npmjs.com/package/godot-mcp-bridge)** · **[Report Issues](https://github.com/TomasLucasUTN/godot-mcp-bridge/issues)**
+**[Report Issues](https://github.com/TomasLucasUTN/godot-mcp-bridge/issues)**
