@@ -52,6 +52,9 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ws": "^8.18.0"
   },
+  "overrides": {
+    "@hono/node-server": "^2.0.11"
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/ws": "^8.5.10",
