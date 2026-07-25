@@ -215,6 +215,11 @@ Everything else is grouped **by intent** and is one call away:
 for, and the names of the tools inside it — so the AI can find what it needs
 without loading the whole catalog first. Nothing is ever unreachable.
 
+For a goal-to-tool index and per-topic usage guides (scene editing patterns,
+the runtime testing loop, asset generation, troubleshooting), see
+[`docs/TOOLS.md`](./docs/TOOLS.md) — the same content the server exposes live
+via the `get_guide` tool, in browsable form.
+
 | Toolset | Tools | What it's for |
 |---------|-------|---------|
 | **core** *(always on)* | 35 | Look around (`read_scene`, `scene_tree_dump`, `search_project`, `classdb_query`), edit scenes/nodes (live-tree + undo, `batch_scene_edit`), scripts, run the game, read errors |
