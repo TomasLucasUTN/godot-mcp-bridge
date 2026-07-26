@@ -39,7 +39,7 @@ and a GUT test runner.
 
 ## Verification status
 
-All 212 tools have been exercised by hand against a running Godot 4.7
+All 213 tools have been exercised by hand against a running Godot 4.7
 editor in July 2026. That pass found and fixed four real bugs: collision presets
 silently saving an empty bitmask when given layer names, a live-scene write that
 left partial mutations after reporting failure, a 2D navmesh bake that always
@@ -63,7 +63,7 @@ debugger. A standard (non-.NET) Godot build cannot use C# at all.
 
 ## Tool surface
 
-212 tools. Only `core` (35) loads by default — a large always-on tool list makes
+213 tools. Only `core` (35) loads by default — a large always-on tool list makes
 agents wander and burns context. The rest are grouped by intent and enabled on
 demand with `enable_toolset({name})`; `list_toolsets` shows every group and its
 contents.
