@@ -11,6 +11,7 @@ import { PrimaryHttpServer, type ToolExecutor } from '../primary-http.js';
 //   16510-16599  this file
 //   16600        proxy-client.test.ts
 //   16610        project-binding.test.ts
+//   16620        handshake-auth.test.ts
 let nextPort = 16510;
 function getPort() { return nextPort++; }
 

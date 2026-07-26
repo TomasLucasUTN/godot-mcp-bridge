@@ -69,6 +69,12 @@ const WEBSOCKET_PORT = parseInt(process.env.GODOT_MCP_PORT || '6505', 10);
 // worth setting when several projects or a CI editor share a machine, since the
 // addon dials a fixed port and cannot tell which server it reached.
 const EXPECTED_PROJECT = process.env.GODOT_MCP_PROJECT || null;
+// Optional shared secret for the editor/runtime handshake. The bridge already
+// refuses any connection that sends an Origin header, which is what keeps a web
+// page from driving the editor; this covers the remaining case of another local
+// process. Set the same value in the editor via GODOT_MCP_SECRET or the
+// `godot_mcp/network/secret` project setting. Unset = no check (unchanged).
+const EXPECTED_SECRET = process.env.GODOT_MCP_SECRET || null;
 const HTTP_PORT = parseInt(process.env.GODOT_MCP_HTTP_PORT || '6506', 10);
 const TOOL_TIMEOUT = parseInt(process.env.GODOT_MCP_TIMEOUT_MS || '30000', 10);
 const IDLE_TIMEOUT = parseInt(process.env.GODOT_MCP_IDLE_TIMEOUT_MS || '30000', 10);
@@ -657,7 +663,7 @@ async function killProcessOnPort(port: number): Promise<boolean> {
 async function startPrimary(): Promise<void> {
   console.error(`[${SERVER_NAME}] Starting in PRIMARY mode v${SERVER_VERSION}...`);
 
-  godotBridge = new GodotBridge(WEBSOCKET_PORT, TOOL_TIMEOUT, EXPECTED_PROJECT);
+  godotBridge = new GodotBridge(WEBSOCKET_PORT, TOOL_TIMEOUT, EXPECTED_PROJECT, EXPECTED_SECRET);
   setGodotBridge(godotBridge);
 
   godotBridge.onConnectionChange((connected) => {

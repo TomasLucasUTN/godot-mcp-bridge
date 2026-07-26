@@ -13,7 +13,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import type {
   ToolInvokeMessage,
   ToolResultMessage,
@@ -27,6 +27,44 @@ const PING_INTERVAL = 10000;
 /** Close code for "you are the wrong project". Distinct from 4000/4001 (slot
  *  already taken) so the addon can tell a collision from a misconfiguration. */
 export const CLOSE_WRONG_PROJECT = 4002;
+
+/** Close code for "your godot_ready did not carry the expected secret". */
+export const CLOSE_BAD_SECRET = 4003;
+
+/**
+ * Reject any WebSocket handshake that carries an `Origin` header.
+ *
+ * The bridge binds to 127.0.0.1, which stops remote hosts but NOT the browser
+ * on this machine: WebSocket connections are not subject to the same-origin
+ * policy, so any page the developer happens to visit while the editor is open
+ * can open ws://127.0.0.1:6505 and start issuing tool calls — which include
+ * writing files into the project and `game_eval`. That is arbitrary code
+ * execution reachable from a web page.
+ *
+ * Browsers always send `Origin` on a WebSocket handshake and cannot be told not
+ * to. Godot's WebSocketPeer does not send one. So refusing any request that has
+ * the header closes the browser vector completely, costs nothing, and needs no
+ * configuration. A non-browser local process can still forge the absence of the
+ * header — that is what the optional shared secret below is for.
+ */
+export function isBrowserOrigin(headers: Record<string, string | string[] | undefined>): boolean {
+  const origin = headers['origin'] ?? headers['Origin'];
+  return typeof origin === 'string' && origin.length > 0;
+}
+
+/** Constant-time compare of two secrets, safe on length mismatch. */
+export function secretsMatch(expected: string, received: string): boolean {
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(received, 'utf8');
+  // timingSafeEqual throws on differing lengths, so compare a fixed-size digest
+  // of each instead of the raw bytes.
+  if (a.length !== b.length) {
+    // Still burn a comparison so a length mismatch is not measurably faster.
+    timingSafeEqual(a, a);
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
 
 /**
  * Canonical form of a project path for comparison: forward slashes, no trailing
@@ -117,21 +155,39 @@ export class GodotBridge {
   private port: number;
   private timeout: number;
   private expectedProjectPath: string | null;
+  private expectedSecret: string | null = null;
 
   constructor(
     port: number = DEFAULT_PORT,
     timeout: number = DEFAULT_TIMEOUT,
-    expectedProjectPath: string | null = null
+    expectedProjectPath: string | null = null,
+    expectedSecret: string | null = null
   ) {
     this.port = port;
     this.timeout = timeout;
     this.expectedProjectPath = expectedProjectPath ? normalizeProjectPath(expectedProjectPath) : null;
+    // Opt-in: with no secret configured the handshake is unchanged, so existing
+    // setups keep working. Origin rejection above is the always-on defence.
+    this.expectedSecret = expectedSecret && expectedSecret.length > 0 ? expectedSecret : null;
   }
 
   start(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port });
+        this.wss = new WebSocketServer({
+          host: '127.0.0.1',
+          port: this.port,
+          // See isBrowserOrigin: binding to loopback does not keep the local
+          // browser out, and a WebSocket from a page is not blocked by CORS.
+          verifyClient: ({ req }, done) => {
+            if (isBrowserOrigin(req.headers as Record<string, string | string[] | undefined>)) {
+              this.log('warn', `Refused a connection sending Origin: ${req.headers.origin} (browsers cannot drive the editor)`);
+              done(false, 403, 'Origin not allowed');
+              return;
+            }
+            done(true);
+          },
+        });
 
         this.wss.on('connection', (ws) => this.handleConnection(ws));
         this.wss.on('error', (error) => {
@@ -231,6 +287,23 @@ export class GodotBridge {
 
       if (message.type === 'godot_ready') {
         const desiredRole: 'editor' | 'runtime' = (message.role === 'runtime') ? 'runtime' : 'editor';
+
+        // Shared secret, when one is configured. Origin rejection already keeps
+        // browsers out; this covers the remaining local case — any other process
+        // on this machine can open a plain WebSocket and claim to be the editor.
+        if (this.expectedSecret) {
+          const offered = typeof message.secret === 'string' ? message.secret : '';
+          if (!offered || !secretsMatch(this.expectedSecret, offered)) {
+            this.log('warn', `Rejecting ${desiredRole} connection: missing or wrong secret`);
+            ws.close(CLOSE_BAD_SECRET, 'Bridge secret missing or incorrect');
+            if (assignedRole === 'editor' && this.editor?.ws === ws) {
+              this.editor = null;
+              this.notifyConnectionChange(false);
+            }
+            assignedRole = null;
+            return;
+          }
+        }
 
         // Refuse an editor that has a different project open.
         //
@@ -529,7 +602,8 @@ export function getDefaultBridge(): GodotBridge {
 export function createBridge(
   port?: number,
   timeout?: number,
-  expectedProjectPath?: string | null
+  expectedProjectPath?: string | null,
+  expectedSecret?: string | null
 ): GodotBridge {
-  return new GodotBridge(port, timeout, expectedProjectPath);
+  return new GodotBridge(port, timeout, expectedProjectPath, expectedSecret);
 }

@@ -15,9 +15,13 @@ signal fatal_error(reason: String)
 
 const DEFAULT_PORT := 6505
 const PORT_SETTING := "godot_mcp/network/port"
+const SECRET_SETTING := "godot_mcp/network/secret"
 ## Mirrors CLOSE_WRONG_PROJECT in mcp-server/src/godot-bridge.ts. Distinct from
 ## 4000/4001 (a slot is already taken), which ARE worth retrying.
 const CLOSE_WRONG_PROJECT := 4002
+## Mirrors CLOSE_BAD_SECRET. Also a configuration error, not a race — retrying
+## with the same wrong secret will fail identically forever.
+const CLOSE_BAD_SECRET := 4003
 const RECONNECT_DELAY := 2.0
 const MAX_RECONNECT_DELAY := 10.0
 const MAX_PACKETS_PER_FRAME := 32
@@ -57,6 +61,25 @@ static func resolve_port() -> int:
 
 static func default_url() -> String:
 	return "ws://127.0.0.1:%d" % resolve_port()
+
+## Resolve the optional handshake secret: GODOT_MCP_SECRET env var, then the
+## `godot_mcp/network/secret` project setting, else empty (no secret sent).
+##
+## The bridge already refuses any connection that sends an `Origin` header,
+## which is what stops a web page from driving the editor — a WebSocket from a
+## browser is not blocked by the same-origin policy, and loopback binding does
+## not help there. This secret covers the case that check cannot: another
+## process on this machine opening a plain WebSocket and claiming to be Godot.
+##
+## Prefer the env var if the value is sensitive: the project setting lives in
+## project.godot, which is usually committed.
+static func resolve_secret() -> String:
+	var from_env := OS.get_environment("GODOT_MCP_SECRET")
+	if not from_env.is_empty():
+		return from_env
+	if ProjectSettings.has_setting(SECRET_SETTING):
+		return str(ProjectSettings.get_setting(SECRET_SETTING))
+	return ""
 
 func _ready() -> void:
 	_project_path = ProjectSettings.globalize_path("res://")
@@ -135,11 +158,17 @@ func _handle_connect() -> void:
 
 	# Send godot_ready message with project info. role=editor distinguishes
 	# this connection from the runtime helper that may also connect.
-	_send_message({
+	var hello := {
 		&"type": &"godot_ready",
 		&"role": &"editor",
 		&"project_path": _project_path,
-	})
+	}
+	# Only sent when configured on this side; a server with no secret set ignores
+	# it, so setting it here alone cannot lock the editor out.
+	var secret := resolve_secret()
+	if not secret.is_empty():
+		hello[&"secret"] = secret
+	_send_message(hello)
 
 	connected.emit()
 
@@ -152,13 +181,18 @@ func _handle_connect() -> void:
 func _check_fatal_close() -> void:
 	if not _should_reconnect:
 		return
-	if socket.get_close_code() != CLOSE_WRONG_PROJECT:
+	var code := socket.get_close_code()
+	if code != CLOSE_WRONG_PROJECT and code != CLOSE_BAD_SECRET:
 		return
 	_should_reconnect = false
 	if _reconnect_timer:
 		_reconnect_timer.stop()
-	push_error("[MCP] Server refused this project: %s" % socket.get_close_reason())
-	push_error("[MCP] This editor has '%s' open. Point the server at this project (GODOT_MCP_PROJECT), or give each project its own port via '%s'." % [_project_path, PORT_SETTING])
+	if code == CLOSE_WRONG_PROJECT:
+		push_error("[MCP] Server refused this project: %s" % socket.get_close_reason())
+		push_error("[MCP] This editor has '%s' open. Point the server at this project (GODOT_MCP_PROJECT), or give each project its own port via '%s'." % [_project_path, PORT_SETTING])
+	else:
+		push_error("[MCP] Server refused the handshake secret: %s" % socket.get_close_reason())
+		push_error("[MCP] The server was started with GODOT_MCP_SECRET set. Set the same value here via the GODOT_MCP_SECRET environment variable or the '%s' project setting." % SECRET_SETTING)
 	fatal_error.emit(socket.get_close_reason())
 
 func _handle_disconnect() -> void:

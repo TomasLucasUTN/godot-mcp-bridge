@@ -55,12 +55,19 @@ func _process(_delta: float) -> void:
 	if st == WebSocketPeer.STATE_OPEN:
 		if not _connected:
 			_connected = true
-			_send({
+			var hello := {
 				"type": "godot_ready",
 				"role": "runtime",
 				"project_path": _project_path,
 				"started_at": _started_at_msec,
-			})
+			}
+			# Same secret as the editor client, resolved the same way — a server
+			# started with one configured would otherwise refuse the runtime and
+			# every runtime-only tool would look like "game not running".
+			var secret := MCPClientScript.resolve_secret()
+			if not secret.is_empty():
+				hello["secret"] = secret
+			_send(hello)
 			push_runtime_log("info", "MCPRuntime connected to MCP server.")
 
 		while _socket.get_available_packet_count() > 0:
