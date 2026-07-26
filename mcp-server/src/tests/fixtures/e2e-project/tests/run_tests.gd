@@ -63,6 +63,7 @@ func _initialize() -> void:
 	_test_gridmap_and_node_property()
 	_test_save_resource_to_file()
 	_test_generate_2d_asset()
+	_test_scene_diff()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1748,3 +1749,53 @@ func _test_generate_2d_asset() -> void:
 	_rm(png)
 	_rm(dir + "probe.png.import")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(dir))
+
+# scene_diff answers "what changed since I last looked" without re-sending the
+# whole tree. The cases that matter: a baseline costs nothing, an unchanged
+# scene reports unchanged, and each kind of change is actually detected.
+func _test_scene_diff() -> void:
+	print("
+[scene_diff]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var an = preload("res://addons/godot_mcp/tools/analysis_tools.gd").new()
+	var scene := "res://__gdtest_diff.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "Sprite2D", "node_name": "Hero"})
+
+	var base = an.scene_diff({"scene_path": scene})
+	_check(base.get("ok", false), "baseline snapshot ok")
+	_check(base.get("baseline", false), "first call is marked as a baseline")
+	var snap := str(base.get("snapshot_id", ""))
+	_check(not snap.is_empty(), "a snapshot_id is returned")
+	_check(not base.has("added"), "a baseline does not send a diff")
+
+	# Nothing touched: the whole point is that this is cheap and says so.
+	var same = an.scene_diff({"scene_path": scene, "snapshot_id": snap})
+	_check(same.get("unchanged", false), "an untouched scene reports unchanged")
+	_check(int(same.get("change_count", -1)) == 0, "no changes counted")
+
+	# Add, modify and remove, then diff against the ORIGINAL baseline.
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "Camera2D", "node_name": "Cam"})
+	st.modify_node_property({"scene_path": scene, "node_path": "Hero", "property_name": "position", "value": [40, 60]})
+	var d = an.scene_diff({"scene_path": scene, "snapshot_id": snap})
+	_check(d.get("ok", false), "diff ok")
+	_check(not d.get("unchanged", true), "changes are reported")
+	_check(str(d.get("added", [])).contains("Cam"), "the added node is listed")
+	var mods := str(d.get("modified", []))
+	_check(mods.contains("Hero") and mods.contains("position"), "the changed property is listed with its node")
+	_check(mods.contains("before") and mods.contains("after"), "before/after values are included")
+
+	# Removal, against a fresh baseline.
+	var snap2 := str(d.get("snapshot_id", ""))
+	st.remove_node({"scene_path": scene, "node_path": "Cam"})
+	var d2 = an.scene_diff({"scene_path": scene, "snapshot_id": snap2})
+	_check(str(d2.get("removed", [])).contains("Cam"), "the removed node is listed")
+
+	# An id from another scene, or one that never existed, must be refused
+	# rather than silently compared against the wrong thing.
+	_check(not an.scene_diff({"scene_path": scene, "snapshot_id": "snap_does_not_exist"}).get("ok", true), "an unknown snapshot_id is rejected")
+
+	an.free()
+	st.free()
+	_rm(scene)

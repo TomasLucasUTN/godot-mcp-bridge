@@ -488,6 +488,72 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       expect(treeAfter).toBe(treeBefore);
     }, 25000);
   });
+
+  /**
+   * Tools that only exist because there is an editor: they read or drive
+   * EditorInterface. The headless GDScript suite runs without an EditorPlugin,
+   * so these can only be exercised here — and until now they were the tools with
+   * no automated coverage at all.
+   */
+  describe('editor-only tools', () => {
+    const SEL_SCENE = 'res://e2e_editor_only.tscn';
+    const SEL_FILE = join(FIXTURE_PROJECT, 'e2e_editor_only.tscn');
+
+    beforeAll(async () => {
+      // create_scene refuses to overwrite, so a leftover from a previous run
+      // would fail the whole block in beforeAll.
+      if (existsSync(SEL_FILE)) rmSync(SEL_FILE);
+      await bridge.invokeTool('create_scene', {
+        scene_path: SEL_SCENE,
+        root_node_type: 'Node2D',
+        root_node_name: 'Root',
+      });
+      for (const name of ['Alpha', 'Beta']) {
+        await bridge.invokeTool('add_node', {
+          scene_path: SEL_SCENE, node_name: name, node_type: 'Node2D', parent_path: '.',
+        });
+      }
+      // Selection acts on the OPEN scene, so it has to be open.
+      await bridge.invokeTool('open_in_godot', { path: SEL_SCENE });
+      await new Promise((r) => setTimeout(r, 1500));
+    }, 40000);
+
+    it('selects nodes, reports the selection, and clears it', async () => {
+      // scene_path is required and must match the scene actually open: the tool
+      // refuses to select into a scene the developer is not looking at.
+      await bridge.invokeTool('select_nodes', { scene_path: SEL_SCENE, node_paths: ['Alpha', 'Beta'] });
+      const selected = JSON.stringify(await bridge.invokeTool('get_editor_selection', {}));
+      expect(selected).toContain('Alpha');
+      expect(selected).toContain('Beta');
+
+      await bridge.invokeTool('clear_editor_selection', {});
+      const cleared = JSON.stringify(await bridge.invokeTool('get_editor_selection', {}));
+      expect(cleared).not.toContain('Alpha');
+    }, 25000);
+
+    it('closes the scene tab it opened', async () => {
+      // force: the scene is dirty from being opened and edited; without it the
+      // tool refuses rather than discarding the developer's unsaved work, which
+      // is the behaviour worth having.
+      const closed = JSON.stringify(await bridge.invokeTool('close_scene_tab', {
+        scene_path: SEL_SCENE, force: true,
+      }));
+      expect(closed).toContain(SEL_SCENE);
+
+      // With the scene closed, a read has to fall back to the disk path and
+      // still work — the dual-path contract in reverse.
+      const read = JSON.stringify(await bridge.invokeTool('read_scene', { scene_path: SEL_SCENE }));
+      expect(read).toContain('Alpha');
+    }, 25000);
+
+    it('reports export presets without needing templates installed', async () => {
+      // export_project itself needs export templates, which a CI runner does not
+      // have; what IS checkable is that the preset reader answers honestly
+      // rather than throwing. A fixture with no presets must say so.
+      const presets = JSON.stringify(await bridge.invokeTool('list_export_presets', {}));
+      expect(presets).toMatch(/presets|count/);
+    }, 25000);
+  });
 });
 
 describe.skipIf(canRun)('E2E — real Godot editor process (skipped)', () => {
