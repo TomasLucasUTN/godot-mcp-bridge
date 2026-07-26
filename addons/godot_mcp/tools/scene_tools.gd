@@ -208,13 +208,17 @@ func read_scene(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path' parameter"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var structure = _build_node_structure(root, include_properties, ".", max_depth, 0)
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {&"ok": true, &"scene_path": scene_path, &"max_depth": max_depth, &"root": structure}
 
@@ -669,7 +673,12 @@ func _add_node_live(root: Node, scene_path: String, node_name: String, node_type
 			added_descendants += _count_nodes(created_pair[0])
 	var ur := _get_undo_redo()
 	if ur:
-		ur.create_action("MCP: add %s" % node_name)
+		# custom_context pins the action to the edited scene's history. Without it
+		# EditorUndoRedoManager infers the history from the FIRST object it sees —
+		# which here is `self`, a tool node living under the EditorPlugin, not in
+		# the scene. The entry then lands in the global history where Ctrl+Z on
+		# the scene never reaches it.
+		ur.create_action("MCP: add %s" % node_name, UndoRedo.MERGE_DISABLE, root)
 		ur.add_do_method(self, &"_attach_node_owned", parent, new_node, root)
 		ur.add_do_reference(new_node)
 		ur.add_undo_method(parent, &"remove_child", new_node)
@@ -693,7 +702,7 @@ func _remove_node_live(root: Node, scene_path: String, node_path: String) -> Dic
 	var index := target.get_index()
 	var ur := _get_undo_redo()
 	if ur:
-		ur.create_action("MCP: remove %s" % n_name)
+		ur.create_action("MCP: remove %s" % n_name, UndoRedo.MERGE_DISABLE, root)
 		ur.add_do_method(parent, &"remove_child", target)
 		ur.add_undo_method(self, &"_attach_node_at", parent, target, root, index)
 		ur.add_undo_reference(target)
@@ -711,7 +720,7 @@ func _rename_node_live(root: Node, node_path: String, new_name: String) -> Dicti
 	var old_name = target.name
 	var ur := _get_undo_redo()
 	if ur:
-		ur.create_action("MCP: rename %s" % old_name)
+		ur.create_action("MCP: rename %s" % old_name, UndoRedo.MERGE_DISABLE, root)
 		ur.add_do_property(target, &"name", new_name)
 		ur.add_undo_property(target, &"name", old_name)
 		ur.commit_action()
@@ -733,7 +742,7 @@ func _move_node_live(root: Node, node_path: String, new_parent_path: String, sib
 	var old_index := target.get_index()
 	var ur := _get_undo_redo()
 	if ur:
-		ur.create_action("MCP: move %s" % target.name)
+		ur.create_action("MCP: move %s" % target.name, UndoRedo.MERGE_DISABLE, root)
 		ur.add_do_method(self, &"_reparent_node", target, new_parent, root, sibling_index)
 		ur.add_undo_method(self, &"_reparent_node", target, old_parent, root, old_index)
 		ur.commit_action()
@@ -763,7 +772,7 @@ func _duplicate_node_live(root: Node, node_path: String, new_name: String) -> Di
 	var index := target.get_index() + 1
 	var ur := _get_undo_redo()
 	if ur:
-		ur.create_action("MCP: duplicate %s" % target.name)
+		ur.create_action("MCP: duplicate %s" % target.name, UndoRedo.MERGE_DISABLE, root)
 		ur.add_do_method(self, &"_attach_node_at", parent, dup, root, index)
 		ur.add_do_reference(dup)
 		ur.add_undo_method(parent, &"remove_child", dup)
@@ -800,6 +809,11 @@ func batch_scene_edit(args: Dictionary) -> Dictionary:
 	var root: Node = acq[0]
 	var is_live: bool = acq[1]
 
+	# The whole batch is ONE undo entry: it is presented as a single atomic edit,
+	# so Ctrl+Z should take all of it back, not unwind it op by op.
+	var ctx := _begin_edit(is_live, "MCP: batch edit %s" % scene_path.get_file(), root)
+	ctx[&"live"] = is_live
+
 	var results: Array = []
 	var applied := 0
 	var all_ok := true
@@ -808,21 +822,22 @@ func batch_scene_edit(args: Dictionary) -> Dictionary:
 			results.append({&"ok": false, &"error": "Each operation must be an object with an 'op' field"})
 			all_ok = false
 			if stop_on_error:
-				_discard_scene(root, is_live)
+				_abort_edit(ctx, root, is_live)
 				return {&"ok": false, &"error": "Operation %d is not an object; batch discarded" % results.size(), &"results": results}
 			continue
-		var r := _apply_op(root, op_v)
+		var r := _apply_op(root, op_v, ctx)
 		results.append(r)
 		if r.get(&"ok", false):
 			applied += 1
 		else:
 			all_ok = false
 			if stop_on_error:
-				_discard_scene(root, is_live)
+				_abort_edit(ctx, root, is_live)
 				return {&"ok": false, &"scene_path": scene_path,
 					&"error": "Op %d (%s) failed: %s — batch discarded, nothing saved" % [results.size() - 1, str(op_v.get(&"op", "?")), str(r.get(&"error", ""))],
 					&"results": results}
 
+	_edit_commit(ctx)
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
@@ -832,10 +847,16 @@ func batch_scene_edit(args: Dictionary) -> Dictionary:
 		&"results": results,
 		&"message": "Applied %d/%d edit(s) to %s with a single %s" % [applied, results.size(), scene_path, "live-tree update" if is_live else "load+save"]}
 
+## Detach a node without freeing it. Paired with _attach_node_at as the undo of a
+## batch remove; the node stays alive through the undo entry's reference.
+func _detach_node(parent: Node, node: Node) -> void:
+	if is_instance_valid(parent) and is_instance_valid(node) and node.get_parent() == parent:
+		parent.remove_child(node)
+
 ## Apply one batch operation to an already-loaded scene root. Mutates in place, no
 ## load/save. Returns a per-op {ok, ...} result. Mirrors the standalone tools but
 ## without their own disk round-trip so batch_scene_edit can share one load+save.
-func _apply_op(root: Node, op: Dictionary) -> Dictionary:
+func _apply_op(root: Node, op: Dictionary, ctx: Dictionary) -> Dictionary:
 	var kind := str(op.get(&"op", ""))
 	match kind:
 		"add_node":
@@ -862,7 +883,7 @@ func _apply_op(root: Node, op: Dictionary) -> Dictionary:
 			for g in op.get(&"groups", []):
 				if not str(g).is_empty():
 					n.add_to_group(str(g), true)
-			parent.add_child(n, true)
+			_edit_add_child(ctx, parent, n, root)
 			_set_owner_recursive(n, root)
 			for child_data in op.get(&"children", []):
 				if typeof(child_data) == TYPE_DICTIONARY:
@@ -874,7 +895,7 @@ func _apply_op(root: Node, op: Dictionary) -> Dictionary:
 			var t := _find_node(root, str(op.get(&"node_path", ".")))
 			if not t:
 				return {&"ok": false, &"op": kind, &"error": "Node not found: " + str(op.get(&"node_path", "."))}
-			_set_node_properties(t, op.get(&"properties", {}))
+			_edit_set_many(ctx, t, op.get(&"properties", {}))
 			return {&"ok": true, &"op": kind, &"node_path": str(op.get(&"node_path", "."))}
 		"remove_node":
 			var np := str(op.get(&"node_path", ""))
@@ -883,8 +904,19 @@ func _apply_op(root: Node, op: Dictionary) -> Dictionary:
 			var t2 := root.get_node_or_null(np)
 			if not t2:
 				return {&"ok": false, &"op": kind, &"error": "Node not found: " + np}
-			t2.get_parent().remove_child(t2)
-			t2.queue_free()
+			var t2_parent := t2.get_parent()
+			var t2_index := t2.get_index()
+			t2_parent.remove_child(t2)
+			# Undo has to be able to put it back, so the node cannot be freed on
+			# the live path — the undo entry holds the only remaining reference.
+			if bool(ctx.get(&"live", false)):
+				_edit_record(ctx, self, &"_detach_node", [t2_parent, t2],
+					&"_attach_node_at", [t2_parent, t2, root, t2_index])
+				var ur_ref: EditorUndoRedoManager = ctx.get(&"ur")
+				if ur_ref:
+					ur_ref.add_undo_reference(t2)
+			else:
+				t2.queue_free()
 			return {&"ok": true, &"op": kind, &"removed": np}
 		"rename_node":
 			var t3 := _find_node(root, str(op.get(&"node_path", "")))
@@ -893,7 +925,7 @@ func _apply_op(root: Node, op: Dictionary) -> Dictionary:
 			var new_name := str(op.get(&"new_name", ""))
 			if new_name.is_empty():
 				return {&"ok": false, &"op": kind, &"error": "Missing new_name"}
-			t3.name = new_name
+			_edit_set(ctx, t3, &"name", new_name)
 			return {&"ok": true, &"op": kind, &"new_name": new_name}
 		"move_node":
 			var t4 := root.get_node_or_null(str(op.get(&"node_path", "")))
@@ -902,7 +934,11 @@ func _apply_op(root: Node, op: Dictionary) -> Dictionary:
 			var new_parent := _find_node(root, str(op.get(&"new_parent_path", ".")))
 			if not new_parent:
 				return {&"ok": false, &"op": kind, &"error": "New parent not found"}
+			var old_parent_b := t4.get_parent()
+			var old_index_b := t4.get_index()
 			_reparent_node(t4, new_parent, root, int(op.get(&"sibling_index", -1)))
+			_edit_record(ctx, self, &"_reparent_node", [t4, new_parent, root, int(op.get(&"sibling_index", -1))],
+				&"_reparent_node", [t4, old_parent_b, root, old_index_b])
 			return {&"ok": true, &"op": kind, &"moved": str(op.get(&"node_path", ""))}
 		_:
 			return {&"ok": false, &"op": kind, &"error": "Unknown op '%s' (use add_node, set_properties, remove_node, rename_node, move_node)" % kind}
@@ -941,23 +977,26 @@ func set_anchor_preset(args: Dictionary) -> Dictionary:
 	if not _ANCHOR_PRESETS.has(preset_name):
 		return {&"ok": false, &"error": "Invalid 'preset': %s. Valid presets: %s" % [preset_name, ", ".join(_ANCHOR_PRESETS.keys())]}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 	if not (target is Control):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Control" % [node_path, target.get_class()]}
 
 	var control: Control = target
 	control.set_anchors_preset(_ANCHOR_PRESETS[preset_name], keep_offsets)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -978,19 +1017,22 @@ func reorder_node(args: Dictionary) -> Dictionary:
 	if node_path.strip_edges().is_empty() or node_path == ".":
 		return {&"ok": false, &"error": "Cannot reorder root node"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = root.get_node_or_null(node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var parent = target.get_parent()
 	if not parent:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Cannot reorder - no parent"}
 
 	var old_index = target.get_index()
@@ -998,12 +1040,12 @@ func reorder_node(args: Dictionary) -> Dictionary:
 	new_index = clampi(new_index, 0, max_index)
 	
 	if old_index == new_index:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": true, &"message": "No change needed"}
 
 	parent.move_child(target, new_index)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1027,28 +1069,36 @@ func attach_script(args: Dictionary) -> Dictionary:
 	if script_path == "res://__mcp_rejected_path__":
 		return {&"ok": false, &"error": "script_path escapes the project sandbox"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
+	# _acquire_scene, not _load_scene: when the target scene is OPEN, loading a
+	# disk copy and saving it back throws away whatever is unsaved in the editor,
+	# and the reload that follows wipes the live tree with it. Verified against a
+	# real project — this call used to destroy an unsaved node outright.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 
-	var root: Node = result[0]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var script_res = load(script_path)
 	if not script_res:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Failed to load script: " + script_path}
 
-	target.set_script(script_res)
+	var ctx := _begin_edit(is_live, "MCP: attach script to %s" % node_path, root)
+	_edit_set(ctx, target, &"script", script_res)
+	_edit_commit(ctx)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"message": "Attached %s to node '%s'" % [script_path, node_path]}
+	return {&"ok": true, &"live_editor_scene": is_live,
+		&"message": "Attached %s to node '%s'" % [script_path, node_path]}
 
 # =============================================================================
 # detach_script
@@ -1060,19 +1110,22 @@ func detach_script(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	target.set_script(null)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1094,22 +1147,25 @@ func set_collision_shape(args: Dictionary) -> Dictionary:
 	if not ClassDB.class_exists(shape_type):
 		return {&"ok": false, &"error": "Invalid shape type: " + shape_type}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 	if not (&"shape" in target):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'shape' property — point node_path at a CollisionShape2D/3D" % [node_path, target.get_class()]}
 
 	var shape = ClassDB.instantiate(shape_type)
 	if not shape:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Failed to create shape: " + shape_type}
 
 	if shape_params.has(&"radius"):
@@ -1121,7 +1177,7 @@ func set_collision_shape(args: Dictionary) -> Dictionary:
 
 	target.set("shape", shape)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1141,17 +1197,20 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 	if texture_type.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'texture_type'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 	if not (&"texture" in target):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'texture' property" % [node_path, target.get_class()]}
 
 	var texture: Texture2D = null
@@ -1162,15 +1221,15 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 		"FromPath", "ImageTexture":
 			var tex_path: String = str(texture_params.get(&"path", ""))
 			if tex_path.is_empty():
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Missing 'path' in texture_params for %s" % texture_type}
 			tex_path = _ensure_res_path(tex_path)
 			if tex_path == "res://__mcp_rejected_path__":
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "texture path escapes the project sandbox"}
 			texture = load(tex_path)
 			if not texture:
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Failed to load texture: " + tex_path}
 
 		# Real ImageTexture from raw image data on disk (use when you need
@@ -1178,16 +1237,16 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 		"NewImageTexture":
 			var src_path: String = str(texture_params.get(&"path", ""))
 			if src_path.is_empty():
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Missing 'path' in texture_params for NewImageTexture"}
 			src_path = _ensure_res_path(src_path)
 			if src_path == "res://__mcp_rejected_path__":
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "image path escapes the project sandbox"}
 			var img := Image.new()
 			var ierr := img.load(ProjectSettings.globalize_path(src_path))
 			if ierr != OK:
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Image.load failed for %s (err=%d %s)" % [src_path, ierr, error_string(ierr)]}
 			texture = ImageTexture.create_from_image(img)
 
@@ -1208,12 +1267,12 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 			texture.height = int(texture_params.get(&"height", 64))
 
 		_:
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Unknown texture type: " + texture_type}
 
 	target.set("texture", texture)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1260,19 +1319,22 @@ func instance_scene(args: Dictionary) -> Dictionary:
 	if not instance_packed:
 		return {&"ok": false, &"error": "Failed to load scene: " + instance_path}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var parent = _find_node(root, parent_path)
 	if not parent:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
 
 	var instance = _instantiate_packed_scene_for_edit(instance_packed, true)
 	if not instance:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Failed to instantiate scene: " + instance_path}
 
 	if not node_name.strip_edges().is_empty():
@@ -1285,7 +1347,7 @@ func instance_scene(args: Dictionary) -> Dictionary:
 
 	var actual_name: String = instance.name
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1307,18 +1369,21 @@ func set_mesh(args: Dictionary) -> Dictionary:
 	if mesh_type.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'mesh_type'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	if not (target is MeshInstance3D):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' is %s, expected MeshInstance3D" % [node_path, target.get_class()]}
 
 	var mesh: Mesh = null
@@ -1326,30 +1391,30 @@ func set_mesh(args: Dictionary) -> Dictionary:
 	if mesh_type == "file":
 		var file_path: String = str(mesh_params.get(&"path", ""))
 		if file_path.is_empty():
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Missing 'path' in mesh_params for file type"}
 		file_path = _ensure_res_path(file_path)
 		if file_path == "res://__mcp_rejected_path__":
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "mesh path escapes the project sandbox"}
 		var loaded = load(file_path)
 		if not loaded or not (loaded is Mesh):
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Failed to load mesh resource (or not a Mesh): " + file_path}
 		mesh = loaded
 	else:
 		if not ClassDB.class_exists(mesh_type):
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Unknown mesh type: " + mesh_type}
 		if not ClassDB.can_instantiate(mesh_type):
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Cannot instantiate mesh type: " + mesh_type}
 
 		var instance = ClassDB.instantiate(mesh_type)
 		if not (instance is PrimitiveMesh):
 			if instance is Node:
 				instance.queue_free()
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "'%s' is not a PrimitiveMesh type" % mesh_type}
 		mesh = instance
 
@@ -1388,7 +1453,7 @@ func set_mesh(args: Dictionary) -> Dictionary:
 
 	target.set("mesh", mesh)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1409,14 +1474,17 @@ func set_material(args: Dictionary) -> Dictionary:
 	if material_type.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'material_type'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var material: Material = null
@@ -1424,15 +1492,15 @@ func set_material(args: Dictionary) -> Dictionary:
 	if material_type == "file":
 		var file_path: String = str(material_params.get(&"path", ""))
 		if file_path.is_empty():
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Missing 'path' in material_params for file type"}
 		file_path = _ensure_res_path(file_path)
 		if file_path == "res://__mcp_rejected_path__":
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "material path escapes the project sandbox"}
 		var loaded = load(file_path)
 		if not loaded or not (loaded is Material):
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Failed to load material (or not a Material): " + file_path}
 		material = loaded
 
@@ -1456,7 +1524,7 @@ func set_material(args: Dictionary) -> Dictionary:
 			material.transparency = int(material_params[&"transparency"])
 
 	else:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Unknown material type: '%s'. Use 'StandardMaterial3D' or 'file'." % material_type}
 
 	var apply_mode: String
@@ -1474,10 +1542,10 @@ func set_material(args: Dictionary) -> Dictionary:
 		target.material_override = material
 		apply_mode = "material_override"
 	else:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) does not support material assignment" % [node_path, target.get_class()]}
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1494,17 +1562,21 @@ func get_node_spatial_info(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 	if not (target is Node3D):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [node_path, target.get_class()]}
 
 	var target_3d: Node3D = target
@@ -1540,7 +1612,7 @@ func get_node_spatial_info(args: Dictionary) -> Dictionary:
 			var local_aabb: AABB = visual_target.get_aabb()
 			info[&"local_aabb"] = _serialize_value(local_aabb)
 
-	root.queue_free()
+	_discard_scene(root, is_live)
 	return info
 
 func _get_node3d_global_transform(node: Node3D) -> Transform3D:
@@ -1620,32 +1692,36 @@ func measure_node_distance(args: Dictionary) -> Dictionary:
 	if to_node_path.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'to_node_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var from_node = _find_node(root, from_node_path)
 	var to_node = _find_node(root, to_node_path)
 
 	if not from_node:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + from_node_path}
 	if not to_node:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + to_node_path}
 	if not (from_node is Node3D):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [from_node_path, from_node.get_class()]}
 	if not (to_node is Node3D):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [to_node_path, to_node.get_class()]}
 
 	var from_position: Vector3 = _get_node3d_global_transform(from_node).origin
 	var to_position: Vector3 = _get_node3d_global_transform(to_node).origin
 	var delta: Vector3 = to_position - from_position
 
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
@@ -1678,17 +1754,20 @@ func snap_node_to_grid(args: Dictionary) -> Dictionary:
 	if space not in ["local", "global"]:
 		return {&"ok": false, &"error": "Invalid 'space'. Use 'local' or 'global'."}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 	if not (target is Node3D):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [node_path, target.get_class()]}
 
 	var target_3d: Node3D = target
@@ -1708,7 +1787,7 @@ func snap_node_to_grid(args: Dictionary) -> Dictionary:
 	var new_local_position: Vector3 = target_3d.transform.origin
 	var new_global_position: Vector3 = _get_node3d_global_transform(target_3d).origin
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -1778,13 +1857,17 @@ func get_scene_hierarchy(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var hierarchy = _build_hierarchy_recursive(root, ".")
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {&"ok": true, &"scene_path": scene_path, &"hierarchy": hierarchy}
 
@@ -1824,14 +1907,18 @@ func get_scene_node_properties(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var node_type = target.get_class()
@@ -1876,7 +1963,7 @@ func get_scene_node_properties(args: Dictionary) -> Dictionary:
 		chain.append(cls)
 		cls = ClassDB.get_parent_class(cls)
 
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
@@ -1960,14 +2047,17 @@ func set_scene_node_property(args: Dictionary) -> Dictionary:
 	if property_name.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'property_name'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var parsed_value = _parse_typed_value(value, value_type)
@@ -1975,7 +2065,7 @@ func set_scene_node_property(args: Dictionary) -> Dictionary:
 
 	target.set(property_name, parsed_value)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -2098,7 +2188,7 @@ func set_node_properties(args: Dictionary) -> Dictionary:
 	if is_live and not pending.is_empty():
 		var ur := _get_undo_redo()
 		if ur:
-			ur.create_action("MCP: set properties on %s" % node_path)
+			ur.create_action("MCP: set properties on %s" % node_path, UndoRedo.MERGE_DISABLE, root)
 			for p in pending:
 				ur.add_do_property(target, p[&"prop"], p[&"parsed"])
 				ur.add_undo_property(target, p[&"prop"], p[&"old"])
@@ -2159,14 +2249,17 @@ func set_node_groups(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
+	# See attach_script: _load_scene + _save_scene destroys unsaved editor state
+	# when the scene is open.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 
-	var root: Node = result[0]
 	var target := _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var requested: Array[String] = []
@@ -2175,36 +2268,37 @@ func set_node_groups(args: Dictionary) -> Dictionary:
 		if not s.is_empty():
 			requested.append(s)
 
-	var current_groups := target.get_groups()
+	if mode not in ["replace", "add", "remove"]:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Invalid 'mode': " + mode + ". Use 'replace', 'add', or 'remove'."}
 
+	var current_groups := target.get_groups()
+	var ctx := _begin_edit(is_live, "MCP: set groups on %s" % node_path, root)
 	match mode:
 		"replace":
 			for g in current_groups:
 				target.remove_from_group(g)
+				_edit_record(ctx, target, &"remove_from_group", [g], &"add_to_group", [g, true])
 			for g in requested:
 				target.add_to_group(g, true)
+				_edit_record(ctx, target, &"add_to_group", [g, true], &"remove_from_group", [g])
 		"add":
 			for g in requested:
 				target.add_to_group(g, true)
+				_edit_record(ctx, target, &"add_to_group", [g, true], &"remove_from_group", [g])
 		"remove":
 			for g in requested:
 				target.remove_from_group(g)
-		_:
-			root.queue_free()
-			return {&"ok": false, &"error": "Invalid 'mode': " + mode + ". Use 'replace', 'add', or 'remove'."}
+				_edit_record(ctx, target, &"remove_from_group", [g], &"add_to_group", [g, true])
+	_edit_commit(ctx)
 
-	var err := _save_scene(root, scene_path)
+	# Read back from the tree we just edited (live or disk copy) rather than
+	# re-loading the file, which would report stale groups on an open scene.
+	var resulting_groups: Array = target.get_groups()
+
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
-
-	# Re-load to read the persisted groups.
-	var verify := _load_scene(scene_path)
-	var resulting_groups: Array = []
-	if verify[1].is_empty():
-		var v_target := _find_node(verify[0], node_path)
-		if v_target:
-			resulting_groups = v_target.get_groups()
-		verify[0].queue_free()
 
 	return {
 		&"ok": true,
@@ -2222,18 +2316,22 @@ func get_node_groups(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var groups := target.get_groups()
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
@@ -2251,14 +2349,18 @@ func find_nodes_in_group(args: Dictionary) -> Dictionary:
 	if group_name.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'group'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var matches: Array = []
 	_collect_nodes_in_group(root, group_name, ".", matches)
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
@@ -2297,14 +2399,16 @@ func set_resource_property(args: Dictionary) -> Dictionary:
 	if property_name.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'property_name'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	# Walk to the resource.
@@ -2312,14 +2416,14 @@ func set_resource_property(args: Dictionary) -> Dictionary:
 	if not resource_path.is_empty():
 		for segment in resource_path.split("/", false):
 			if resource == null:
-				root.queue_free()
+				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Resource path broke at segment '%s' (got null)" % segment}
 			resource = resource.get(segment)
 		if resource == null:
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Resource at '%s' is null on node '%s'" % [resource_path, node_path]}
 		if not (resource is Resource):
-			root.queue_free()
+			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "'%s' is not a Resource (got %s)" % [resource_path, typeof(resource)]}
 
 	var has_prop := false
@@ -2328,14 +2432,14 @@ func set_resource_property(args: Dictionary) -> Dictionary:
 			has_prop = true
 			break
 	if not has_prop:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Property '%s' not found on %s" % [property_name, resource.get_class()]}
 
 	var old_value = resource.get(property_name)
 	var parsed = _parse_value(value)
 	resource.set(property_name, parsed)
 
-	var err := _save_scene(root, scene_path)
+	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
 		return err
 
@@ -2427,7 +2531,7 @@ func save_resource_to_file(args: Dictionary) -> Dictionary:
 		# whole-scene disk write — the editor's unsaved state is preserved.
 		var ur := _get_undo_redo()
 		if ur:
-			ur.create_action("MCP: save resource on %s" % node_path)
+			ur.create_action("MCP: save resource on %s" % node_path, UndoRedo.MERGE_DISABLE, root)
 			ur.add_do_property(parent_obj, parent_prop, loaded)
 			ur.add_undo_property(parent_obj, parent_prop, resource)
 			ur.commit_action()
@@ -2474,6 +2578,7 @@ func get_resource_info(args: Dictionary) -> Dictionary:
 	var res: Resource = null
 	var info: Dictionary = {&"ok": true}
 	var loaded_root: Node = null
+	var scene_is_live := false
 	var path: String = ""
 
 	if not path_raw.is_empty():
@@ -2490,17 +2595,20 @@ func get_resource_info(args: Dictionary) -> Dictionary:
 			f.close()
 	elif not scene_path_raw.is_empty() and not node_path.is_empty() and not resource_property.is_empty():
 		var scene_path: String = _ensure_res_path(scene_path_raw)
-		var sresult := _load_scene(scene_path)
-		if not sresult[1].is_empty():
-			return sresult[1]
-		loaded_root = sresult[0]
+		# Live tree when the scene is open, so a resource the agent just changed
+		# reads back as it is now rather than as it was last saved.
+		var sacq := _acquire_scene(scene_path)
+		if not sacq[2].is_empty():
+			return sacq[2]
+		loaded_root = sacq[0]
+		scene_is_live = sacq[1]
 		var target := _find_node(loaded_root, node_path)
 		if not target:
-			loaded_root.queue_free()
+			_discard_scene(loaded_root, scene_is_live)
 			return {&"ok": false, &"error": "Node not found: " + node_path}
 		var prop_value = target.get(resource_property)
 		if prop_value == null or not (prop_value is Resource):
-			loaded_root.queue_free()
+			_discard_scene(loaded_root, scene_is_live)
 			return {&"ok": false, &"error": "Property '%s' on node '%s' is not a Resource (got %s)" % [resource_property, node_path, type_string(typeof(prop_value))]}
 		res = prop_value
 		info[&"scene_path"] = scene_path
@@ -2575,7 +2683,8 @@ func get_resource_info(args: Dictionary) -> Dictionary:
 			info[&"dependencies"] = Array(deps)
 
 	if loaded_root:
-		loaded_root.queue_free()
+		# Never free the editor's live root — _discard_scene is the guard.
+		_discard_scene(loaded_root, scene_is_live)
 
 	return info
 
@@ -2597,14 +2706,18 @@ func list_signal_connections(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
 	var outgoing: Array = []
@@ -2620,7 +2733,7 @@ func list_signal_connections(args: Dictionary) -> Dictionary:
 		# Walk the whole scene and collect connections targeting our node.
 		_collect_incoming(root, target, root, incoming)
 
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
@@ -2682,29 +2795,32 @@ func connect_signal(args: Dictionary) -> Dictionary:
 	if from_node.is_empty() or signal_name.is_empty() or to_node.is_empty() or method.is_empty():
 		return {&"ok": false, &"error": "from_node, signal, to_node, and method are all required"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "from_node not found: " + from_node}
 	if not dst:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "to_node not found: " + to_node}
 	if not src.has_signal(signal_name):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Signal '%s' not found on %s" % [signal_name, src.get_class()]}
 	if not skip_method_check and not dst.has_method(method):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Method '%s' not found on %s. Make sure the target script defines it (and that the script was attached via attach_script so the editor's live node sees it)." % [method, dst.get_class()]}
 
 	var callable := Callable(dst, method)
 	if src.is_connected(signal_name, callable):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": true, &"already_connected": true,
 			&"message": "Connection already exists; no change."}
 
@@ -2715,18 +2831,31 @@ func connect_signal(args: Dictionary) -> Dictionary:
 	var persist_flags: int = flags | Object.CONNECT_PERSIST
 	var err := src.connect(signal_name, callable, persist_flags)
 	if err != OK:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "connect() returned %d (%s)" % [err, error_string(err)]}
 
-	var serr := _save_scene(root, scene_path)
+	var serr := _finish_scene_edit(root, scene_path, is_live)
 	if not serr.is_empty():
 		return serr
 
-	# Verify the connection actually landed in the .tscn by re-reading the
-	# scene state. If it didn't, the save silently dropped it (usually
-	# because the dst node is not an owned descendant of root) and we should
-	# return a clear error rather than claim success.
-	var persisted := _signal_is_persisted(scene_path, from_node, signal_name, to_node, method)
+	# Verify the connection actually landed, rather than claiming success after a
+	# save silently dropped it (which happens when dst is not an owned descendant
+	# of root).
+	#
+	# WHERE to look depends on the path taken. On a live scene nothing is written
+	# to disk — the edit sits in the editor until the user saves — so re-reading
+	# the .tscn would always report "not persisted" and turn a good connection
+	# into a spurious error. Check the live tree instead; the CONNECT_PERSIST flag
+	# above is what makes it survive the eventual save.
+	var persisted := false
+	if is_live:
+		for c in src.get_signal_connection_list(signal_name):
+			var cb: Callable = c.get("callable", Callable())
+			if cb.get_object() == dst and str(cb.get_method()) == method:
+				persisted = (int(c.get("flags", 0)) & Object.CONNECT_PERSIST) != 0
+				break
+	else:
+		persisted = _signal_is_persisted(scene_path, from_node, signal_name, to_node, method)
 	if not persisted:
 		return {&"ok": false, &"error": "connect() succeeded at runtime but the connection did not persist into the .tscn. Ensure the target node is part of the scene (not an external autoload) and that the script is attached via attach_script."}
 
@@ -2763,28 +2892,33 @@ func wire_signal(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "from_node, signal, and to_node are required"}
 
 	# Throwaway load to read the signal's arg types and the receiver's script path.
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "from_node not found: " + from_node}
 	if not dst:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "to_node not found: " + to_node}
 	if not src.has_signal(signal_name):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Signal '%s' not found on %s" % [signal_name, src.get_class()]}
 	var scr := dst.get_script()
 	if scr == null or str(scr.resource_path).is_empty():
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "to_node '%s' has no attached script to hold the handler. Attach one first via attach_script." % to_node}
 	var script_path: String = str(scr.resource_path)
 	var params := _signal_params(src, signal_name)
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	if method.is_empty():
 		method = "_on_%s_%s" % [str(from_node.get_file()).to_snake_case(), signal_name]
@@ -2860,13 +2994,18 @@ func generate_onready_refs(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-	var root: Node = result[0]
+	# A read has to see the LIVE tree when the scene is open, or it reports the
+	# last-saved state: an agent that edits and then reads back gets stale values
+	# and cannot tell. _discard_scene is a no-op on the live root, so the frees
+	# below stay correct on both paths.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var target := _find_node(root, target_node)
 	if not target:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "target_node not found: " + target_node}
 
 	var nodes: Array = []
@@ -2896,7 +3035,7 @@ func generate_onready_refs(args: Dictionary) -> Dictionary:
 	var scr := target.get_script()
 	if scr != null:
 		script_path = str(scr.resource_path)
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	var inserted := false
 	var insert_note := ""
@@ -3398,26 +3537,29 @@ func disconnect_signal(args: Dictionary) -> Dictionary:
 	if from_node.is_empty() or signal_name.is_empty() or to_node.is_empty() or method.is_empty():
 		return {&"ok": false, &"error": "from_node, signal, to_node, and method are all required"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-
-	var root: Node = result[0]
+	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
+	# saving it back discards the editor's unsaved state and the reload that
+	# follows wipes the live tree with it.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src or not dst:
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "from_node or to_node not found"}
 
 	var callable := Callable(dst, method)
 	if not src.is_connected(signal_name, callable):
-		root.queue_free()
+		_discard_scene(root, is_live)
 		return {&"ok": true, &"already_disconnected": true,
 			&"message": "Connection did not exist; no change."}
 
 	src.disconnect(signal_name, callable)
 
-	var serr := _save_scene(root, scene_path)
+	var serr := _finish_scene_edit(root, scene_path, is_live)
 	if not serr.is_empty():
 		return serr
 
