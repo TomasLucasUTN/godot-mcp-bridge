@@ -269,6 +269,22 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
         resource_type: 'GradientTexture1D',
         resource_path: 'res://e2e_clobber_tex.tres',
       });
+      // These three files were written a moment ago through the bridge, so the
+      // editor's filesystem doesn't know about them yet and load() fails —
+      // `instance_scene` came back with "Failed to instantiate scene" on a cold
+      // CI runner while passing locally purely on timing. Rescan and wait for the
+      // scene to actually be loadable rather than sleeping a guessed interval.
+      // A scan may already be running right after those writes, and rescan
+      // rejects rather than queueing — so the request itself is best-effort. The
+      // poll below is the actual wait: it stops when the scene is loadable.
+      await bridge.invokeTool('rescan_filesystem', {}).catch(() => null);
+      for (let i = 0; i < 40; i++) {
+        const probe = await bridge.invokeTool('read_scene', {
+          scene_path: 'res://e2e_clobber_child.tscn',
+        }).catch(() => null) as Record<string, unknown> | null;
+        if (probe && !probe.error) break;
+        await new Promise(r => setTimeout(r, 250));
+      }
       // From here on the scene is OPEN, so every tool below takes the live path.
       await bridge.invokeTool('open_in_godot', { path: LIVE_SCENE });
     }, 30000);
