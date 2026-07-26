@@ -96,10 +96,15 @@ jobs:
               }
           }
           CS
-          # --import builds the C# project files; a cold import warns a lot and
-          # can exit nonzero even on success, so the dotnet build below is the
-          # real gate.
+          # The first run of this spike showed --import alone does NOT emit the
+          # .csproj, which left OmniSharp with nothing to load. --build-solutions
+          # is the flag that generates and builds the scripting solution (it
+          # implies --editor, so --headless is still needed to run without a
+          # display). Import first so the resource cache exists, then build.
+          # A cold import warns a lot and can exit nonzero even on success, so
+          # the dotnet build below is the real gate.
           "$GODOT_MONO" --headless --path "$proj" --import || true
+          "$GODOT_MONO" --headless --path "$proj" --build-solutions || true
           ls -la "$proj"
           if ls "$proj"/*.csproj >/dev/null 2>&1; then
             dotnet build "$proj" -v quiet
