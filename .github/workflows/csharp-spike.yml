@@ -39,6 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install a virtual display
+        # --build-solutions implies --editor; see the build step below.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -117,7 +121,11 @@ jobs:
           # hang has to fail fast and visibly, not burn the runner's whole
           # budget looking like slow progress.
           timeout 180s "$GODOT_MONO" --headless --path "$proj" --import || echo "::warning::--import did not finish cleanly"
-          if timeout 300s "$GODOT_MONO" --headless --path "$proj" --build-solutions; then
+          # --build-solutions implies --editor, and an editor wants a display:
+          # under plain --headless it never exits (measured: exit 124 at 300s,
+          # no .csproj). Run it under a virtual display instead, which is how
+          # godot-breakpoint-mcp drives a real editor in its own CI.
+          if timeout 300s xvfb-run -a "$GODOT_MONO" --path "$proj" --build-solutions; then
             echo "BUILD_SOLUTIONS=finished" >> "$GITHUB_ENV"
           else
             code=$?
