@@ -21,5 +21,11 @@ robocopy "$repo\addons\godot_mcp" "$fixture\addons\godot_mcp" /MIR /NFL /NDL /NJ
 # Rebuild the class cache so `extends SceneToolBase` (and other class_names) resolve
 # under -s, then run the tests. The runner quits 0 on all-pass, 1 on any failure.
 & $Godot --headless --path $fixture --import | Out-Null
+# Every addon script must at least parse. The logic tests only preload the
+# handlers they exercise, so a syntax error in an untested file would
+# otherwise stay hidden until it blew up in a live editor.
+& $Godot --headless --path $fixture -s "res://tests/parse_all.gd"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 & $Godot --headless --path $fixture -s "res://tests/run_tests.gd"
 exit $LASTEXITCODE

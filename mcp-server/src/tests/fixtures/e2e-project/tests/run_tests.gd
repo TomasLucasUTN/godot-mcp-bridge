@@ -40,6 +40,13 @@ func _initialize() -> void:
 	_test_sync_localization()
 	_test_netcode_scaffolding()
 	_test_csharp_status()
+	_test_port_resolution()
+	_test_validate_addon_scripts()
+	_test_tilemap_cells()
+	_test_animation_authoring()
+	_test_script_rewrites()
+	_test_project_config()
+	_test_bulk_and_rename()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -340,6 +347,20 @@ func _test_arg_coercion() -> void:
 	_check(typeof(d["expected"]) == TYPE_FLOAT and abs(d["expected"] - 3.5) < 0.001, "'expected' numeric string becomes float")
 	_check(typeof(d["node_path"]) == TYPE_STRING and d["node_path"] == "5", "string-typed 'node_path' NOT coerced (a node named '5' survives)")
 	_check(typeof(d["name"]) == TYPE_STRING, "'name' not in the numeric whitelist, stays string")
+
+	# Free-form text keys must survive the words "true"/"false" verbatim. The
+	# coercion used to hit every key, so a node named "true" became a boolean.
+	var t := {"node_name": "true", "content": "false", "method": "true",
+		"property_name": "false", "group": "true", "dry_run": "true"}
+	te._parse_stringified_args(t)
+	_check(t["node_name"] == "true" and typeof(t["node_name"]) == TYPE_STRING,
+		"a node named 'true' stays a String")
+	_check(t["content"] == "false" and typeof(t["content"]) == TYPE_STRING,
+		"script content 'false' stays a String")
+	_check(typeof(t["method"]) == TYPE_STRING and typeof(t["property_name"]) == TYPE_STRING,
+		"method/property_name stay Strings")
+	_check(typeof(t["group"]) == TYPE_STRING, "group name stays a String")
+	_check(t["dry_run"] == true, "an actual flag is still coerced to bool")
 	te.free()
 
 # create_folder + delete_file (both live in script_tools).
@@ -828,3 +849,293 @@ func _test_csharp_status() -> void:
 		_check(made.has("warning"), "create_csharp_script warns C# cannot run here")
 		_rm(path)
 	ft.free()
+
+# Port resolution for the WebSocket bridge. The addon used to hardcode 6505 with
+# no override, which meant one project at a time and any editor attaching to any
+# listening server. Precedence must be: env var, then project setting, then the
+# default — and an out-of-range value must fall through rather than be obeyed.
+func _test_port_resolution() -> void:
+	print("
+[port resolution]")
+	var client = preload("res://addons/godot_mcp/mcp_client.gd")
+	var key: String = client.PORT_SETTING
+	var had_setting := ProjectSettings.has_setting(key)
+	var old_setting: Variant = ProjectSettings.get_setting(key) if had_setting else null
+
+	# Clean slate: no env, no setting.
+	OS.set_environment("GODOT_MCP_PORT", "")
+	if had_setting:
+		ProjectSettings.set_setting(key, null)
+	_check(client.resolve_port() == client.DEFAULT_PORT, "falls back to %d" % client.DEFAULT_PORT)
+	_check(client.default_url() == "ws://127.0.0.1:%d" % client.DEFAULT_PORT, "default_url uses the resolved port")
+
+	# Project setting alone.
+	ProjectSettings.set_setting(key, 7100)
+	_check(client.resolve_port() == 7100, "project setting is honoured")
+
+	# Env var wins over the setting, so a headless/CI editor can be redirected
+	# without dirtying project.godot.
+	OS.set_environment("GODOT_MCP_PORT", "7200")
+	_check(client.resolve_port() == 7200, "env var overrides the project setting")
+	_check(client.default_url() == "ws://127.0.0.1:7200", "default_url follows the env var")
+
+	# Garbage must not silently become port 0 (which would bind a random port).
+	OS.set_environment("GODOT_MCP_PORT", "not-a-number")
+	_check(client.resolve_port() == 7100, "non-numeric env var falls through to the setting")
+	OS.set_environment("GODOT_MCP_PORT", "99999")
+	_check(client.resolve_port() == 7100, "out-of-range env var falls through to the setting")
+
+	OS.set_environment("GODOT_MCP_PORT", "")
+	ProjectSettings.set_setting(key, 0)
+	_check(client.resolve_port() == client.DEFAULT_PORT, "out-of-range setting falls through to the default")
+
+	# Restore.
+	if had_setting:
+		ProjectSettings.set_setting(key, old_setting)
+	else:
+		ProjectSettings.set_setting(key, null)
+
+
+# validate_script used to report every addon file that trips a promoted warning
+# as a syntax error. The throwaway script it compiles had no resource_path, so it
+# lost the `exclude_addons` warning exemption that the real file gets, and any
+# warning the project promotes to an error (this one promotes inference_on_variant)
+# failed the compile with ERR_PARSE_ERROR and an empty error list.
+func _test_validate_addon_scripts() -> void:
+	print("
+[validate_script — addon warning exemption]")
+	var scr = preload("res://addons/godot_mcp/tools/script_tools.gd").new()
+
+	# The real regression: a large addon file that compiles fine in the editor.
+	var target := "res://addons/godot_mcp/tools/scene_tools.gd"
+	var r = scr.validate_script({"path": target})
+	_check(r.get("valid", false), "addon script with promoted warnings validates as valid")
+
+	# Every shipped addon script, so a new file that trips this can't slip in.
+	var sweep = scr.validate_scripts({"paths": [
+		"res://addons/godot_mcp/tools/scene_tool_base.gd",
+		"res://addons/godot_mcp/tools/tilemap_tools.gd",
+		"res://addons/godot_mcp/tools/script_tools.gd",
+	]})
+	_check(int(sweep.get("invalid_count", -1)) == 0, "addon sweep reports 0 invalid")
+
+	# And it must still fail a genuinely broken file, or the fix just made the
+	# validator blind.
+	var bad := "res://__gdtest_validate_broken.gd"
+	var f := FileAccess.open(bad, FileAccess.WRITE)
+	f.store_string("extends Node
+func bad():
+	var x = = 5
+")
+	f.close()
+	var rb = scr.validate_script({"path": bad})
+	_check(not rb.get("valid", true), "a real syntax error is still reported invalid")
+	_rm(bad)
+
+	# The temp compile must not leave files behind next to the real ones.
+	_check(not FileAccess.file_exists("res://addons/godot_mcp/tools/__mcp_validate_1.gd"),
+		"no throwaway validation file written to disk")
+	scr.free()
+
+
+# TileMap cell editing. Every one of these goes through the tile_map_data
+# snapshot added for undo, and none had a test — the disk path at least proves
+# the calls behave and read back.
+func _test_tilemap_cells() -> void:
+	print("\n[tilemap cells]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var tm = preload("res://addons/godot_mcp/tools/tilemap_tools.gd").new()
+	var scene := "res://__gdtest_tilemap.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Layer", "node_type": "TileMapLayer", "parent_path": "."})
+
+	var sc = tm.tilemap_set_cell({"scene_path": scene, "node_path": "Layer",
+		"coords": {"x": 1, "y": 2}, "source_id": 0})
+	_check(sc.has("ok"), "tilemap_set_cell returns a status")
+
+	var info = tm.tilemap_get_info({"scene_path": scene, "node_path": "Layer"})
+	_check(info.get("ok", false), "tilemap_get_info ok")
+
+	var got = tm.tilemap_get_cell({"scene_path": scene, "node_path": "Layer", "coords": {"x": 1, "y": 2}})
+	_check(got.get("ok", false), "tilemap_get_cell ok")
+	_check(got.has("is_empty"), "tilemap_get_cell reports emptiness")
+
+	var cleared = tm.tilemap_clear({"scene_path": scene, "node_path": "Layer"})
+	_check(cleared.get("ok", false), "tilemap_clear ok")
+
+	var used = tm.tilemap_get_used_cells({"scene_path": scene, "node_path": "Layer"})
+	_check(used.get("ok", false), "tilemap_get_used_cells ok")
+	_check(int(used.get("cell_count", -1)) == 0, "no used cells after clear")
+
+	# Wrong node type must be refused, not silently ignored.
+	var bad = tm.tilemap_set_cell({"scene_path": scene, "node_path": ".", "coords": {"x": 0, "y": 0}})
+	_check(not bad.get("ok", true), "tilemap_set_cell refuses a non-TileMapLayer")
+
+	tm.free()
+	st.free()
+	_rm(scene)
+
+# AnimationPlayer authoring: create, track, keyframe, remove.
+func _test_animation_authoring() -> void:
+	print("\n[animation authoring]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var an = preload("res://addons/godot_mcp/tools/animation_tools.gd").new()
+	var scene := "res://__gdtest_anim.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Anim", "node_type": "AnimationPlayer", "parent_path": "."})
+	st.add_node({"scene_path": scene, "node_name": "Spr", "node_type": "Sprite2D", "parent_path": "."})
+
+	var cr = an.create_animation({"scene_path": scene, "node_path": "Anim",
+		"animation_name": "walk", "length": 2.0, "loop": true})
+	_check(cr.get("ok", false), "create_animation ok")
+
+	var dup = an.create_animation({"scene_path": scene, "node_path": "Anim", "animation_name": "walk"})
+	_check(not dup.get("ok", true), "create_animation refuses a duplicate name")
+
+	var lst = an.list_animations({"scene_path": scene, "node_path": "Anim"})
+	_check(int(lst.get("animation_count", 0)) == 1, "animation persisted to disk")
+
+	var tr = an.add_animation_track({"scene_path": scene, "node_path": "Anim",
+		"animation_name": "walk", "track_type": "value",
+		"track_node_path": "Spr", "property": "position"})
+	_check(tr.get("ok", false), "add_animation_track ok")
+	var track_idx := int(tr.get("track_index", -1))
+	_check(track_idx >= 0, "track index returned")
+
+	var kf = an.set_animation_keyframe({"scene_path": scene, "node_path": "Anim",
+		"animation_name": "walk", "track_index": track_idx, "time": 0.5,
+		"value": {"x": 10, "y": 20}})
+	_check(kf.get("ok", false), "set_animation_keyframe ok")
+
+	var gi = an.get_animation_info({"scene_path": scene, "node_path": "Anim", "animation_name": "walk"})
+	_check(int(gi.get("length", 0)) == 2, "length round-tripped through the file")
+	_check(gi.get("loop", false), "loop flag round-tripped")
+
+	var rm = an.remove_animation({"scene_path": scene, "node_path": "Anim", "animation_name": "walk"})
+	_check(rm.get("ok", false), "remove_animation ok")
+	_check(int(an.list_animations({"scene_path": scene, "node_path": "Anim"}).get("animation_count", -1)) == 0,
+		"animation gone after removal")
+
+	an.free()
+	st.free()
+	_rm(scene)
+
+# edit_script and rename_file both write irreversibly and had no coverage.
+func _test_script_rewrites() -> void:
+	print("\n[script rewrites]")
+	var sc = preload("res://addons/godot_mcp/tools/script_tools.gd").new()
+	var path := "res://__gdtest_edit.gd"
+	_rm(path)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("extends Node\n\nfunc greet() -> String:\n\treturn \"hello\"\n")
+	f.close()
+
+	var ed = sc.edit_script({"edit": {"file": path, "type": "snippet_replace",
+		"old_snippet": "return \"hello\"", "new_snippet": "return \"goodbye\""}})
+	_check(ed.get("ok", false), "edit_script ok")
+	var body := FileAccess.get_file_as_string(path)
+	_check(body.contains("goodbye"), "edit landed on disk")
+	_check(not body.contains("hello"), "old text replaced")
+
+	var miss = sc.edit_script({"edit": {"file": path, "type": "snippet_replace",
+		"old_snippet": "nothing_like_this_exists", "new_snippet": "x"}})
+	_check(not miss.get("ok", true), "edit_script reports a snippet it cannot find")
+
+	var moved := "res://__gdtest_edit_renamed.gd"
+	_rm(moved)
+	# update_references defaults to TRUE and rewrites every file that mentions the
+	# old path — including THIS ONE, which names it as a literal. Left on, the
+	# suite silently edited its own source on each run and then failed on the
+	# next. Turned off here so the test measures the rename, not the sweep.
+	var rn = sc.rename_file({"old_path": path, "new_path": moved, "update_references": false})
+	_check(rn.get("ok", false), "rename_file ok")
+	_check(FileAccess.file_exists(moved) and not FileAccess.file_exists(path), "file actually moved")
+
+	_rm(moved)
+	sc.free()
+
+# Project settings are global and carry no undo entry at all.
+func _test_project_config() -> void:
+	print("\n[project config]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+	var key := "application/config/custom_gdtest_value"
+	var had := ProjectSettings.has_setting(key)
+
+	var up = pt.update_project_settings({"settings": {key: "probe"}})
+	_check(up.get("ok", false), "update_project_settings ok")
+	_check(str(ProjectSettings.get_setting(key, "")) == "probe", "setting applied in-process")
+
+	var ls = pt.list_settings({"filter": "custom_gdtest"})
+	_check(ls.get("ok", false), "list_settings ok")
+
+	var res_path := "res://__gdtest_res.tres"
+	_rm(res_path)
+	var res = pt.create_resource({"resource_path": res_path, "resource_type": "GradientTexture1D"})
+	_check(res.get("ok", false), "create_resource ok")
+	_check(FileAccess.file_exists(res_path), "resource written to disk")
+	_rm(res_path)
+
+	var bad = pt.create_resource({"resource_path": "res://__gdtest_bad.tres", "resource_type": "NotARealClass"})
+	_check(not bad.get("ok", true), "create_resource refuses an unknown type")
+
+	# update_project_settings calls ProjectSettings.save(), so clearing the value
+	# in memory is not enough — without saving again the probe key stays in
+	# project.godot and shows up as a dirty file after every test run.
+	if not had:
+		ProjectSettings.set_setting(key, null)
+		ProjectSettings.save()
+	_check(not ProjectSettings.has_setting(key), "probe setting removed from project.godot")
+	pt.free()
+
+# Bulk edits and project-wide renames — the widest blast radius here.
+func _test_bulk_and_rename() -> void:
+	print("\n[bulk edits + project-wide rename]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var bt = preload("res://addons/godot_mcp/tools/batch_tools.gd").new()
+	var scene := "res://__gdtest_bulk.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	for n in ["A", "B", "C"]:
+		st.add_node({"scene_path": scene, "node_name": n, "node_type": "Sprite2D", "parent_path": "."})
+
+	var found = bt.find_nodes_by_type({"scene_path": scene, "node_type": "Sprite2D"})
+	_check(int(found.get("count", 0)) == 3, "find_nodes_by_type finds all three")
+
+	var bulk = bt.batch_set_property({"scene_path": scene,
+		"node_paths": ["A", "B", "C"], "property_name": "visible", "value": false})
+	_check(bulk.get("ok", false), "batch_set_property ok")
+	_check(FileAccess.get_file_as_string(scene).contains("visible = false"), "bulk edit persisted")
+
+	var deps = bt.get_scene_dependencies({"scene_path": scene})
+	_check(deps.get("ok", false), "get_scene_dependencies ok")
+
+	# rename_symbol_project_wide walks the whole project, so it is scoped to a
+	# throwaway subfolder via 'root'. Run unscoped it rewrites THIS FILE — which
+	# is exactly what happened the first time, silently replacing the literals
+	# below and corrupting the test on its next run.
+	var rdir := "res://__gdtest_rename"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(rdir))
+	var target := rdir + "/target.gd"
+	_rm(target)
+	var f := FileAccess.open(target, FileAccess.WRITE)
+	f.store_string("extends Node\n\nvar zzq_probe := 1\n\nfunc use() -> int:\n\treturn zzq_probe\n")
+	f.close()
+
+	var preview = bt.rename_symbol_project_wide({"old_name": "zzq_probe", "new_name": "zzq_renamed", "root": rdir})
+	_check(preview.get("ok", false), "rename preview ok")
+	_check(FileAccess.get_file_as_string(target).contains("zzq_probe"),
+		"dry_run preview did NOT touch the file")
+
+	var applied = bt.rename_symbol_project_wide({"old_name": "zzq_probe", "new_name": "zzq_renamed", "root": rdir, "dry_run": false})
+	_check(applied.get("ok", false), "rename applied ok")
+	_check(int(applied.get("file_count", -1)) == 1, "rename stayed inside the scoped root")
+	var after := FileAccess.get_file_as_string(target)
+	_check(after.contains("zzq_renamed") and not after.contains("zzq_probe"), "symbol renamed on disk")
+
+	_rm(target)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(rdir))
+	bt.free()
+	st.free()
+	_rm(scene)

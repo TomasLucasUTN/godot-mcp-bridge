@@ -68,5 +68,30 @@ jobs:
         # even when it succeeded; the test run below is the real gate.
         continue-on-error: true
 
+      - name: Parse every addon script
+        # The logic tests only preload the handlers they exercise; this catches a
+        # syntax error in a file none of them happen to load.
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/parse_all.gd
+
       - name: Run GDScript handler tests
         run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/run_tests.gd
+
+      # The live-scene half — scene open in the editor, tools mutating the real
+      # node tree — is where this project's hardest invariants live (no clobber,
+      # no partial write, undo actually registered). It only runs with a real
+      # editor, so it belongs in this job: the `test` job has no Godot and skips
+      # it. Without this the harness would sit green-by-skipping.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Run the live-scene e2e harness
+        working-directory: mcp-server
+        env:
+          GODOT_BIN: ${{ github.workspace }}/godot
+        run: |
+          npm ci
+          npm run build
+          npx vitest run src/tests/e2e-godot.test.ts

@@ -2,7 +2,16 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { PrimaryHttpServer, type ToolExecutor } from '../primary-http.js';
 
-let nextPort = 16506;
+// This suite burns a fresh port per test (17 and counting), so it owns a whole
+// band rather than a single port. Keep the band clear of the fixed ports the
+// other suites bind — vitest runs test files in parallel, and an overlap makes
+// unrelated suites fail at random rather than failing here.
+//
+//   16505        godot-bridge.test.ts
+//   16510-16599  this file
+//   16600        proxy-client.test.ts
+//   16610        project-binding.test.ts
+let nextPort = 16510;
 function getPort() { return nextPort++; }
 
 /** Fire an HTTP request and return { status, body }. */

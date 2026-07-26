@@ -7,7 +7,8 @@ import {
   unregisterProxyClient,
 } from '../proxy-client.js';
 
-const TEST_PORT = 16507;
+// See the port map in primary-http.test.ts before changing this.
+const TEST_PORT = 16600;
 
 // ---------------------------------------------------------------------------
 // probeExistingServer
