@@ -2,7 +2,8 @@
 extends SceneToolBase
 class_name NetcodeTools
 ## Multiplayer scaffolding tools for MCP.
-## Handles: mp_add_spawner, mp_add_synchronizer, mp_wire_rpc, mp_scaffold_lobby
+## Handles: mp_add_spawner, mp_add_synchronizer, mp_wire_rpc, mp_scaffold_lobby,
+##          mp_diagnose
 ##
 ## The runtime side of multiplayer (spawn_headless_peers, call_rpc_runtime,
 ## get_multiplayer_status) already exists for TESTING netcode. These build it:
@@ -32,7 +33,7 @@ func mp_add_spawner(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 	if spawn_path.is_empty():
-		return {&"ok": false, &"error": "Missing 'spawn_path' — the node new instances get added under (e.g. \"../Players\"), relative to the spawner."}
+		return {&"ok": false, &"error": "Missing 'spawn_path' - the node new instances get added under (e.g. \"../Players\"), relative to the spawner."}
 
 	# Validate every spawnable scene BEFORE touching the tree: on an open scene
 	# a later failure cannot be rolled back (_discard_scene is a no-op there),
@@ -85,7 +86,7 @@ func mp_add_spawner(args: Dictionary) -> Dictionary:
 # =============================================================================
 ## A MultiplayerSynchronizer replicates *property values* over time. The list of
 ## replicated properties lives in a SceneReplicationConfig sub-resource, where
-## each entry carries independent spawn/sync flags — that indirection is what
+## each entry carries independent spawn/sync flags - that indirection is what
 ## makes this tedious to write by hand.
 ##
 ## Property paths are relative to root_path and take the form ".:property"
@@ -101,7 +102,7 @@ func mp_add_synchronizer(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 	if properties.is_empty():
-		return {&"ok": false, &"error": "Missing 'properties' — a non-empty array of property paths to replicate, e.g. [\".:position\", \".:velocity\"]."}
+		return {&"ok": false, &"error": "Missing 'properties' - a non-empty array of property paths to replicate, e.g. [\".:position\", \".:velocity\"]."}
 
 	# Normalise and validate before mutating anything (same reasoning as above).
 	var prop_specs: Array = []
@@ -344,3 +345,206 @@ func _on_peer_disconnected(id: int) -> void:
 			"Call host() or join(address) from your menu UI.",
 			"Add a MultiplayerSpawner (mp_add_spawner) for the player scene.",
 		]}
+
+# =============================================================================
+# mp_diagnose
+# =============================================================================
+## Find the multiplayer mistakes that fail SILENTLY.
+##
+## The scaffolding tools above build a correct setup. This one checks an
+## existing one, and it targets specific failure shapes that recur on the Godot
+## forum - all of which share the property that nothing errors at author time
+## and the game looks fine until a second peer joins:
+##
+## - An `.rpc()` call to a method with no `@rpc` annotation. The call is a no-op
+##   on the remote peer. No error, anywhere.
+## - A MultiplayerSynchronizer whose replication config is empty: it replicates
+##   nothing, forever, silently.
+## - A MultiplayerSpawner with no spawnable scenes, or a `spawn_path` that does
+##   not resolve: nodes the server adds simply never appear on clients, which
+##   reads as "the client is broken" rather than "the spawner is misconfigured".
+## - A synchronizer or spawner whose target path points outside the scene.
+##
+## Static only: it reads scenes and scripts, never runs the game. It cannot see
+## a node added at runtime under a path no spawner covers - that one needs the
+## runtime harness (spawn_headless_peers + the runtime tools).
+func mp_diagnose(args: Dictionary) -> Dictionary:
+	var scene_arg: String = str(args.get(&"scene_path", "")).strip_edges()
+	var include_addons: bool = bool(args.get(&"include_addons", false))
+
+	var scenes: Array = []
+	if not scene_arg.is_empty():
+		scenes.append(_ensure_res_path(scene_arg))
+	else:
+		_collect_scenes("res://", scenes, include_addons)
+
+	var findings: Array = []
+	var scanned := 0
+	for path in scenes:
+		var packed := ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE) as PackedScene
+		if packed == null:
+			continue
+		var root := _instantiate_packed_scene_for_edit(packed)
+		if root == null:
+			continue
+		scanned += 1
+		_diagnose_node_tree(root, root, path, findings)
+		root.queue_free()
+
+	# The @rpc check is per-script, not per-scene: a script calling .rpc() on a
+	# method it never annotated is wrong regardless of where it is instanced.
+	var scripts: Array = []
+	_collect_gd_scripts("res://", scripts, include_addons)
+	for script_path in scripts:
+		_diagnose_rpc_calls(script_path, findings)
+
+	var by_severity := {&"error": 0, &"warning": 0}
+	for f in findings:
+		var sev := str(f.get(&"severity", "warning"))
+		by_severity[sev] = int(by_severity.get(sev, 0)) + 1
+
+	return {
+		&"ok": true,
+		&"scenes_scanned": scanned,
+		&"scripts_scanned": scripts.size(),
+		&"finding_count": findings.size(),
+		&"errors": by_severity[&"error"],
+		&"warnings": by_severity[&"warning"],
+		&"findings": findings,
+		&"note": "Static analysis: scenes and scripts only, the game is never run. A node added at runtime under a path no spawner covers cannot be seen this way - use spawn_headless_peers with the runtime tools for that.",
+	}
+
+func _collect_scenes(dir_path: String, out: Array, include_addons: bool, depth: int = 0) -> void:
+	if depth > 12:
+		return
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if entry.begins_with("."):
+			entry = dir.get_next()
+			continue
+		var full := dir_path.path_join(entry)
+		if dir.current_is_dir():
+			if entry != "addons" or include_addons:
+				_collect_scenes(full, out, include_addons, depth + 1)
+		elif full.get_extension().to_lower() == "tscn":
+			out.append(full)
+		entry = dir.get_next()
+	dir.list_dir_end()
+
+func _collect_gd_scripts(dir_path: String, out: Array, include_addons: bool, depth: int = 0) -> void:
+	if depth > 12:
+		return
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if entry.begins_with("."):
+			entry = dir.get_next()
+			continue
+		var full := dir_path.path_join(entry)
+		if dir.current_is_dir():
+			if entry != "addons" or include_addons:
+				_collect_gd_scripts(full, out, include_addons, depth + 1)
+		elif full.get_extension().to_lower() == "gd":
+			out.append(full)
+		entry = dir.get_next()
+	dir.list_dir_end()
+
+func _add_finding(findings: Array, severity: String, where: String, issue: String, fix: String) -> void:
+	findings.append({&"severity": severity, &"where": where, &"issue": issue, &"fix": fix})
+
+func _diagnose_node_tree(node: Node, root: Node, scene_path: String, findings: Array) -> void:
+	var where := "%s::%s" % [scene_path, str(root.get_path_to(node))]
+
+	if node is MultiplayerSpawner:
+		var spawner: MultiplayerSpawner = node
+		if spawner.get_spawnable_scene_count() == 0:
+			_add_finding(findings, "error", where,
+				"MultiplayerSpawner has no spawnable scenes, so it can never replicate anything.",
+				"Add the scene(s) it should spawn (mp_add_spawner takes spawnable_scenes).")
+		var sp := str(spawner.spawn_path)
+		if sp.is_empty():
+			_add_finding(findings, "error", where,
+				"MultiplayerSpawner has no spawn_path set.",
+				"Point spawn_path at the node new instances get added under.")
+		elif node.get_node_or_null(spawner.spawn_path) == null:
+			_add_finding(findings, "error", where,
+				"MultiplayerSpawner's spawn_path '%s' does not resolve in this scene." % sp,
+				"Fix the path, or add the node it should point at. Spawning into a missing node silently does nothing on clients.")
+
+	if node is MultiplayerSynchronizer:
+		var sync: MultiplayerSynchronizer = node
+		var config := sync.replication_config
+		if config == null or config.get_properties().is_empty():
+			_add_finding(findings, "error", where,
+				"MultiplayerSynchronizer replicates no properties, so it syncs nothing.",
+				"Add the properties to replicate (mp_add_synchronizer takes properties).")
+		var rp := str(sync.root_path)
+		if not rp.is_empty() and node.get_node_or_null(sync.root_path) == null:
+			_add_finding(findings, "error", where,
+				"MultiplayerSynchronizer's root_path '%s' does not resolve in this scene." % rp,
+				"Point root_path at the node whose properties should replicate.")
+
+	for child in node.get_children():
+		_diagnose_node_tree(child, root, scene_path, findings)
+
+## Flag `.rpc("name")` / `.rpc_id(id, "name")` calls whose target method is
+## declared in the SAME script without an `@rpc` annotation.
+##
+## Deliberately narrow: it only reports when the method is defined in the file
+## doing the calling, so a call into another node's script is never guessed at.
+## That keeps this free of the false positives that would make it noise.
+func _diagnose_rpc_calls(script_path: String, findings: Array) -> void:
+	var src := FileAccess.get_file_as_string(script_path)
+	if src.is_empty() or not src.contains("rpc"):
+		return
+
+	# Methods declared in this file, and which of them carry an @rpc annotation
+	# on a preceding line.
+	var annotated: Dictionary = {}
+	var declared: Dictionary = {}
+	var lines := src.split("\n")
+	var re_func := RegEx.new()
+	re_func.compile("^\\s*(static\\s+)?func\\s+([A-Za-z_][A-Za-z0-9_]*)")
+	for i in range(lines.size()):
+		var m := re_func.search(lines[i])
+		if m == null:
+			continue
+		var fname := m.get_string(2)
+		declared[fname] = true
+		# Walk back over decorators/comments to find an @rpc.
+		var j := i - 1
+		while j >= 0:
+			var prev := str(lines[j]).strip_edges()
+			if prev.is_empty() or prev.begins_with("#"):
+				j -= 1
+				continue
+			if prev.begins_with("@rpc"):
+				annotated[fname] = true
+			break
+		j = i
+
+	var re_call := RegEx.new()
+	# Matches both `node.rpc("name")` and the bare `rpc("name")` on self, which
+	# is the more common form. The lookbehind keeps `my_rpc(` and `foo.rpc_bar(`
+	# from matching.
+	re_call.compile("(?<![A-Za-z0-9_])rpc(?:_id)?\\s*\\(\\s*(?:[^,()]+,\\s*)?[\"&']([A-Za-z_][A-Za-z0-9_]*)[\"']")
+	var reported: Dictionary = {}
+	for m in re_call.search_all(src):
+		var target := m.get_string(1)
+		if reported.has(target):
+			continue
+		if not declared.has(target):
+			continue  # defined elsewhere: not ours to judge
+		if annotated.has(target):
+			continue
+		reported[target] = true
+		_add_finding(findings, "error", "%s::%s" % [script_path, target],
+			"'%s' is called with .rpc()/.rpc_id() but has no @rpc annotation, so the remote call is silently dropped." % target,
+			"Add an @rpc annotation to the method (mp_wire_rpc writes a correct one).")

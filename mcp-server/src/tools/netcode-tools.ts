@@ -83,5 +83,17 @@ export const netcodeTools: ToolDefinition[] = [
       },
       required: ['script_path']
     }
+  },
+  {
+    name: 'mp_diagnose',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Find the multiplayer mistakes that fail SILENTLY — nothing errors when you write them, and the game looks fine until a second peer joins. Checks: a method called with .rpc()/.rpc_id() that has no @rpc annotation (the remote call is dropped, no error anywhere); a MultiplayerSynchronizer with an empty replication config (syncs nothing, forever); a MultiplayerSpawner with no spawnable scenes or an unresolvable spawn_path (nodes the server adds never appear on clients, which reads as "the client is broken"). Static analysis only — scenes and scripts, the game is never run. Returns findings with a severity, where it is, and how to fix it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Check one scene. Omit to check every scene in the project.' },
+        include_addons: { type: 'boolean', description: 'Also check the addons/ folder. Default false (your code only).' }
+      }
+    }
   }
 ];

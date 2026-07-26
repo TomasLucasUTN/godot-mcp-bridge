@@ -281,6 +281,7 @@ func _init_tools() -> void:
 		&"mp_add_synchronizer": [_netcode_tools, &"mp_add_synchronizer"],
 		&"mp_wire_rpc": [_netcode_tools, &"mp_wire_rpc"],
 		&"mp_scaffold_lobby": [_netcode_tools, &"mp_scaffold_lobby"],
+		&"mp_diagnose": [_netcode_tools, &"mp_diagnose"],
 
 		&"create_animation_tree": [_animation_tree_tools, &"create_animation_tree"],
 		&"get_animation_tree_structure": [_animation_tree_tools, &"get_animation_tree_structure"],

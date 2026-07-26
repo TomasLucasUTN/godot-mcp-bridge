@@ -88,6 +88,10 @@ const SEMANTIC_GROUPS: Record<string, string[]> = {
   analysis: [
     'get_project_statistics', 'find_unused_resources', 'detect_circular_dependencies',
     'analyze_scene_complexity', 'analyze_signal_flow', 'compare_screenshots',
+    // Lives in netcode-tools.ts (with the scaffolding it complements) but it
+    // only reads — it belongs with the other "what is wrong with this project"
+    // tools, not with the ones that write.
+    'mp_diagnose',
   ],
   // The editor itself: what the developer is doing, selection, tabs, perf.
   editor: [
