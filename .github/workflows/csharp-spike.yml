@@ -66,6 +66,8 @@ jobs:
           mkdir -p omnisharp && tar xzf omnisharp.tar.gz -C omnisharp
           chmod +x omnisharp/OmniSharp
           echo "OMNISHARP=$PWD/omnisharp/OmniSharp" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build a throwaway Godot C# project
         # The question this answers: does a Mono editor headlessly generate the
