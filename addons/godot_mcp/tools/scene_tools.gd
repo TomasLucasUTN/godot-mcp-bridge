@@ -8,7 +8,9 @@ class_name SceneTools
 ##          get_node_spatial_info, measure_node_distance, snap_node_to_grid
 
 
-const _SKIP_PROPS: Dictionary[String, bool] = {
+# Untyped on purpose: typed Dictionary syntax is Godot 4.4+, and the addon
+# advertises 4.3+. CI pins the claimed minimum so this stays honest.
+const _SKIP_PROPS: Dictionary = {
 	"script": true, "owner": true,
 	"unique_name_in_owner": true, "editor_description": true,
 }

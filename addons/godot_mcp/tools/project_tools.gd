@@ -1575,8 +1575,10 @@ func close_scene_tab(args: Dictionary) -> Dictionary:
 	if not edited_scene or edited_scene.scene_file_path != scene_path:
 		ei.open_scene_from_path(scene_path)
 
-	var err := ei.close_scene()
-	if err != OK:
+	# Not `:=` — close_scene() returns void on Godot 4.3 and an Error later, so an
+	# inferred type fails to compile on the version this addon advertises.
+	var err = ei.close_scene()
+	if err != null and int(err) != OK:
 		return {&"ok": false, &"error": "Failed to close scene tab: " + str(err)}
 
 	return {&"ok": true, &"scene_path": scene_path, &"message": "Closed scene tab: " + scene_path}
@@ -1741,7 +1743,10 @@ func export_project(args: Dictionary) -> Dictionary:
 		DirAccess.make_dir_recursive_absolute(art_dir)
 
 	var src_dir := ProjectSettings.globalize_path("res://")
-	var temp_dir := OS.get_temp_dir().path_join("godot_shadow_ws_%d" % Time.get_ticks_msec())
+	# OS.get_temp_dir() is Godot 4.5+; user:// is writable everywhere and is the
+	# right home for a scratch clone anyway (it is per-project and not exported).
+	var temp_root := ProjectSettings.globalize_path("user://")
+	var temp_dir := temp_root.path_join("godot_shadow_ws_%d" % Time.get_ticks_msec())
 	var clone_err := _clone_project_dir(src_dir, temp_dir)
 	if not clone_err.is_empty():
 		_rm_dir_recursive(temp_dir)
