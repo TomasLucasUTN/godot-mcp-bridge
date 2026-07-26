@@ -37,6 +37,7 @@ import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from 
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
 import { isDebugTool, handleDebugTool } from './debug-session.js';
+import { isLspTool, handleLspTool } from './lsp-session.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
@@ -236,6 +237,21 @@ async function executeToolCall(
         })
       }]
     };
+  }
+
+  // Language-server tools, same rationale as the debugger block below: they talk
+  // to the editor's LSP listener (6005), not the addon.
+  if (isLspTool(name)) {
+    try {
+      const payload = await handleLspTool(name, toolArgs, godotBridge!.getStatus().projectPath ?? null);
+      return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: message, tool: name }) }],
+        isError: true,
+      };
+    }
   }
 
   // Debugger tools speak DAP straight to the editor's own adapter, not through

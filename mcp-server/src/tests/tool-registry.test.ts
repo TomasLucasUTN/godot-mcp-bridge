@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { allTools, toolExists } from '../tools/index.js';
 import { RUNTIME_ONLY_TOOLS } from '../godot-bridge.js';
 import { isDebugTool, DEBUG_TOOL_NAMES } from '../debug-session.js';
+import { isLspTool, LSP_TOOL_NAMES } from '../lsp-session.js';
 
 function getExecutorToolNames(): Set<string> {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -72,18 +73,19 @@ describe('Tool registry', () => {
     // source of truth for that set, and index.ts dispatches on the same check.
     const missing = allTools
       .map(tool => tool.name)
-      .filter(name => !executorTools.has(name) && !runtimeTools.has(name) && !isDebugTool(name));
+      .filter(name => !executorTools.has(name) && !runtimeTools.has(name) && !isDebugTool(name) && !isLspTool(name));
 
     expect(missing).toEqual([]);
   });
 
-  it('every name the debug dispatcher claims is actually advertised', () => {
+  it('every name the server-side dispatchers claim is actually advertised', () => {
     // The reverse guard. The test above proves no advertised tool is unreachable;
-    // this one proves the exemption set isn't hiding a tool that was renamed or
-    // dropped. A name in DEBUG_TOOL_NAMES with no matching tool definition would
-    // be routed to a handler nobody can call, instead of erroring as unknown.
+    // this one proves the exemption sets aren't hiding a tool that was renamed or
+    // dropped. A name in DEBUG_TOOL_NAMES/LSP_TOOL_NAMES with no matching tool
+    // definition would be routed to a handler nobody can call, instead of
+    // erroring as unknown.
     const advertised = new Set(allTools.map(t => t.name));
-    const claimed = [...DEBUG_TOOL_NAMES];
+    const claimed = [...DEBUG_TOOL_NAMES, ...LSP_TOOL_NAMES];
     const orphaned = claimed.filter(name => !advertised.has(name));
 
     expect(orphaned).toEqual([]);
