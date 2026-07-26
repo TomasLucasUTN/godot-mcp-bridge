@@ -64,6 +64,9 @@ func _initialize() -> void:
 	_test_save_resource_to_file()
 	_test_generate_2d_asset()
 	_test_scene_diff()
+	_test_tilemap_terrain_and_autotile()
+	_test_bake_navigation_mesh()
+	_test_export_and_peer_contracts()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1799,3 +1802,157 @@ func _test_scene_diff() -> void:
 	an.free()
 	st.free()
 	_rm(scene)
+
+# The last mutating tools without coverage. Each needs setup the earlier batches
+# did not: a TileSet carrying terrain data, a navigation polygon, or a spawned
+# process. Where the real work cannot happen headlessly (export needs templates,
+# peer spawning needs a game), the CONTRACT is still asserted — a tool that
+# refuses cleanly and says why is the behaviour that matters at that boundary.
+
+## A TileSet with one atlas source and one terrain set, built in code. Doing
+## this by hand in the editor is exactly the tedium the tilemap tools exist to
+## avoid, and without it the terrain/autotile paths cannot be reached at all.
+func _make_tileset_with_terrain() -> TileSet:
+	var ts := TileSet.new()
+	ts.tile_size = Vector2i(16, 16)
+
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.3, 0.6, 0.3, 1.0))
+	var tex := ImageTexture.create_from_image(img)
+
+	var atlas := TileSetAtlasSource.new()
+	atlas.texture = tex
+	atlas.texture_region_size = Vector2i(16, 16)
+	for x in range(4):
+		for y in range(4):
+			atlas.create_tile(Vector2i(x, y))
+	ts.add_source(atlas, 0)
+
+	ts.add_terrain_set()
+	ts.set_terrain_set_mode(0, TileSet.TERRAIN_MODE_MATCH_CORNERS_AND_SIDES)
+	ts.add_terrain(0)
+	ts.set_terrain_name(0, 0, "grass")
+	return ts
+
+func _test_tilemap_terrain_and_autotile() -> void:
+	print("\n[tilemap terrain + autotile]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var tm = preload("res://addons/godot_mcp/tools/tilemap_tools.gd").new()
+	var scene := "res://__gdtest_terrain.tscn"
+	var tileset_path := "res://__gdtest_terrain.tres"
+	_rm(scene)
+	_rm(tileset_path)
+
+	ResourceSaver.save(_make_tileset_with_terrain(), tileset_path)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "TileMapLayer", "node_name": "Ground"})
+	st.set_node_properties({"scene_path": scene, "node_path": "Ground", "properties": {"tile_set": tileset_path}})
+
+	# With a TileSet attached the earlier warning must be gone: the cells can
+	# render now, and a warning that never clears is one nobody reads.
+	var filled = tm.tilemap_fill_rect({
+		"scene_path": scene, "node_path": "Ground",
+		"from_coords": [0, 0], "to_coords": [2, 2], "source_id": 0, "atlas_coords": [0, 0],
+	})
+	_check(filled.get("ok", false), "fill_rect ok with a TileSet attached")
+	_check(not filled.has("warning"), "no TileSet warning once one is assigned")
+
+	var terrain = tm.tilemap_set_terrain_cells({
+		"scene_path": scene, "node_path": "Ground",
+		"terrain_set": 0, "terrain": 0,
+		"cells": [[0, 0], [1, 0], [2, 0]],
+	})
+	_check(terrain.get("ok", false), "tilemap_set_terrain_cells ok")
+
+	var bad_set = tm.tilemap_set_terrain_cells({
+		"scene_path": scene, "node_path": "Ground",
+		"terrain_set": 7, "terrain": 0, "cells": [[0, 0]],
+	})
+	_check(not bad_set.get("ok", true), "an out-of-range terrain_set is rejected")
+
+	# Autotile picks an atlas tile per cell from its neighbour bitmask.
+	var auto = tm.tilemap_autotile({
+		"scene_path": scene, "node_path": "Ground",
+		"source_id": 0, "neighbours": "4",
+		"cells": [[0, 0], [1, 0], [0, 1], [1, 1]],
+		"mask_to_atlas": {"0": [0, 0], "1": [1, 0], "3": [2, 0], "5": [3, 0], "7": [0, 1], "15": [1, 1]},
+	})
+	_check(auto.get("ok", false), "tilemap_autotile ok")
+	# It reports the cells whose computed bitmask had no entry in mask_to_atlas
+	# instead of quietly painting nothing — an incomplete map is the usual
+	# mistake, and silence would look like the tool not working.
+	_check(auto.has("cells_painted") and auto.has("unmapped_count"), "autotile reports painted and unmapped counts")
+	var used = tm.tilemap_get_used_cells({"scene_path": scene, "node_path": "Ground"})
+	_check(Array(used.get("cells", [])).size() >= 4, "the layer still holds the filled cells")
+
+	# A map covering every 4-neighbour mask paints every cell, nothing unmapped.
+	var full_map := {}
+	for m in range(16):
+		full_map[str(m)] = [m % 4, m / 4]
+	var auto2 = tm.tilemap_autotile({
+		"scene_path": scene, "node_path": "Ground",
+		"source_id": 0, "neighbours": "4",
+		"cells": [[0, 0], [1, 0], [0, 1], [1, 1]],
+		"mask_to_atlas": full_map,
+	})
+	_check(int(auto2.get("cells_painted", 0)) == 4, "a complete mask map paints every cell")
+	_check(int(auto2.get("unmapped_count", -1)) == 0, "and leaves nothing unmapped")
+
+	_check(not tm.tilemap_autotile({"scene_path": scene, "node_path": "Ground", "cells": [[0, 0]]}).get("ok", true), "autotile without mask_to_atlas is rejected")
+	_check(not tm.tilemap_autotile({"scene_path": scene, "node_path": "Ground", "cells": [], "mask_to_atlas": {"0": [0, 0]}}).get("ok", true), "autotile without cells is rejected")
+
+	tm.free()
+	st.free()
+	_rm(scene)
+	_rm(tileset_path)
+
+func _test_bake_navigation_mesh() -> void:
+	print("\n[bake_navigation_mesh]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var nv = preload("res://addons/godot_mcp/tools/navigation_tools.gd").new()
+	var scene := "res://__gdtest_navbake.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Level"})
+	nv.setup_navigation_region({"scene_path": scene, "dimension": "2D", "node_name": "Nav"})
+
+	# An explicit outline, so the bake has real geometry to work with rather than
+	# silently producing an empty polygon.
+	var baked = nv.bake_navigation_mesh({
+		"scene_path": scene, "node_path": "Nav",
+		"outline": [[0, 0], [256, 0], [256, 256], [0, 256]],
+	})
+	_check(baked.get("ok", false), "bake_navigation_mesh ok")
+
+	var info = nv.get_navigation_info({"scene_path": scene, "node_path": "Nav"})
+	_check(info.get("ok", false), "get_navigation_info ok after baking")
+	_check(baked.has("bounds"), "the baked area's bounds are reported")
+
+	var missing = nv.bake_navigation_mesh({"scene_path": scene, "node_path": "NoSuchNode"})
+	_check(not missing.get("ok", true), "baking a node that does not exist is rejected")
+
+	nv.free()
+	st.free()
+	_rm(scene)
+
+func _test_export_and_peer_contracts() -> void:
+	print("\n[export + headless peers: contracts]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+
+	# These three cannot do their real work here — exporting needs templates
+	# installed, and spawning peers needs a game to connect to. What IS worth
+	# asserting is that each refuses cleanly and says why, instead of hanging or
+	# reporting a success that did not happen.
+	var presets = pt.list_export_presets({})
+	_check(presets.get("ok", false), "list_export_presets answers on a project with none configured")
+
+	var no_preset = pt.export_project({"preset": "NoSuchPreset", "output_path": "res://__gdtest_out.exe"})
+	_check(not no_preset.get("ok", true), "export_project rejects an unknown preset")
+	_check(str(no_preset.get("error", "")).length() > 10, "and says why, rather than failing bare")
+
+	var no_scene = pt.spawn_headless_peers({"count": 1})
+	_check(not no_scene.get("ok", true), "spawn_headless_peers refuses without a scene to run")
+
+	var stop_none = pt.stop_headless_peers({})
+	_check(stop_none.has("ok"), "stop_headless_peers answers even with nothing running")
+
+	pt.free()
