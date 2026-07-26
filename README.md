@@ -23,19 +23,19 @@ licensed) and has since diverged substantially — see [`CHANGELOG.md`](./CHANGE
 
 ## Why this one
 
-Most Godot MCP servers edit your `.tscn` files on disk. If you have that scene **open
+Many Godot MCP servers edit your `.tscn` files on disk. If you have that scene **open
 in the editor with unsaved changes, they silently overwrite your work.** This one
 doesn't: when a scene is open, every mutating tool edits the **live editor tree**
 instead — so your unsaved edits survive, and structural changes go through Godot's
 **undo system** (Ctrl+Z works). You can keep working in the editor while the AI works
 alongside you. Closed scenes still edit on disk as usual.
 
-A few more things that set it apart:
+Two things past that we haven't seen replicated elsewhere:
 
 - **Works alongside you** — the AI can poll `get_editor_activity` to see what *you* just
   did in the editor (selection, scene open/close/save, script focus, resource saves,
   asset reimports, settings changes, undo/redo, which screen you're on), tagged human vs
-  its own actions. True pair-programming, not one-directional. No other Godot MCP has this.
+  its own actions. True pair-programming, not one-directional.
 - **Real headless export** — builds an actual game binary via a shadow-workspace clone,
   asynchronously, without freezing the editor (`export_project` → `get_export_status`).
 - **Runs your real tests** — `run_gut_tests` executes your GUT unit suite (sync or async)
