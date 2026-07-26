@@ -67,3 +67,4 @@ notes/
 mcp-server/src/tests/fixtures/e2e-project/__gdtest_*
 mcp-server/src/tests/fixtures/e2e-project/__probe*
 mcp-server/src/tests/fixtures/e2e-project/default_bus_layout.tres
+mcp-server/src/tests/fixtures/e2e-project/e2e_*
