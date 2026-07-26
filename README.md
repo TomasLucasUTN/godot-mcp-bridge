@@ -115,6 +115,14 @@ More of what it does:
 - **Tells you what's rotting** — `find_unused_resources`, `detect_circular_dependencies`,
   `analyze_scene_complexity`, and `analyze_signal_flow` (which catches connections whose
   handler doesn't exist — a bug that otherwise only shows up at runtime).
+- **Asks what changed, not for everything again** — `scene_diff` takes a snapshot id
+  and then returns only the added, removed and modified nodes (with before/after
+  values), so the agent stops paying for a full `read_scene` every time it looks back.
+  It catches your edits too, not just its own.
+- **Catches multiplayer bugs that fail silently** — `mp_diagnose` flags an `.rpc()`
+  call to a method with no `@rpc` annotation, a synchronizer replicating nothing, and
+  a spawner whose `spawn_path` goes nowhere. None of those error when you write them;
+  all of them look like "the client is broken" when a second peer joins.
 - **Visual regression** — `compare_screenshots` diffs two frames and reports the changed
   percentage and region, so "did my change actually alter the screen?" has an answer.
 - **Tests your UI like a human would** — click a button by its visible caption
@@ -334,7 +342,7 @@ via the `get_guide` tool, in browsable form.
 | **editor** | 11 | The editor itself: `get_editor_activity` (what *you* just did), selection, scene tabs, performance |
 | **physics** | 7 | Collision shapes, raycasts, layers **by name**, collision presets |
 | **tilemap** | 8 | TileMapLayer cell painting, terrain + deterministic bitwise autotiling |
-| **analysis** | 6 | `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
+| **analysis** | 8 | `scene_diff` (what changed since you last looked, without re-reading the tree), `mp_diagnose` (silent multiplayer bugs), `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
 | **scaffolding** | 11 | `wire_signal`, `generate_onready_refs`, `scaffold_entity`, `scaffold_state_machine`, `create_csharp_script`, plus multiplayer: `mp_add_spawner`, `mp_add_synchronizer`, `mp_wire_rpc`, `mp_scaffold_lobby` |
 | **testing** | 6 | GUT test runner (sync/async), scene/mesh integrity validation, assertions |
 | **ui** | 6 | Theme resources, colors, stylebox overrides |
