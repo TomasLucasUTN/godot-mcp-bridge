@@ -2122,10 +2122,11 @@ func set_node_properties(args: Dictionary) -> Dictionary:
 			root.queue_free()
 		return {&"ok": false, &"error": "Node not found: " + node_path}
 
-	# Build the set of valid property names once.
+	# Build the set of valid property names once, keeping each one's declared
+	# type so values can be parsed against it (see _parse_value call below).
 	var valid_props: Dictionary = {}
 	for prop in target.get_property_list():
-		valid_props[str(prop[&"name"])] = true
+		valid_props[str(prop[&"name"])] = int(prop.get(&"type", TYPE_NIL))
 
 	var applied: Array = []
 	var failed: Array = []
@@ -2141,7 +2142,11 @@ func set_node_properties(args: Dictionary) -> Dictionary:
 			continue
 
 		var old_value = target.get(prop_name)
-		var parsed = _parse_value(raw_value)
+		# Parse against the DECLARED type, not the value's shape: without the
+		# hint `[100, 100]` for a Vector2 property stays an Array, set() quietly
+		# no-ops, and the caller gets "type mismatch?" for a form other tools
+		# here accept.
+		var parsed = VariantCodec.parse_typed_value(raw_value, int(valid_props.get(prop_name, -1)))
 
 		if old_value is Resource and not (parsed is Resource):
 			failed.append({&"property": prop_name, &"reason": "expects a Resource (use set_resource_property or specialized tool)"})

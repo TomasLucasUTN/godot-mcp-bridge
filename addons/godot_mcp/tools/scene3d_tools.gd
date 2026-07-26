@@ -415,10 +415,12 @@ func add_gridmap(args: Dictionary) -> Dictionary:
 		gridmap.mesh_library = lib
 
 	if cell_size != null:
-		var parsed = _parse_value(cell_size)
+		# Typed parse so [x, y, z] is accepted alongside {x, y, z} — the codec
+		# needs the hint to know an array is meant as a vector here.
+		var parsed = VariantCodec.parse_typed_value(cell_size, TYPE_VECTOR3)
 		if not (parsed is Vector3):
 			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'cell_size' must be a {x,y,z} Vector3"}
+			return {&"ok": false, &"error": "'cell_size' must be a Vector3: {\"x\":2,\"y\":2,\"z\":2} or [2, 2, 2]"}
 		gridmap.cell_size = parsed
 
 	# Opened after the validations above so an early return can't leave an

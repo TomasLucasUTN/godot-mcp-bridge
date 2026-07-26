@@ -55,6 +55,34 @@ static func parse_typed_value(value: Variant, type_hint: int) -> Variant:
 			TYPE_AABB:
 				return _parse_aabb_dictionary(dict)
 
+	# [x, y] / [x, y, z] for a vector-typed property.
+	#
+	# {x, y, z} is the canonical form and what serialize_value emits, but an
+	# agent that has just written `position: [100, 100]` somewhere else will try
+	# an array here too. Without this the value fails to apply — loudly in the
+	# tools that check, silently in the ones that don't — for a shape that reads
+	# perfectly natural. Only reached when a type hint asks for a vector, so a
+	# genuine Array property is unaffected.
+	if value is Array:
+		var arr: Array = value
+		match type_hint:
+			TYPE_VECTOR2:
+				if arr.size() >= 2:
+					return Vector2(float(arr[0]), float(arr[1]))
+			TYPE_VECTOR2I:
+				if arr.size() >= 2:
+					return Vector2i(int(arr[0]), int(arr[1]))
+			TYPE_VECTOR3:
+				if arr.size() >= 3:
+					return Vector3(float(arr[0]), float(arr[1]), float(arr[2]))
+			TYPE_VECTOR3I:
+				if arr.size() >= 3:
+					return Vector3i(int(arr[0]), int(arr[1]), int(arr[2]))
+			TYPE_COLOR:
+				if arr.size() >= 3:
+					return Color(float(arr[0]), float(arr[1]), float(arr[2]),
+						float(arr[3]) if arr.size() >= 4 else 1.0)
+
 	return parse_value(value)
 
 static func serialize_value(value: Variant) -> Variant:

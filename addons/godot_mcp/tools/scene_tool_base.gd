@@ -125,8 +125,22 @@ func _serialize_value(value: Variant) -> Variant:
 	return VariantCodec.serialize_value(value)
 
 func _set_node_properties(node: Node, properties: Dictionary) -> void:
+	# Parse against the property's DECLARED type rather than guessing from the
+	# value's shape. Without the hint, `[100, 100]` for a Vector2 property stays
+	# an Array, `node.set()` quietly does nothing, and the caller gets "set had
+	# no effect (type mismatch?)" for a value that reads perfectly natural — and
+	# that some other tools here do accept.
+	var types := _property_type_map(node)
 	for prop_name: String in properties:
-		node.set(prop_name, _parse_value(properties[prop_name]))
+		var hint: int = int(types.get(prop_name, -1))
+		node.set(prop_name, VariantCodec.parse_typed_value(properties[prop_name], hint))
+
+## name -> Variant.Type for the node's declared properties.
+func _property_type_map(node: Object) -> Dictionary:
+	var out: Dictionary = {}
+	for p in node.get_property_list():
+		out[str(p.get(&"name", ""))] = int(p.get(&"type", TYPE_NIL))
+	return out
 
 ## Acquire the scene root to mutate. Returns [root, is_live, error_dict]:
 ##   - is_live true  → root is the editor's LIVE tree; mutate in place, do NOT
