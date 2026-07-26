@@ -367,9 +367,78 @@ func create_csharp_script(args: Dictionary) -> Dictionary:
 	file.close()
 	_refresh_filesystem()
 
-	return {&"ok": true, &"path": path, &"class_name": cls, &"base_type": base_type,
+	var result := {&"ok": true, &"path": path, &"class_name": cls, &"base_type": base_type,
 		&"size_bytes": content.length(),
-		&"message": "Created C# script %s (class %s : %s). Needs a .NET Godot build + C# solution to compile." % [path, cls, base_type]}
+		&"message": "Created C# script %s (class %s : %s)." % [path, cls, base_type]}
+
+	# The standard (non-.NET) Godot build cannot load a C# script AT ALL — it has
+	# no CSharpScript class. Writing the file still "succeeds", so without this
+	# the agent gets a green result and only discovers much later that attaching
+	# it silently does nothing. Say it at creation time instead.
+	var caps := _csharp_capability()
+	result[&"csharp_supported"] = caps[&"editor_supports_csharp"]
+	if not caps[&"editor_supports_csharp"]:
+		result[&"warning"] = "This Godot build has no C# support (standard build, not the .NET one), so this script cannot be attached or run here. Install the .NET build of Godot to use it. Call csharp_status for the full picture."
+	elif not caps[&"project_has_solution"]:
+		result[&"warning"] = "No .csproj/.sln found in the project — Godot generates one the first time you build. Until then this script will not compile."
+	return result
+
+## What this editor and project can actually do with C#.
+##
+## The definitive editor check is whether ClassDB knows CSharpScript: the .NET
+## build registers it, the standard build does not. Checking the executable name
+## or looking for a GodotSharp folder would be guessing at the install layout.
+func _csharp_capability() -> Dictionary:
+	var editor_ok := ClassDB.class_exists("CSharpScript")
+	var has_solution := false
+	var solution_name := ""
+	var dir := DirAccess.open("res://")
+	if dir:
+		dir.list_dir_begin()
+		var f := dir.get_next()
+		while f != "":
+			if f.ends_with(".sln") or f.ends_with(".csproj"):
+				has_solution = true
+				solution_name = f
+				break
+			f = dir.get_next()
+		dir.list_dir_end()
+	return {
+		&"editor_supports_csharp": editor_ok,
+		&"project_has_solution": has_solution,
+		&"solution_file": solution_name,
+	}
+
+# =============================================================================
+# csharp_status
+# =============================================================================
+## Report whether C# is usable here BEFORE the agent invests in writing any.
+## A C# script in a non-.NET project is inert: it writes fine, attaches to
+## nothing, and fails quietly.
+func csharp_status(_args: Dictionary) -> Dictionary:
+	var caps := _csharp_capability()
+	var editor_ok: bool = caps[&"editor_supports_csharp"]
+	var has_solution: bool = caps[&"project_has_solution"]
+
+	var usable := editor_ok and has_solution
+	var blockers: Array = []
+	if not editor_ok:
+		blockers.append("This is the standard Godot build, which has no C# support at all. Download the .NET build of Godot (same version) to use C#.")
+	elif not has_solution:
+		blockers.append("No .csproj/.sln in the project. Godot creates one on the first C# build (Project > Tools > C#), or when you create a C# script and build.")
+
+	return {
+		&"ok": true,
+		&"csharp_usable": usable,
+		&"editor_supports_csharp": editor_ok,
+		&"project_has_solution": has_solution,
+		&"solution_file": caps[&"solution_file"],
+		&"godot_version": "%d.%d" % [Engine.get_version_info().major, Engine.get_version_info().minor],
+		&"blockers": blockers,
+		&"message": ("C# is usable in this project." if usable
+			else "C# is NOT usable here — see 'blockers'. Write GDScript instead, or switch to a .NET Godot build."),
+		&"note": "GDScript is fully supported either way; this only affects C#.",
+	}
 
 ## Godot 4 C# node template (PascalCase overrides, partial class).
 func _csharp_template(cls: String, base_type: String, ns: String) -> String:

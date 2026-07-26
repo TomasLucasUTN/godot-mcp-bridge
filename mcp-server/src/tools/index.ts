@@ -20,6 +20,7 @@ import { navigationTools } from './navigation-tools.js';
 import { animationTreeTools } from './animation-tree-tools.js';
 import { debugTools } from './debug-tools.js';
 import { lspTools } from './lsp-tools.js';
+import { netcodeTools } from './netcode-tools.js';
 import { shaderTools } from './shader-tools.js';
 import { testingTools } from './testing-tools.js';
 import { analysisTools } from './analysis-tools.js';
@@ -31,7 +32,7 @@ const ALL_DEFS: ToolDefinition[] = [
   ...analysisTools, ...animationTools, ...animationTreeTools, ...physicsTools,
   ...audioTools, ...tilemapTools, ...scene3dTools, ...shaderTools,
   ...navigationTools, ...themeTools, ...particleTools, ...testingTools,
-  ...assetTools, ...visualizerTools, ...debugTools, ...lspTools,
+  ...assetTools, ...visualizerTools, ...debugTools, ...lspTools, ...netcodeTools,
 ];
 
 // The default-enabled set, chosen by name rather than by source file. It is the
@@ -74,10 +75,14 @@ const SEMANTIC_GROUPS: Record<string, string[]> = {
     'await_signal_runtime', 'serialize_runtime_tree', 'spawn_headless_peers',
     'stop_headless_peers',
   ],
-  // Generate the boilerplate instead of hand-writing it.
+  // Generate the boilerplate instead of hand-writing it — including the
+  // multiplayer replication nodes, whose real state lives in a sub-resource
+  // that is tedious to author by hand.
   scaffolding: [
     'wire_signal', 'generate_onready_refs', 'scaffold_entity',
     'scaffold_state_machine', 'generate_property_forwarder', 'create_csharp_script',
+    'csharp_status',
+    'mp_add_spawner', 'mp_add_synchronizer', 'mp_wire_rpc', 'mp_scaffold_lobby',
   ],
   // Project health, dead code, visual regression.
   analysis: [
@@ -147,6 +152,7 @@ const FILE_FALLBACK: Array<[string, ToolDefinition[]]> = [
   ['utility', visualizerTools],
   ['debug', debugTools],
   ['code_intel', lspTools],
+  ['scaffolding', netcodeTools],
 ];
 
 function buildToolsets(): Record<string, ToolDefinition[]> {

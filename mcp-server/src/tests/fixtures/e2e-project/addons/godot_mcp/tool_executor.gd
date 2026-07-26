@@ -21,6 +21,7 @@ var _particle_tools: Node
 var _scene3d_tools: Node
 var _batch_tools: Node
 var _navigation_tools: Node
+var _netcode_tools: Node
 var _animation_tree_tools: Node
 var _shader_tools: Node
 var _testing_tools: Node
@@ -97,6 +98,10 @@ func _init_tools() -> void:
 	_navigation_tools.name = "NavigationTools"
 	add_child(_navigation_tools)
 
+	_netcode_tools = preload("res://addons/godot_mcp/tools/netcode_tools.gd").new()
+	_netcode_tools.name = "NetcodeTools"
+	add_child(_netcode_tools)
+
 	_animation_tree_tools = preload("res://addons/godot_mcp/tools/animation_tree_tools.gd").new()
 	_animation_tree_tools.name = "AnimationTreeTools"
 	add_child(_animation_tree_tools)
@@ -120,6 +125,7 @@ func _init_tools() -> void:
 		&"search_project": [_file_tools, &"search_project"],
 		&"create_script": [_file_tools, &"create_script"],
 		&"create_csharp_script": [_file_tools, &"create_csharp_script"],
+		&"csharp_status": [_file_tools, &"csharp_status"],
 
 		&"create_scene": [_scene_tools, &"create_scene"],
 		&"read_scene": [_scene_tools, &"read_scene"],
@@ -269,6 +275,10 @@ func _init_tools() -> void:
 		&"setup_navigation_agent": [_navigation_tools, &"setup_navigation_agent"],
 		&"set_navigation_layers": [_navigation_tools, &"set_navigation_layers"],
 		&"get_navigation_info": [_navigation_tools, &"get_navigation_info"],
+		&"mp_add_spawner": [_netcode_tools, &"mp_add_spawner"],
+		&"mp_add_synchronizer": [_netcode_tools, &"mp_add_synchronizer"],
+		&"mp_wire_rpc": [_netcode_tools, &"mp_wire_rpc"],
+		&"mp_scaffold_lobby": [_netcode_tools, &"mp_scaffold_lobby"],
 
 		&"create_animation_tree": [_animation_tree_tools, &"create_animation_tree"],
 		&"get_animation_tree_structure": [_animation_tree_tools, &"get_animation_tree_structure"],
@@ -322,6 +332,7 @@ func set_editor_plugin(plugin: EditorPlugin) -> void:
 	if _scene3d_tools: _scene3d_tools.set_editor_plugin(plugin)
 	if _batch_tools: _batch_tools.set_editor_plugin(plugin)
 	if _navigation_tools: _navigation_tools.set_editor_plugin(plugin)
+	if _netcode_tools: _netcode_tools.set_editor_plugin(plugin)
 	if _animation_tree_tools: _animation_tree_tools.set_editor_plugin(plugin)
 	if _shader_tools: _shader_tools.set_editor_plugin(plugin)
 	if _testing_tools: _testing_tools.set_editor_plugin(plugin)
@@ -377,6 +388,8 @@ const _DESTRUCTIVE_TOOLS := {
 	"batch_set_property": true, "rename_symbol_project_wide": true,
 	"setup_navigation_region": true, "bake_navigation_mesh": true,
 	"setup_navigation_agent": true, "set_navigation_layers": true,
+	"mp_add_spawner": true, "mp_add_synchronizer": true,
+	"mp_wire_rpc": true, "mp_scaffold_lobby": true,
 	"create_resource": true, "remove_autoload": true,
 	"create_animation_tree": true, "add_state_machine_state": true,
 	"remove_state_machine_state": true, "add_state_machine_transition": true,

@@ -83,6 +83,12 @@ export const fileTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'csharp_status',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: 'Report whether C# is actually usable in this editor and project — CALL THIS BEFORE writing any C#. The standard Godot build has no C# support at all: a .cs file written there saves fine, attaches to nothing, and fails silently. Tells you which of the two blockers applies (non-.NET build, or no .csproj/.sln yet) so you can switch to GDScript instead of debugging a no-op.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
     name: 'create_csharp_script',
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description: "Create a Godot C# script (.cs) with the correct partial-class template (using Godot; public partial class X : Base { _Ready/_Process }). Writes the boilerplate so you don't hand-write it. Note: Godot's C# workflow needs a .NET build of Godot and a C# solution (Project > Tools > C# > Create C# solution, done once); this only writes the script. base_type is a Godot class name (Node, Node2D, CharacterBody2D, ...).",

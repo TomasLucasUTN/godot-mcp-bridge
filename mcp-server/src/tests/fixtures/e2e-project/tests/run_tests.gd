@@ -38,6 +38,8 @@ func _initialize() -> void:
 	_test_compare_screenshots()
 	_test_activity_digest()
 	_test_sync_localization()
+	_test_netcode_scaffolding()
+	_test_csharp_status()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -712,3 +714,117 @@ func _test_sync_localization() -> void:
 	ProjectSettings.save()
 	pt.free()
 	_rmdir(dir)
+
+# Multiplayer scaffolding: spawner, synchronizer, @rpc wiring, lobby generation.
+# The synchronizer case is the one that matters — its replicated property list
+# lives in a SceneReplicationConfig sub-resource, so "it saved without error" is
+# not enough; the config has to survive the round-trip to disk.
+func _test_netcode_scaffolding() -> void:
+	print("
+[netcode scaffolding]")
+	var nt = preload("res://addons/godot_mcp/tools/netcode_tools.gd").new()
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var dir := "res://__gdtest_net"
+	_rmdir(dir)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+
+	var player := dir + "/player.tscn"
+	st.create_scene({"scene_path": player, "root_node_type": "CharacterBody2D", "root_node_name": "NetPlayer"})
+	var game := dir + "/game.tscn"
+	st.create_scene({"scene_path": game, "root_node_type": "Node2D", "root_node_name": "Game",
+		"nodes": [{"name": "Players", "type": "Node2D"}]})
+
+	# --- spawner ---
+	var sp = nt.mp_add_spawner({"scene_path": game, "parent_path": ".",
+		"spawn_path": "../Players", "spawnable_scenes": [player]})
+	_check(sp.get("ok", false), "mp_add_spawner returns ok")
+
+	# A spawnable scene that does not exist must be rejected BEFORE the node is
+	# added, otherwise a failed call still mutates an open scene.
+	var bad = nt.mp_add_spawner({"scene_path": game, "parent_path": ".", "node_name": "BadSpawner",
+		"spawn_path": "../Players", "spawnable_scenes": ["res://__nope_does_not_exist.tscn"]})
+	_check(not bad.get("ok", true), "mp_add_spawner rejects a missing spawnable scene")
+	var after_bad := FileAccess.open(game, FileAccess.READ)
+	var game_text := after_bad.get_as_text()
+	after_bad.close()
+	_check(not game_text.contains("BadSpawner"), "rejected spawner left nothing behind")
+
+	# --- synchronizer ---
+	var sy = nt.mp_add_synchronizer({"scene_path": player, "parent_path": ".",
+		"properties": [".:position", {"path": "velocity", "spawn": false}]})
+	_check(sy.get("ok", false), "mp_add_synchronizer returns ok")
+	# A bare "velocity" should have been normalised to ".:velocity".
+	var props: Array = sy.get("properties", [])
+	_check(props.has(".:velocity"), "bare property name normalised to '.:velocity'")
+
+	var packed = ResourceLoader.load(player, "", ResourceLoader.CACHE_MODE_IGNORE)
+	var inst = packed.instantiate() if packed else null
+	var sync_node = inst.get_node_or_null("MultiplayerSynchronizer") if inst else null
+	_check(sync_node != null, "synchronizer node persisted to disk")
+	if sync_node:
+		var cfg = sync_node.replication_config
+		_check(cfg != null, "replication_config resource persisted")
+		if cfg:
+			_check(cfg.has_property(NodePath(".:position")), "replicated property survives the round-trip")
+	if inst:
+		inst.free()
+
+	# --- rpc wiring ---
+	var script_path := dir + "/net.gd"
+	var f := FileAccess.open(script_path, FileAccess.WRITE)
+	f.store_string("extends Node
+")
+	f.close()
+	var rpc = nt.mp_wire_rpc({"script_path": script_path, "method": "broadcast_hit",
+		"mode": "any_peer", "params": [{"name": "damage", "type": "int"}]})
+	_check(rpc.get("ok", false), "mp_wire_rpc returns ok")
+	var rf := FileAccess.open(script_path, FileAccess.READ)
+	var rpc_text := rf.get_as_text()
+	rf.close()
+	_check(rpc_text.contains('@rpc("any_peer", "reliable")'), "annotation matches the requested mode")
+	_check(rpc_text.contains("func broadcast_hit(damage: int)"), "typed parameter written")
+	var dup = nt.mp_wire_rpc({"script_path": script_path, "method": "broadcast_hit"})
+	_check(not dup.get("ok", true), "mp_wire_rpc refuses to redefine an existing method")
+
+	# --- lobby ---
+	var lobby := dir + "/lobby.gd"
+	var lb = nt.mp_scaffold_lobby({"script_path": lobby, "port": 9999, "max_clients": 4})
+	_check(lb.get("ok", false), "mp_scaffold_lobby returns ok")
+	var lf := FileAccess.open(lobby, FileAccess.READ)
+	var lobby_text := lf.get_as_text()
+	lf.close()
+	_check(lobby_text.contains("const PORT := 9999"), "lobby uses the requested port")
+	_check(lobby_text.contains("ENetMultiplayerPeer"), "lobby wires an ENet peer")
+	var again = nt.mp_scaffold_lobby({"script_path": lobby})
+	_check(not again.get("ok", true), "mp_scaffold_lobby refuses to overwrite")
+
+	nt.free()
+	st.free()
+	_rmdir(dir)
+
+# C# capability detection. The headless harness runs the STANDARD Godot build,
+# so this asserts the negative case: it must report C# as unusable rather than
+# letting an agent write .cs files that can never load.
+func _test_csharp_status() -> void:
+	print("
+[csharp_status]")
+	var ft = preload("res://addons/godot_mcp/tools/file_tools.gd").new()
+	var st = ft.csharp_status({})
+	_check(st.get("ok", false), "csharp_status returns ok")
+	_check(st.has("csharp_usable"), "reports csharp_usable")
+	# ClassDB is the source of truth; assert the tool agrees with it either way,
+	# so this passes on a .NET build too instead of hard-coding one environment.
+	var expected := ClassDB.class_exists("CSharpScript")
+	_check(st.get("editor_supports_csharp", not expected) == expected,
+		"editor_supports_csharp matches ClassDB (%s)" % str(expected))
+	if not expected:
+		_check(not st.get("csharp_usable", true), "C# reported unusable on a non-.NET build")
+		_check((st.get("blockers", []) as Array).size() > 0, "a blocker is explained")
+		# And creating a script must carry the warning rather than a bare success.
+		var path := "res://__gdtest_cs_probe.cs"
+		_rm(path)
+		var made = ft.create_csharp_script({"path": path, "class_name": "ProbeScript"})
+		_check(made.get("ok", false), "create_csharp_script still writes the file")
+		_check(made.has("warning"), "create_csharp_script warns C# cannot run here")
+		_rm(path)
+	ft.free()
