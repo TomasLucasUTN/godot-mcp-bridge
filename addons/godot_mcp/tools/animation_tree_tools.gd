@@ -376,7 +376,16 @@ func remove_state_machine_transition(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Transition '%s' -> '%s' does not exist" % [from, to]}
 
-	var removed_transition := state_machine.get_transition(state_machine.find_transition(from, to))
+	# AnimationNodeStateMachine has no find_transition(): the index has to be
+	# located by walking from/to. Calling the nonexistent method aborted this
+	# function mid-edit, so the tool returned an empty dictionary — neither
+	# success nor error — with the undo action left open.
+	var removed_transition: AnimationNodeStateMachineTransition = null
+	for i in range(state_machine.get_transition_count()):
+		if str(state_machine.get_transition_from(i)) == from and str(state_machine.get_transition_to(i)) == to:
+			removed_transition = state_machine.get_transition(i)
+			break
+
 	var ctx := _begin_edit(is_live, "MCP: remove transition %s -> %s" % [from, to], root)
 	state_machine.remove_transition(from, to)
 	_edit_record(ctx, state_machine, &"remove_transition", [from, to],

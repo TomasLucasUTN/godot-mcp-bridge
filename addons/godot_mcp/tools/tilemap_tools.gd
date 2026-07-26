@@ -17,6 +17,12 @@ func _to_vector2i(value: Variant, default: Vector2i = Vector2i.ZERO) -> Vector2i
 		return Vector2i(parsed)
 	if parsed is Dictionary:
 		return Vector2i(int(parsed.get(&"x", default.x)), int(parsed.get(&"y", default.y)))
+	# [x, y] is what most other tools here take for a coordinate (add_node's
+	# position, setup_collision's size), so an agent reasonably tries it. Falling
+	# through to the default instead would paint at (0, 0) and report success —
+	# a wrong result reported as a right one.
+	if parsed is Array and parsed.size() >= 2:
+		return Vector2i(int(parsed[0]), int(parsed[1]))
 	return default
 
 ## Validate that the target node exists and is a TileMapLayer. Returns
@@ -28,6 +34,19 @@ func _get_tilemap_layer(root: Node, node_path: String) -> Array:
 	if not (target is TileMapLayer):
 		return [null, "Node '%s' is %s, expected TileMapLayer (Godot 4.3+)" % [node_path, target.get_class()]]
 	return [target, ""]
+
+## Warning text when a layer has no TileSet, or "" when it does.
+##
+## Painting cells on such a layer stores the data and reports success, but
+## nothing can render: a source_id resolves against the TileSet, and there isn't
+## one. Not an error — a caller may legitimately assign the TileSet afterwards,
+## and refusing would break that. But reporting plain success for an edit the
+## user cannot see is the silent-no-op shape this project treats as a bug, so
+## the result says so.
+func _tileset_warning(layer: TileMapLayer) -> String:
+	if layer.tile_set != null:
+		return ""
+	return "This TileMapLayer has no TileSet, so the cells are stored but cannot render. Assign a TileSet to the layer (or to its parent TileMap) for them to appear."
 
 # ---------------------------------------------------------------------------
 # Undo for cell edits
@@ -79,6 +98,7 @@ func tilemap_set_cell(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": layer_result[1]}
 	var layer: TileMapLayer = layer_result[0]
 
+	var tileset_warning := _tileset_warning(layer)
 	var ctx := _begin_cells(is_live, "MCP: set cell %s" % coords, layer)
 	layer.set_cell(coords, source_id, atlas_coords, alternative_tile)
 	_commit_cells(ctx)
@@ -87,9 +107,12 @@ func tilemap_set_cell(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
+	var out := {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"coords": {&"x": coords.x, &"y": coords.y}, &"source_id": source_id,
 		&"message": "Set cell (%d, %d) on '%s'" % [coords.x, coords.y, node_path]}
+	if not tileset_warning.is_empty():
+		out[&"warning"] = tileset_warning
+	return out
 
 # =============================================================================
 # tilemap_fill_rect
@@ -123,6 +146,7 @@ func tilemap_fill_rect(args: Dictionary) -> Dictionary:
 	var min_y := mini(from_coords.y, to_coords.y)
 	var max_y := maxi(from_coords.y, to_coords.y)
 
+	var tileset_warning := _tileset_warning(layer)
 	var ctx := _begin_cells(is_live, "MCP: fill tiles", layer)
 	var cell_count := 0
 	for x in range(min_x, max_x + 1):
@@ -135,9 +159,12 @@ func tilemap_fill_rect(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
+	var out := {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"cells_filled": cell_count,
 		&"message": "Filled %d cells on '%s'" % [cell_count, node_path]}
+	if not tileset_warning.is_empty():
+		out[&"warning"] = tileset_warning
+	return out
 
 # =============================================================================
 # tilemap_get_cell
