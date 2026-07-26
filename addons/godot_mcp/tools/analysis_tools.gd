@@ -4,7 +4,7 @@ class_name AnalysisTools
 ## Read-only project analysis tools for MCP.
 ## Handles: get_project_statistics, find_unused_resources,
 ##          detect_circular_dependencies, analyze_scene_complexity,
-##          analyze_signal_flow
+##          analyze_signal_flow, compare_screenshots, scene_diff
 ##
 ## Everything here only reads: no tool in this file writes to the project.
 ## The shared scan walks res:// once and is reused by several tools, since a
@@ -596,3 +596,179 @@ func _load_image(path: String) -> Image:
 	if tex != null:
 		return tex.get_image()
 	return null
+
+# =============================================================================
+# scene_diff — what changed in this scene since you last looked
+# =============================================================================
+## The question an agent asks constantly, and until now could only answer by
+## calling read_scene again and re-reading the entire tree. On a scene of any
+## size that is the single biggest token cost in a session, and almost all of it
+## is spent re-reading nodes that did not change.
+##
+## Two-call shape:
+##   1. scene_diff({scene_path}) with no snapshot_id -> takes a snapshot and
+##      returns its id. Cheap: no tree is sent back.
+##   2. scene_diff({scene_path, snapshot_id}) -> returns only what changed since
+##      that snapshot (added / removed / moved / modified), and a fresh id.
+##
+## Works whether the change came from the agent or the developer, because it
+## compares the actual tree rather than tracking tool calls. Snapshots live in
+## this node, so they are per-editor-session; an unknown id is reported rather
+## than guessed at.
+const _SNAPSHOT_CAP := 24
+
+var _snapshots: Dictionary = {}   # id -> {scene_path, taken_at, nodes}
+var _snapshot_seq: int = 0
+
+func scene_diff(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var snapshot_id: String = str(args.get(&"snapshot_id", "")).strip_edges()
+	var include_properties: bool = bool(args.get(&"include_properties", true))
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+
+	var current := _snapshot_scene(scene_path, include_properties)
+	if current.is_empty():
+		return {&"ok": false, &"error": "Could not read scene: " + scene_path}
+
+	var new_id := _store_snapshot(scene_path, current)
+
+	if snapshot_id.is_empty():
+		return {
+			&"ok": true, &"scene_path": scene_path, &"snapshot_id": new_id,
+			&"node_count": current.size(), &"baseline": true,
+			&"message": "Snapshot taken. Pass this snapshot_id back to see what changed since.",
+		}
+
+	if not _snapshots.has(snapshot_id):
+		return {&"ok": false, &"error": "Unknown snapshot_id '%s'. Snapshots live in the editor session and are dropped when it restarts (or after %d newer ones). Call scene_diff without a snapshot_id to take a fresh baseline." % [snapshot_id, _SNAPSHOT_CAP]}
+
+	var previous: Dictionary = _snapshots[snapshot_id]
+	if str(previous.get(&"scene_path", "")) != scene_path:
+		return {&"ok": false, &"error": "snapshot_id '%s' belongs to %s, not %s" % [snapshot_id, previous.get(&"scene_path", "?"), scene_path]}
+
+	var before: Dictionary = previous.get(&"nodes", {})
+	var added: Array = []
+	var removed: Array = []
+	var modified: Array = []
+
+	for path in current:
+		if not before.has(path):
+			added.append({&"path": path, &"type": str(current[path].get(&"type", ""))})
+			continue
+		var diff := _diff_node(before[path], current[path])
+		if not diff.is_empty():
+			diff[&"path"] = path
+			modified.append(diff)
+
+	for path in before:
+		if not current.has(path):
+			removed.append({&"path": path, &"type": str(before[path].get(&"type", ""))})
+
+	var changed := added.size() + removed.size() + modified.size()
+	return {
+		&"ok": true,
+		&"scene_path": scene_path,
+		&"snapshot_id": new_id,
+		&"compared_to": snapshot_id,
+		&"unchanged": changed == 0,
+		&"change_count": changed,
+		&"added": added,
+		&"removed": removed,
+		&"modified": modified,
+		&"node_count": current.size(),
+		&"message": "No changes since that snapshot." if changed == 0 else "%d change(s) since that snapshot." % changed,
+	}
+
+## path -> {type, script, props}. Property values are serialized so a Vector2
+## compares by value rather than by reference.
+func _snapshot_scene(scene_path: String, include_properties: bool) -> Dictionary:
+	var root: Node = _edited_root_if_open(scene_path)
+	var owns_root := false
+	if root == null:
+		var packed := ResourceLoader.load(scene_path, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+		if packed == null:
+			return {}
+		root = _instantiate_packed_scene_for_edit(packed)
+		if root == null:
+			return {}
+		owns_root = true
+
+	var out: Dictionary = {}
+	_walk_snapshot(root, root, out, include_properties)
+	if owns_root:
+		root.queue_free()
+	return out
+
+func _walk_snapshot(node: Node, root: Node, out: Dictionary, include_properties: bool) -> void:
+	var path := "." if node == root else str(root.get_path_to(node))
+	var entry := {&"type": node.get_class()}
+	var scr := node.get_script()
+	if scr is Script:
+		entry[&"script"] = str((scr as Script).resource_path)
+	if include_properties:
+		entry[&"props"] = _interesting_properties(node)
+	out[path] = entry
+	for child in node.get_children():
+		_walk_snapshot(child, root, out, include_properties)
+
+## Only properties the node actually stores differently from its default. A full
+## property dump would be larger than the read_scene this is meant to replace.
+func _interesting_properties(node: Node) -> Dictionary:
+	var props: Dictionary = {}
+	for p in node.get_property_list():
+		var usage := int(p.get(&"usage", 0))
+		if not (usage & PROPERTY_USAGE_STORAGE):
+			continue
+		var name := str(p.get(&"name", ""))
+		if name.is_empty() or name == "script":
+			continue
+		var value = node.get(name)
+		# Resources compare by reference and would report a change on every
+		# reload; record the path instead, which is what actually matters.
+		if value is Resource:
+			value = str((value as Resource).resource_path)
+		elif value is Object:
+			continue
+		props[name] = str(_serialize_value(value))
+	return props
+
+func _diff_node(before: Dictionary, after: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	if str(before.get(&"type", "")) != str(after.get(&"type", "")):
+		out[&"type"] = {&"before": before.get(&"type", ""), &"after": after.get(&"type", "")}
+	if str(before.get(&"script", "")) != str(after.get(&"script", "")):
+		out[&"script"] = {&"before": before.get(&"script", ""), &"after": after.get(&"script", "")}
+
+	var pb: Dictionary = before.get(&"props", {})
+	var pa: Dictionary = after.get(&"props", {})
+	var changed: Dictionary = {}
+	for key in pa:
+		if not pb.has(key):
+			changed[key] = {&"before": null, &"after": pa[key]}
+		elif str(pb[key]) != str(pa[key]):
+			changed[key] = {&"before": pb[key], &"after": pa[key]}
+	for key in pb:
+		if not pa.has(key):
+			changed[key] = {&"before": pb[key], &"after": null}
+	if not changed.is_empty():
+		out[&"properties"] = changed
+	return out
+
+func _store_snapshot(scene_path: String, nodes: Dictionary) -> String:
+	_snapshot_seq += 1
+	var id := "snap_%d" % _snapshot_seq
+	_snapshots[id] = {&"scene_path": scene_path, &"taken_at": Time.get_ticks_msec(), &"nodes": nodes}
+	# Bounded: a long session must not accumulate a full tree copy per call.
+	if _snapshots.size() > _SNAPSHOT_CAP:
+		var oldest := ""
+		var oldest_at := 0x7FFFFFFF
+		for key in _snapshots:
+			var at := int(_snapshots[key].get(&"taken_at", 0))
+			if at < oldest_at:
+				oldest_at = at
+				oldest = key
+		if not oldest.is_empty():
+			_snapshots.erase(oldest)
+	return id

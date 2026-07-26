@@ -168,6 +168,7 @@ func _init_tools() -> void:
 		&"analyze_scene_complexity": [_analysis_tools, &"analyze_scene_complexity"],
 		&"analyze_signal_flow": [_analysis_tools, &"analyze_signal_flow"],
 		&"compare_screenshots": [_analysis_tools, &"compare_screenshots"],
+		&"scene_diff": [_analysis_tools, &"scene_diff"],
 		&"disconnect_signal": [_scene_tools, &"disconnect_signal"],
 		&"duplicate_node": [_scene_tools, &"duplicate_node"],
 		&"set_anchor_preset": [_scene_tools, &"set_anchor_preset"],

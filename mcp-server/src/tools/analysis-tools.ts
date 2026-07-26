@@ -84,5 +84,19 @@ export const analysisTools: ToolDefinition[] = [
       },
       required: ['baseline', 'current']
     }
+  },
+  {
+    name: 'scene_diff',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: 'Answer "what changed in this scene since I last looked" without re-reading the whole tree. Call once with just scene_path to take a snapshot (returns a snapshot_id, no tree), then call again with that snapshot_id to get only the added, removed and modified nodes — with per-property before/after for the ones that changed. Catches the developer\'s edits as well as your own, because it compares the actual tree rather than tracking tool calls. Use this instead of a second read_scene: on a scene of any size, almost all of a re-read is nodes that did not change. Snapshots live in the editor session and are dropped when it restarts.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene to snapshot or compare' },
+        snapshot_id: { type: 'string', description: 'A snapshot_id from an earlier call. Omit to take a fresh baseline.' },
+        include_properties: { type: 'boolean', description: 'Compare node properties, not just structure. Default true. Set false for a cheaper structure-only diff.' }
+      },
+      required: ['scene_path']
+    }
   }
 ];
