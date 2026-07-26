@@ -260,6 +260,16 @@ func send_tool_result(request_id: String, success: bool, result = null, error: S
 	_send_message(response)
 	print("[MCP] Sent result for ", request_id, " (success=", success, ")")
 
+## Push one editor-activity event to the server, unsolicited.
+##
+## The server used to poll get_editor_activity on a timer while a client was
+## subscribed to the activity resource. This replaces that: the editor already
+## knows the instant something happens, so it says so. Dropped silently when the
+## socket is not open — activity is best-effort, and a queue of stale events
+## delivered on reconnect would be worse than the gap.
+func send_editor_activity(event: Dictionary) -> void:
+	_send_message({&"type": &"editor_activity", &"event": event})
+
 func _send_message(message: Dictionary) -> void:
 	if socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		socket.send_text(JSON.stringify(message))

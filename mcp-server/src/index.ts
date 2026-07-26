@@ -529,6 +529,13 @@ function createMcpServer(handleTool: ToolHandler): Server {
       )
     : undefined;
 
+  // The addon pushes each human action as it happens, so the feed does not have
+  // to poll for it in the steady state.
+  if (activityFeed && godotBridge) {
+    const feed = activityFeed;
+    godotBridge.onEditorActivity((event) => feed.push(event as unknown as ActivityEvent));
+  }
+
   registerResources(server, activityFeed);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {

@@ -31,6 +31,9 @@ export const CLOSE_WRONG_PROJECT = 4002;
 /** Close code for "your godot_ready did not carry the expected secret". */
 export const CLOSE_BAD_SECRET = 4003;
 
+/** Receives editor-activity events pushed by the addon. */
+export type EditorActivityCallback = (event: Record<string, unknown>) => void;
+
 /**
  * Reject any WebSocket handshake that carries an `Origin` header.
  *
@@ -156,6 +159,7 @@ export class GodotBridge {
   private timeout: number;
   private expectedProjectPath: string | null;
   private expectedSecret: string | null = null;
+  private editorActivityCallbacks = new Set<EditorActivityCallback>();
 
   constructor(
     port: number = DEFAULT_PORT,
@@ -451,6 +455,11 @@ export class GodotBridge {
       case 'godot_ready':
         // Already handled at the role-assignment step above; no-op for repeats.
         break;
+      case 'editor_activity':
+        // Unsolicited: the editor says what the developer just did the instant
+        // it happens, so nothing has to poll for it.
+        this.notifyEditorActivity((message as { event?: unknown }).event);
+        break;
       default:
         this.log('warn', `Unknown message type from ${role}: ${(message as { type: string }).type}`);
     }
@@ -574,6 +583,23 @@ export class GodotBridge {
 
   onRuntimeStatusChange(callback: RuntimeStatusCallback): void {
     this.runtimeStatusCallbacks.add(callback);
+  }
+
+  /** Called for each editor-activity event the addon pushes. */
+  onEditorActivity(callback: EditorActivityCallback): void {
+    this.editorActivityCallbacks.add(callback);
+  }
+  offEditorActivity(callback: EditorActivityCallback): void {
+    this.editorActivityCallbacks.delete(callback);
+  }
+
+  private notifyEditorActivity(event: unknown): void {
+    if (!event || typeof event !== 'object') return;
+    const e = event as { type?: string; source?: string };
+    this.log('debug', `Editor pushed activity: ${e.type} (${e.source})`);
+    for (const cb of this.editorActivityCallbacks) {
+      try { cb(event as Record<string, unknown>); } catch (err) { this.log('error', `Activity callback error: ${err}`); }
+    }
   }
 
   private notifyConnectionChange(connected: boolean, info?: GodotInfo): void {

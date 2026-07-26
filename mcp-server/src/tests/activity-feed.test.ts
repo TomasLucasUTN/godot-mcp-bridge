@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ActivityFeed, ACTIVITY_URI, type ActivityEvent } from '../activity-feed.js';
+import { ActivityFeed, ACTIVITY_URI, summarizeActivity, type ActivityEvent } from '../activity-feed.js';
 
 /**
  * The live editor-activity feed.
@@ -156,5 +156,103 @@ describe('ActivityFeed', () => {
 
     expect(feed.snapshot().events.length).toBeLessThanOrEqual(50);
     feed.stop();
+  });
+});
+
+describe('ActivityFeed — events pushed by the addon', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('notifies on a pushed event without waiting for a poll', async () => {
+    const server = makeServer();
+    const fetch = vi.fn().mockResolvedValue({ events: [], latest_id: 0 });
+    const feed = new ActivityFeed(server, fetch);
+
+    feed.subscribe(ACTIVITY_URI);
+    feed.push(ev(1, 'human', 'scene_saved'));
+    await vi.advanceTimersByTimeAsync(300); // only the coalesce window
+
+    expect(server.notification).toHaveBeenCalledTimes(1);
+    expect(feed.snapshot().events).toHaveLength(1);
+    feed.stop();
+  });
+
+  it('ignores a pushed agent event', async () => {
+    const server = makeServer();
+    const feed = new ActivityFeed(server, vi.fn().mockResolvedValue(null));
+
+    feed.subscribe(ACTIVITY_URI);
+    feed.push(ev(1, 'agent'));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(server.notification).not.toHaveBeenCalled();
+    feed.stop();
+  });
+
+  it('drops a pushed event when nobody is subscribed', () => {
+    const feed = new ActivityFeed(makeServer(), vi.fn());
+    feed.push(ev(1, 'human'));
+    expect(feed.snapshot().events).toHaveLength(0);
+    feed.stop();
+  });
+
+  it('backs the poll right off once the addon has pushed', async () => {
+    // Polling exists only for an addon older than the push channel. Once a push
+    // arrives it must stop driving the feed, or the work is duplicated forever.
+    const fetch = vi.fn().mockResolvedValue({ events: [], latest_id: 0 });
+    const feed = new ActivityFeed(makeServer(), fetch);
+
+    feed.subscribe(ACTIVITY_URI);
+    await vi.advanceTimersByTimeAsync(5000);
+    const pollsBefore = fetch.mock.calls.length;
+    expect(pollsBefore).toBeGreaterThan(1); // fast poll while no push seen
+
+    feed.push(ev(1, 'human'));
+    fetch.mockClear();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(fetch.mock.calls.length).toBe(0); // now on the slow fallback
+    feed.stop();
+  });
+});
+
+describe('summarizeActivity', () => {
+  it('says so plainly when nothing happened', () => {
+    expect(summarizeActivity([])).toContain('Nothing');
+  });
+
+  it('names a saved scene instead of counting it', () => {
+    const s = summarizeActivity([{ id: 1, type: 'scene_saved', detail: 'res://levels/one.tscn', source: 'human' }]);
+    expect(s).toContain('saved');
+    expect(s).toContain('levels/one.tscn');
+    expect(s).not.toContain('res://'); // the prefix is noise in a summary
+  });
+
+  it('collapses selection churn to a count', () => {
+    // A drag fires selection continuously; twelve records is what the summary
+    // exists to replace.
+    const events: ActivityEvent[] = Array.from({ length: 12 }, (_, i) => ev(i + 1, 'human', 'selection'));
+    const s = summarizeActivity(events);
+    expect(s).toContain('12 times');
+  });
+
+  it('counts rather than lists once there are several files', () => {
+    const events: ActivityEvent[] = ['a', 'b', 'c'].map((n, i) => ({
+      id: i + 1, type: 'script_focus', detail: `res://${n}.gd`, source: 'human',
+    }));
+    const s = summarizeActivity(events);
+    expect(s).toContain('3 scripts');
+    expect(s).not.toContain('a.gd');
+  });
+
+  it('reads as one sentence when several kinds of thing happened', () => {
+    const s = summarizeActivity([
+      { id: 1, type: 'scene_saved', detail: 'res://a.tscn', source: 'human' },
+      { id: 2, type: 'undo_redo', detail: 'Move Node', source: 'human' },
+      ev(3, 'human', 'selection'),
+    ]);
+    expect(s.startsWith('The developer ')).toBe(true);
+    expect(s).toContain(' and ');
+    expect(s.endsWith('.')).toBe(true);
   });
 });

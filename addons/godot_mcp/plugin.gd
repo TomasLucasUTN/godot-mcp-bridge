@@ -45,6 +45,9 @@ func _enter_tree() -> void:
 	# Watch the dev's own editor activity so the agent can see what the human is
 	# doing (bidirectional awareness — the AI works alongside the dev, not blind).
 	_connect_awareness_signals()
+	# Push each human action to the server as it happens, rather than having the
+	# server poll for them on a timer.
+	_activity.human_activity.connect(_on_human_activity)
 
 	# Start connection
 	_mcp_client.connect_to_server()
@@ -215,6 +218,10 @@ func _connect_awareness_signals() -> void:
 
 func _record_activity(type: String, detail) -> void:
 	_activity.record(type, detail)
+
+func _on_human_activity(event: Dictionary) -> void:
+	if _mcp_client:
+		_mcp_client.send_editor_activity(event)
 
 ## Read editor-activity events after `since_id` (0 = everything buffered), newest
 ## last. `source_filter` of "human"/"agent" narrows to just that origin. Returns the

@@ -15,6 +15,12 @@ const AGENT_GRACE_MS := 350
 ## through get_editor_activity; this is only a nudge, so it stays cheap.
 const DIGEST_MAX := 5
 
+## Emitted for each HUMAN-sourced event as it happens, so the plugin can push it
+## to the server instead of the server polling for it. Agent-sourced events are
+## not emitted: the agent already knows what it did, and pushing them back would
+## make every tool call generate traffic.
+signal human_activity(event: Dictionary)
+
 var _ring: Array = []
 var _seq: int = 0
 var _agent_until_ms: int = 0
@@ -33,9 +39,12 @@ func record(type: String, detail) -> void:
 	# Best-effort attribution: a human action within the grace window can be
 	# mis-tagged agent, and a very slow deferred signal can slip to human.
 	var source := "agent" if Time.get_ticks_msec() < _agent_until_ms else "human"
-	_ring.append({&"id": _seq, &"t_ms": Time.get_ticks_msec(), &"type": type, &"detail": detail, &"source": source})
+	var event := {&"id": _seq, &"t_ms": Time.get_ticks_msec(), &"type": type, &"detail": detail, &"source": source}
+	_ring.append(event)
 	if _ring.size() > CAP:
 		_ring = _ring.slice(_ring.size() - CAP)
+	if source == "human":
+		human_activity.emit(event)
 
 ## Events after `since_id` (0 = everything buffered), newest last. `source_filter`
 ## of "human"/"agent" narrows to that origin. `latest_id` lets a poller advance

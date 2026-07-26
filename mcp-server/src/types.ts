@@ -81,6 +81,21 @@ export interface RuntimeStatusMessage {
   connected: boolean;
 }
 
+/**
+ * Unsolicited: the editor addon says what the developer just did, the moment it
+ * happens, so the server does not have to poll get_editor_activity for it.
+ */
+export interface EditorActivityMessage {
+  type: 'editor_activity';
+  event: {
+    id: number;
+    type: string;
+    detail: unknown;
+    source: 'human' | 'agent';
+    t_ms?: number;
+  };
+}
+
 export type WebSocketMessage =
   | ToolInvokeMessage
   | ToolResultMessage
@@ -88,7 +103,8 @@ export type WebSocketMessage =
   | PongMessage
   | GodotReadyMessage
   | ClientStatusMessage
-  | RuntimeStatusMessage;
+  | RuntimeStatusMessage
+  | EditorActivityMessage;
 
 // Tool result types
 export interface ListDirResult {
