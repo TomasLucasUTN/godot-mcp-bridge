@@ -10,20 +10,24 @@ name: C# toolchain spike
 # setup to find out whether it actually works here before any C# tools are
 # written.
 #
-# STATUS after two runs (2026-07-27): the toolchain half is answered, the
-# project-file half is not.
-#   - Godot Mono boots headless on a plain runner (4.5.stable.mono.official),
-#     and netcoredbg + OmniSharp both install and start. No exotic dependencies.
-#   - `--import` alone does NOT emit the .csproj, so OmniSharp has nothing to
-#     load.
-#   - `--build-solutions` (which implies --editor) did not exit under --headless:
-#     run 2 sat on that step for 20 minutes and was cancelled. Hence the
-#     timeouts below — a hang must fail fast rather than look like slow work.
+# CLOSED 2026-07-27 after four runs. Answer: no, not without an interactive
+# editor session. Kept in the repo as the record of what was measured.
 #
-# So the open question is narrower than "can C# work": can a .csproj be produced
-# without a GUI editor session at all? If not, every cs_* tool would require the
-# user to have opened the project in a real editor once, which is a constraint
-# worth stating up front rather than discovering later.
+# What works: Godot Mono boots on a plain runner (4.5.stable.mono.official), and
+# netcoredbg + OmniSharp both install and start in about a minute. The toolchain
+# was never the problem.
+#
+# What does not: there is no non-interactive way to get the .csproj.
+#   - `--import` alone does not emit it.
+#   - `--build-solutions` is the right flag but never returns. Under plain
+#     --headless it ran 20 minutes before being cancelled; with a 300s timeout it
+#     exits 124. It implies --editor, so the next guess was a missing display —
+#     but under `xvfb-run` it ALSO exits 124 with no .csproj. It opens an editor
+#     session and stays open; it is not a batch command.
+#
+# Consequence for cs_* tools: they would only work for a user who has already
+# opened the project in a real editor once. That is a precondition, and shipping
+# tools that quietly misbehave without it is worse than not shipping them.
 #
 # Still `workflow_dispatch`-only: it costs nothing until someone asks for it.
 
