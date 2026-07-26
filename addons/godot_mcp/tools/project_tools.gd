@@ -1912,3 +1912,73 @@ func _tail_text(s: String, n: int) -> String:
 	if s.length() <= n:
 		return s
 	return "...(truncated)...\n" + s.substr(s.length() - n)
+
+# =============================================================================
+# undo_last / redo_last
+# =============================================================================
+## Step the editor's undo history, the same stack Ctrl+Z drives.
+##
+## Every mutating tool that touches an open scene registers an entry there, so
+## this lets the agent take back its own last edit without the developer having
+## to reach for the keyboard — and makes the undo coverage testable, which it
+## otherwise isn't from outside the editor.
+##
+## Note this is the GLOBAL editor history: if the developer did something after
+## the agent did, undo takes THEIR action back first. The returned action name is
+## what actually got undone, so check it rather than assuming.
+func undo_last(args: Dictionary) -> Dictionary:
+	return _step_history(int(args.get(&"steps", 1)), true)
+
+func redo_last(args: Dictionary) -> Dictionary:
+	return _step_history(int(args.get(&"steps", 1)), false)
+
+func _step_history(steps: int, undo: bool) -> Dictionary:
+	if not _editor_plugin:
+		return {&"ok": false, &"error": "Editor plugin unavailable (is the godot_mcp plugin enabled?)"}
+	if steps < 1:
+		return {&"ok": false, &"error": "'steps' must be >= 1"}
+
+	var manager := _editor_plugin.get_undo_redo()
+	if not manager:
+		return {&"ok": false, &"error": "Undo history unavailable"}
+
+	# EditorUndoRedoManager only RECORDS actions — undo()/redo() live on the
+	# plain UndoRedo behind a history. Scene edits go to the edited scene's own
+	# history, not the global one, so resolve the id from the scene root and
+	# fall back to global when no scene is open.
+	var history_id := EditorUndoRedoManager.GLOBAL_HISTORY
+	var edited := _editor_plugin.get_editor_interface().get_edited_scene_root()
+	if edited:
+		history_id = manager.get_object_history_id(edited)
+	var ur: UndoRedo = manager.get_history_undo_redo(history_id)
+	if not ur:
+		return {&"ok": false, &"error": "Undo history unavailable"}
+
+	var verb := "undo" if undo else "redo"
+	var done: Array = []
+	for i in range(steps):
+		# Read the label BEFORE stepping: afterwards it names the neighbouring
+		# entry, not the one that just moved.
+		var label: String = ur.get_current_action_name()
+		if undo:
+			if not ur.has_undo():
+				break
+			ur.undo()
+		else:
+			if not ur.has_redo():
+				break
+			ur.redo()
+		done.append(label if not label.is_empty() else "(unnamed)")
+
+	if done.is_empty():
+		return {
+			&"ok": true, &"undone": [], &"steps_applied": 0,
+			&"message": "Nothing left to %s" % verb,
+		}
+
+	return {
+		&"ok": true,
+		&"steps_applied": done.size(),
+		&"actions": done,
+		&"message": "Stepped %d %s action(s): %s" % [done.size(), verb, ", ".join(done)],
+	}

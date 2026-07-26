@@ -663,6 +663,28 @@ export const projectTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'undo_last',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: "Undo the editor's most recent action — the same stack Ctrl+Z drives. Mutating tools that edit an OPEN scene register an entry there, so this takes back your own last edit without the developer touching the keyboard. Two caveats: the history is GLOBAL, so if the developer acted after you did, this undoes THEIR action first (the response names what was actually undone — check it); and edits written straight to disk on a scene that is NOT open have no undo entry at all, so this will not reach them.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: { type: 'number', description: 'How many actions to step back (default 1). Stops early if the history runs out.' }
+      }
+    }
+  },
+  {
+    name: 'redo_last',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: "Redo the action most recently undone, mirroring undo_last. Same global-history caveat: it redoes whatever is next on the editor's stack, which may not be yours.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: { type: 'number', description: 'How many actions to step forward (default 1). Stops early if the history runs out.' }
+      }
+    }
+  },
+  {
     name: 'get_uid',
     annotations: { readOnlyHint: true, openWorldHint: false },
     description: 'Get the res:// UID (uid://...) for a resource file (Godot 4.4+). Useful for writing UID-based references instead of path-based ones. Fails if the file has not been imported yet or UIDs are not supported for its type.',

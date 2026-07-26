@@ -201,6 +201,8 @@ func _init_tools() -> void:
 		&"stop_headless_peers": [_project_tools, &"stop_headless_peers"],
 		&"classdb_query": [_project_tools, &"classdb_query"],
 		&"rescan_filesystem": [_project_tools, &"rescan_filesystem"],
+		&"undo_last": [_project_tools, &"undo_last"],
+		&"redo_last": [_project_tools, &"redo_last"],
 		&"run_scene": [_project_tools, &"run_scene"],
 		&"stop_scene": [_project_tools, &"stop_scene"],
 		&"is_playing": [_project_tools, &"is_playing"],
