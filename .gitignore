@@ -60,3 +60,10 @@ mcp-server/src/tests/fixtures/e2e-project/addons/godot_mcp/
 # remove the objects (they stay reachable by SHA through the fork network), so
 # "commit now, hide later" is not an option. See notes/LONGTERM.md.
 notes/
+
+# Scratch files the GDScript suite writes into the fixture. Every test creates
+# its own and removes it, but a test that fails mid-way (or a handler that keeps
+# the file open) leaves one behind, and that churn is not worth reviewing.
+mcp-server/src/tests/fixtures/e2e-project/__gdtest_*
+mcp-server/src/tests/fixtures/e2e-project/__probe*
+mcp-server/src/tests/fixtures/e2e-project/default_bus_layout.tres

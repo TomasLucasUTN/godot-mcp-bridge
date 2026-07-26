@@ -56,6 +56,13 @@ func _initialize() -> void:
 	_test_tilemap_bulk()
 	_test_input_map_and_autoloads()
 	_test_property_forwarder()
+	_test_mp_diagnose()
+	_test_particle_material_and_gradient()
+	_test_theme_constant_and_stylebox()
+	_test_audio_bus()
+	_test_gridmap_and_node_property()
+	_test_save_resource_to_file()
+	_test_generate_2d_asset()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1489,3 +1496,255 @@ func _test_property_forwarder() -> void:
 	sc.free()
 	_rm(target)
 	_rm(target + ".uid")
+
+# mp_diagnose finds the multiplayer mistakes that fail silently. Each case here
+# builds the broken setup on purpose and checks it is reported — a diagnostic
+# that misses the bug it exists for is worse than none.
+func _test_mp_diagnose() -> void:
+	print("
+[mp_diagnose]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var nc = preload("res://addons/godot_mcp/tools/netcode_tools.gd").new()
+	var scene := "res://__gdtest_mp.tscn"
+	var script := "res://__gdtest_mp_rpc.gd"
+	_rm(scene)
+	_rm(script)
+
+	# A spawner with no spawnable scenes and a spawn_path that goes nowhere, and
+	# a synchronizer replicating nothing.
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Arena"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "MultiplayerSpawner", "node_name": "Spawner"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "MultiplayerSynchronizer", "node_name": "Sync"})
+	st.set_node_properties({"scene_path": scene, "node_path": "Spawner", "properties": {"spawn_path": NodePath("../DoesNotExist")}})
+
+	var r = nc.mp_diagnose({"scene_path": scene})
+	_check(r.get("ok", false), "mp_diagnose ok")
+	var dump := str(r.get("findings", []))
+	_check(dump.contains("no spawnable scenes"), "empty spawner reported")
+	_check(dump.contains("does not resolve"), "unresolvable spawn_path reported")
+	_check(dump.contains("replicates no properties"), "empty synchronizer reported")
+	_check(int(r.get("errors", 0)) >= 3, "all three counted as errors")
+
+	# The classic silent no-op: .rpc() on a method with no @rpc annotation.
+	var f := FileAccess.open(script, FileAccess.WRITE)
+	f.store_string("extends Node
+
+func shoot() -> void:
+	pass
+
+@rpc(\"any_peer\")
+func annotated() -> void:
+	pass
+
+func fire() -> void:
+	rpc(\"shoot\")
+	rpc(\"annotated\")
+")
+	f.close()
+
+	var r2 = nc.mp_diagnose({})
+	var dump2 := str(r2.get("findings", []))
+	_check(dump2.contains("shoot"), "un-annotated rpc target reported")
+	_check(not dump2.contains("'annotated' is called"), "correctly annotated rpc is NOT reported")
+
+	# A correct setup must come back clean, or the tool is just noise.
+	_rm(scene)
+	_rm(script)
+	_rm(script + ".uid")
+	var clean := "res://__gdtest_mp_ok.tscn"
+	_rm(clean)
+	st.create_scene({"scene_path": clean, "root_node_type": "Node2D", "root_node_name": "Arena"})
+	st.add_node({"scene_path": clean, "parent_path": ".", "node_type": "Node2D", "node_name": "Players"})
+	nc.mp_add_spawner({"scene_path": clean, "parent_path": ".", "spawn_path": "../Players", "spawnable_scenes": [clean]})
+	var r3 = nc.mp_diagnose({"scene_path": clean})
+	_check(int(r3.get("errors", 0)) == 0, "a correct spawner setup reports no errors")
+
+	nc.free()
+	st.free()
+	_rm(clean)
+
+# Second coverage batch: the mutating tools left after the first pass.
+#
+# Six of the eighteen are deliberately NOT here — they need a live editor
+# (select_nodes, clear_editor_selection, close_scene_tab), export templates
+# (export_project), or spawn real processes (spawn_headless_peers,
+# stop_headless_peers). Those belong in the live e2e harness, which runs against
+# a real editor; asserting them from a headless SceneTree would either fail or
+# pass for the wrong reason.
+func _test_particle_material_and_gradient() -> void:
+	print("\n[particle material + gradient]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var pa = preload("res://addons/godot_mcp/tools/particle_tools.gd").new()
+	var scene := "res://__gdtest_pmat.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	pa.create_particles({"scene_path": scene, "dimension": "2D", "node_name": "Fx", "amount": 16})
+
+	var mat = pa.set_particle_material({
+		"scene_path": scene, "node_path": "Fx",
+		"spread": 30.0, "initial_velocity_min": 20.0, "initial_velocity_max": 60.0,
+	})
+	_check(mat.get("ok", false), "set_particle_material ok")
+	var txt := FileAccess.get_file_as_string(scene)
+	_check(txt.contains("ParticleProcessMaterial"), "process material persisted")
+
+	var grad = pa.set_particle_color_gradient({
+		"scene_path": scene, "node_path": "Fx",
+		"stops": [{"offset": 0.0, "color": {"r": 1, "g": 1, "b": 1, "a": 1}},
+				  {"offset": 1.0, "color": {"r": 1, "g": 0, "b": 0, "a": 0}}],
+	})
+	_check(grad.get("ok", false), "set_particle_color_gradient ok")
+	_check(FileAccess.get_file_as_string(scene).contains("Gradient"), "gradient persisted")
+
+	var no_stops = pa.set_particle_color_gradient({"scene_path": scene, "node_path": "Fx", "stops": []})
+	_check(not no_stops.get("ok", true), "an empty gradient is rejected")
+
+	pa.free()
+	st.free()
+	_rm(scene)
+
+func _test_theme_constant_and_stylebox() -> void:
+	print("\n[theme constant + stylebox]")
+	var th = preload("res://addons/godot_mcp/tools/theme_tools.gd").new()
+	var theme := "res://__gdtest_theme2.tres"
+	_rm(theme)
+	th.create_theme({"theme_path": theme})
+
+	var c = th.set_theme_constant({"theme_path": theme, "control_type": "BoxContainer", "constant_name": "separation", "value": 12})
+	_check(c.get("ok", false), "set_theme_constant ok")
+
+	var sb = th.set_theme_stylebox({
+		"theme_path": theme, "control_type": "Button", "stylebox_name": "normal",
+		"style": {"type": "flat", "bg_color": {"r": 0.2, "g": 0.2, "b": 0.2, "a": 1}, "corner_radius": 4},
+	})
+	_check(sb.get("ok", false), "set_theme_stylebox ok")
+
+	# Read it back off disk: the theme is a resource, so a write that does not
+	# persist looks identical to one that does until something reloads it.
+	var loaded := ResourceLoader.load(theme, "Theme", ResourceLoader.CACHE_MODE_IGNORE) as Theme
+	_check(loaded != null, "theme reloads from disk")
+	if loaded:
+		_check(loaded.get_constant("separation", "BoxContainer") == 12, "constant survived the round trip")
+		_check(loaded.get_stylebox("normal", "Button") != null, "stylebox survived the round trip")
+
+	th.free()
+	_rm(theme)
+
+func _test_audio_bus() -> void:
+	print("\n[add_audio_bus]")
+	var au = preload("res://addons/godot_mcp/tools/audio_tools.gd").new()
+	var bus := "GdTestSfx"
+	var had_layout := FileAccess.file_exists(str(ProjectSettings.get_setting("audio/buses/default_bus_layout", "res://default_bus_layout.tres")))
+
+	var made = au.add_audio_bus({"bus_name": bus, "send_to": "Master", "volume_db": -6.0})
+	_check(made.get("ok", false), "add_audio_bus ok")
+	_check(AudioServer.get_bus_index(bus) >= 0, "bus exists in AudioServer")
+
+	var dup = au.add_audio_bus({"bus_name": bus})
+	_check(not dup.get("ok", true), "a duplicate bus name is rejected")
+
+	var bad_send = au.add_audio_bus({"bus_name": "GdTestOther", "send_to": "NoSuchBus"})
+	_check(not bad_send.get("ok", true), "an unknown send_to bus is rejected")
+
+	var layout = au.get_audio_bus_layout({})
+	_check(layout.get("ok", false), "get_audio_bus_layout ok")
+	_check(str(layout).contains(bus), "the new bus shows up in the layout")
+
+	# Buses are global state AND the tool saves the layout to a resource file, so
+	# removing it in memory is not enough — the next run would reload the saved
+	# layout, find the bus already there, and fail. Remove it and re-save.
+	for name in [bus, "GdTestOther"]:
+		var idx := AudioServer.get_bus_index(name)
+		if idx >= 0:
+			AudioServer.remove_bus(idx)
+	var layout_path := str(ProjectSettings.get_setting("audio/buses/default_bus_layout", "res://default_bus_layout.tres"))
+	if had_layout:
+		ResourceSaver.save(AudioServer.generate_bus_layout(), layout_path)
+	else:
+		# The project had no layout file before this test; the tool created one.
+		# Re-saving would leave it behind as untracked fixture churn.
+		_rm(layout_path)
+	_check(AudioServer.get_bus_index(bus) < 0, "test bus removed from the saved layout")
+	_check(had_layout or not FileAccess.file_exists(layout_path), "no stray bus layout left behind")
+	au.free()
+
+func _test_gridmap_and_node_property() -> void:
+	print("\n[gridmap + modify_node_property]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var s3 = preload("res://addons/godot_mcp/tools/scene3d_tools.gd").new()
+	var scene := "res://__gdtest_grid.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+
+	var grid = s3.add_gridmap({"scene_path": scene, "node_name": "Blocks", "cell_size": [2, 2, 2]})
+	_check(grid.get("ok", false), "add_gridmap ok")
+	_check(FileAccess.get_file_as_string(scene).contains("GridMap"), "gridmap persisted")
+
+	# modify_node_property is the single-property sibling of set_node_properties
+	# and had no coverage of its own.
+	var prop = st.modify_node_property({
+		"scene_path": scene, "node_path": "Blocks",
+		"property_name": "cell_size", "value": [4, 4, 4],
+	})
+	_check(prop.get("ok", false), "modify_node_property ok")
+	var reread = st.get_node_properties({"scene_path": scene, "node_path": "Blocks", "properties": ["cell_size"]})
+	_check(str(reread).contains("4"), "the new value is read back from disk")
+
+	var missing = st.modify_node_property({
+		"scene_path": scene, "node_path": "Blocks",
+		"property_name": "not_a_real_property", "value": 1,
+	})
+	_check(not missing.get("ok", true), "an unknown property is rejected")
+
+	s3.free()
+	st.free()
+	_rm(scene)
+
+func _test_save_resource_to_file() -> void:
+	print("\n[save_resource_to_file]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var ph = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var scene := "res://__gdtest_saveres.tscn"
+	var out := "res://__gdtest_shape.tres"
+	_rm(scene)
+	_rm(out)
+	st.create_scene({"scene_path": scene, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+	ph.setup_collision({"scene_path": scene, "node_path": ".", "shape_type": "circle", "node_name": "Hit"})
+
+	# Pull the sub-resource out into its own file so several scenes can share it.
+	var saved = st.save_resource_to_file({
+		"scene_path": scene, "node_path": "Hit",
+		"resource_path": "shape", "save_to": out,
+	})
+	_check(saved.get("ok", false), "save_resource_to_file ok")
+	_check(FileAccess.file_exists(out), "resource written to its own file")
+	var loaded := ResourceLoader.load(out, "", ResourceLoader.CACHE_MODE_IGNORE)
+	_check(loaded is CircleShape2D, "the extracted file holds the right resource type")
+	_check(FileAccess.get_file_as_string(scene).contains(out), "the scene now points at the external file")
+
+	ph.free()
+	st.free()
+	_rm(scene)
+	_rm(out)
+
+func _test_generate_2d_asset() -> void:
+	print("\n[generate_2d_asset]")
+	var at = preload("res://addons/godot_mcp/tools/asset_tools.gd").new()
+	var dir := "res://__gdtest_assets/"
+	var svg := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#3aa\"/></svg>"
+
+	var made = at.generate_2d_asset({"svg_code": svg, "filename": "probe", "save_path": dir})
+	_check(made.get("ok", false), "generate_2d_asset ok")
+	var png := dir + "probe.png"
+	_check(FileAccess.file_exists(png), "PNG written to disk")
+	var img := Image.new()
+	_check(img.load(ProjectSettings.globalize_path(png)) == OK, "the PNG is a readable image")
+	_check(img.get_width() == 32 and img.get_height() == 32, "rasterised at the SVG's size")
+
+	var bad = at.generate_2d_asset({"svg_code": "not svg at all", "filename": "bad", "save_path": dir})
+	_check(not bad.get("ok", true), "invalid SVG is rejected")
+
+	at.free()
+	_rm(png)
+	_rm(dir + "probe.png.import")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(dir))
