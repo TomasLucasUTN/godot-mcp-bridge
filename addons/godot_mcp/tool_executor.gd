@@ -526,11 +526,31 @@ func _batch_execute(args: Dictionary) -> Dictionary:
 # never coerced — that's why we don't reinterpret numbers for ALL keys.
 const _NUMERIC_VALUE_KEYS: Dictionary = {&"value": true, &"expected": true, &"final_value": true}
 
+# Keys whose value is FREE-FORM TEXT, where "true"/"false" is a legitimate string
+# and must survive untouched: a node actually named "true", a group called
+# "false", script content or a property value that is the word itself.
+#
+# The bool coercion below exists because the MCP layer can hand every scalar
+# across as a string and Godot's setter won't turn "true" into a bool. Applying
+# it to every key was documented as harmless "because all consumers str()-coerce"
+# — that held only by luck, and quietly corrupted any of these fields.
+const _TEXT_ONLY_KEYS: Dictionary = {
+	&"name": true, &"node_name": true, &"new_name": true, &"class_name": true,
+	&"content": true, &"text": true, &"code": true, &"snippet": true,
+	&"old_snippet": true, &"new_snippet": true,
+	&"method": true, &"signal": true, &"signal_name": true,
+	&"property": true, &"property_name": true, &"group": true,
+	&"old_name": true, &"animation_name": true, &"state_name": true,
+	&"param_name": true, &"expression": true,
+}
+
 func _parse_stringified_args(args: Dictionary) -> void:
 	for key in args:
 		var val = args[key]
 		if val is String:
 			var s: String = val.strip_edges()
+			if _TEXT_ONLY_KEYS.has(key):
+				continue  # free-form text: "true" means the word, not the bool
 			if s == "true":
 				args[key] = true
 			elif s == "false":

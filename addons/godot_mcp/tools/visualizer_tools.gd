@@ -561,6 +561,15 @@ func _internal_modify_variable(args: Dictionary) -> Dictionary:
 	if script_path.is_empty():
 		return {&"ok": false, &"error": "No script path provided"}
 	
+	# Same sandbox check the other script-writing entry points use. These are
+	# driven by the local visualizer UI rather than by the MCP agent, so exposure
+	# is low — but an unguarded path in a security boundary is the kind of
+	# inconsistency that stops being harmless the moment someone reuses it.
+	var _g := PathGuard.sanitize(script_path)
+	if not _g[&"ok"]:
+		return {&"ok": false, &"error": _g[&"error"]}
+	script_path = _g[&"path"]
+
 	var file := FileAccess.open(script_path, FileAccess.READ)
 	if file == null:
 		return {&"ok": false, &"error": "Cannot open file: " + script_path}
@@ -624,6 +633,15 @@ func _internal_modify_signal(args: Dictionary) -> Dictionary:
 	if script_path.is_empty():
 		return {&"ok": false, &"error": "No script path provided"}
 	
+	# Same sandbox check the other script-writing entry points use. These are
+	# driven by the local visualizer UI rather than by the MCP agent, so exposure
+	# is low — but an unguarded path in a security boundary is the kind of
+	# inconsistency that stops being harmless the moment someone reuses it.
+	var _g := PathGuard.sanitize(script_path)
+	if not _g[&"ok"]:
+		return {&"ok": false, &"error": _g[&"error"]}
+	script_path = _g[&"path"]
+
 	var file := FileAccess.open(script_path, FileAccess.READ)
 	if file == null:
 		return {&"ok": false, &"error": "Cannot open file: " + script_path}
@@ -684,6 +702,15 @@ func _internal_modify_function(args: Dictionary) -> Dictionary:
 	if script_path.is_empty() or func_name.is_empty():
 		return {&"ok": false, &"error": "Missing path or function name"}
 	
+	# Same sandbox check the other script-writing entry points use. These are
+	# driven by the local visualizer UI rather than by the MCP agent, so exposure
+	# is low — but an unguarded path in a security boundary is the kind of
+	# inconsistency that stops being harmless the moment someone reuses it.
+	var _g := PathGuard.sanitize(script_path)
+	if not _g[&"ok"]:
+		return {&"ok": false, &"error": _g[&"error"]}
+	script_path = _g[&"path"]
+
 	var file := FileAccess.open(script_path, FileAccess.READ)
 	if file == null:
 		return {&"ok": false, &"error": "Cannot open file: " + script_path}
@@ -750,6 +777,15 @@ func _internal_modify_function_delete(args: Dictionary) -> Dictionary:
 	if script_path.is_empty() or func_name.is_empty():
 		return {&"ok": false, &"error": "Missing path or function name"}
 	
+	# Same sandbox check the other script-writing entry points use. These are
+	# driven by the local visualizer UI rather than by the MCP agent, so exposure
+	# is low — but an unguarded path in a security boundary is the kind of
+	# inconsistency that stops being harmless the moment someone reuses it.
+	var _g := PathGuard.sanitize(script_path)
+	if not _g[&"ok"]:
+		return {&"ok": false, &"error": _g[&"error"]}
+	script_path = _g[&"path"]
+
 	var file := FileAccess.open(script_path, FileAccess.READ)
 	if file == null:
 		return {&"ok": false, &"error": "Cannot open file: " + script_path}
@@ -829,6 +865,7 @@ func _internal_find_usages(args: Dictionary) -> Dictionary:
 		pattern.compile("\\b" + name + "\\b")
 	
 	for path: String in script_paths:
+
 		var file := FileAccess.open(path, FileAccess.READ)
 		if file == null:
 			continue

@@ -827,13 +827,25 @@ func _query_runtime_node(args: Dictionary) -> Dictionary:
 		# Default subset that's almost always interesting
 		properties = ["position", "global_position", "rotation", "scale", "visible", "modulate"]
 	var prop_values := {}
+	var missing_props: Array = []
 	for pname_v in properties:
 		var pname := str(pname_v)
 		# Include null-valued props too: a null slot (e.g. an unassigned resource)
 		# is real state, distinct from a property that doesn't exist. _serialize
 		# maps null → null.
+		#
+		# But node.get() also returns null for a property that isn't there, so a
+		# bare null is ambiguous: "this Sprite2D has no texture" and "you asked
+		# for a property this class doesn't have" looked identical, and a typo in
+		# the request read as a legitimate null. Report the ones that don't exist
+		# separately so the caller can tell the difference.
+		if not (pname in node):
+			missing_props.append(pname)
+			continue
 		prop_values[pname] = _serialize(node.get(pname))
 	info["properties"] = prop_values
+	if not missing_props.is_empty():
+		info["missing_properties"] = missing_props
 
 	if include_children:
 		var kids: Array = []

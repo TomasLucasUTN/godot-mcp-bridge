@@ -266,6 +266,10 @@ func validate_script(args: Dictionary) -> Dictionary:
 
 	return _validate_one(path)
 
+## Monotonic suffix for the throwaway validation scripts' resource paths, so
+## two validations never claim the same cache slot.
+var _validate_seq: int = 0
+
 ## Validate a single .gd by compiling its current on-disk source. Runs inside
 ## the editor process, so project autoloads/global class names ARE registered —
 ## a reference to an autoload singleton validates correctly (unlike a headless
@@ -285,6 +289,22 @@ func _validate_one(path: String) -> Dictionary:
 	# numbers still line up) before compiling; it doesn't affect the validity of
 	# the rest of the file.
 	var script := GDScript.new()
+	# Give the throwaway script a path NEXT TO the real file before compiling.
+	#
+	# Several GDScript warning settings are path-sensitive — most importantly
+	# `debug/gdscript/warnings/exclude_addons`, which is on by default and mutes
+	# warnings for anything under res://addons/. A GDScript built from
+	# source_code alone has no path, so it loses that exclusion; any warning the
+	# project has promoted to an error (this project ships
+	# `inference_on_variant = 2`) then fails the compile with ERR_PARSE_ERROR and
+	# an empty error list. The file loads perfectly in the editor, so the tool
+	# reported a syntax error that does not exist.
+	#
+	# The path only has to LOOK like the original's neighbour — nothing is
+	# written to disk. The counter keeps repeated or nested validations from
+	# colliding in the resource cache.
+	_validate_seq += 1
+	script.resource_path = "%s/__mcp_validate_%d.gd" % [path.get_base_dir(), _validate_seq]
 	script.source_code = _strip_class_name(source_code)
 	var err := script.reload()  # runs the parser/compiler
 
