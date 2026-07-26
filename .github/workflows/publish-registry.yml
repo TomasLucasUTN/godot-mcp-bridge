@@ -1,0 +1,58 @@
+name: Publish to MCP Registry
+
+# The registry entry went stale at 1.0.0 while the project shipped 1.1.0 and
+# 1.1.1, because publishing was a manual step nobody re-ran. A stale version in a
+# registry listing reads as unmaintained to anyone comparing options, which is
+# the opposite of why the listing exists. This makes it automatic.
+#
+# No secret is needed: the registry accepts GitHub OIDC for `io.github.*`
+# namespaces, and this repo owns `io.github.TomasLucasUTN/godot-mcp-bridge`.
+#
+# Runs on a published GitHub release rather than on a tag push, so the registry
+# only ever advertises a version that was deliberately released. Also runnable by
+# hand for a version that was tagged before this workflow existed.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for `mcp-publisher login github-oidc`.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check server.json matches the released version
+        # The registry publishes whatever server.json says. If that drifted from
+        # package.json, publishing would advertise a version that does not exist
+        # on npm — worse than being stale. Fail loudly instead.
+        run: |
+          set -euo pipefail
+          server_version=$(jq -r '.version' mcp-server/server.json)
+          package_version=$(jq -r '.version' mcp-server/package.json)
+          pkg_in_server=$(jq -r '.packages[0].version' mcp-server/server.json)
+          echo "server.json: $server_version | package.json: $package_version | packages[0]: $pkg_in_server"
+          if [ "$server_version" != "$package_version" ] || [ "$pkg_in_server" != "$package_version" ]; then
+            echo "::error::version mismatch between server.json and package.json"
+            exit 1
+          fi
+
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Publish
+        working-directory: mcp-server
+        run: |
+          set -euo pipefail
+          ../mcp-publisher login github-oidc
+          ../mcp-publisher publish
