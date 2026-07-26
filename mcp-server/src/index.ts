@@ -36,11 +36,11 @@ import { dirname, resolve as resolvePath } from 'path';
 import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from './tools/index.js';
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
-import { isDebugTool, handleDebugTool } from './debug-session.js';
-import { isLspTool, handleLspTool } from './lsp-session.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
+import { isDebugTool, handleDebugTool } from './debug-session.js';
+import { isLspTool, handleLspTool } from './lsp-session.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -108,6 +108,70 @@ const SCENE_INTEGRITY_CHECK_TOOLS = new Set([
   'modify_node_property',
   'batch_set_property',
 ]);
+
+// Operations that cannot be taken back from inside the editor.
+//
+// Deliberately NOT every destructive tool: an edit to a scene that's open goes
+// through Godot's undo history, so Ctrl+Z already covers it. What's listed here
+// writes to disk or to project config with no undo entry — deleting or renaming
+// files, rewriting script text, mass renames, and settings/autoload changes.
+//
+// Gating is opt-in (GODOT_MCP_REQUIRE_CONFIRM=true). Default off because
+// turning it on by default would break every existing 1.x caller; on, each of
+// these needs an explicit `confirm: true`, which is what an agent operating
+// unattended on a real project should be running with.
+const IRREVERSIBLE_TOOLS = new Set([
+  'delete_file', 'rename_file',
+  'edit_script',
+  'rename_symbol_project_wide', 'gd_rename',
+  'update_project_settings', 'set_main_scene',
+  'setup_autoload', 'remove_autoload',
+  'sync_localization',
+]);
+
+const REQUIRE_CONFIRM = process.env.GODOT_MCP_REQUIRE_CONFIRM?.toLowerCase() === 'true';
+
+/**
+ * True when a call must be refused for lack of confirmation.
+ *
+ * A tool already in preview mode (dry_run, or gd_rename without apply) is not
+ * blocked — the preview IS the confirmation step, and demanding both would be
+ * noise. delete_file is skipped because it has always enforced its own confirm
+ * gate deeper down; double-reporting would just confuse the caller.
+ *
+ * `requireConfirm` is a parameter rather than a direct env read so the rule is
+ * testable without mutating process.env.
+ */
+export function needsConfirmation(
+  name: string,
+  args: Record<string, unknown>,
+  requireConfirm: boolean = REQUIRE_CONFIRM,
+): boolean {
+  if (!requireConfirm) return false;
+  if (!IRREVERSIBLE_TOOLS.has(name)) return false;
+  if (args.confirm === true) return false;
+  if (args.dry_run === true) return false;
+  if (name === 'gd_rename' && args.apply !== true) return false;
+  if (name === 'delete_file') return false;
+  return true;
+}
+
+function confirmationBlock(name: string, args: Record<string, unknown>): ToolCallResult | null {
+  if (!needsConfirmation(name, args)) return null;
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        error: `'${name}' makes a change that cannot be undone from the editor, and confirmation is required (GODOT_MCP_REQUIRE_CONFIRM=true).`,
+        tool: name,
+        hint: `Re-run with confirm: true once you've checked the arguments.${
+          name.includes('rename') ? ' A dry_run/preview pass first is cheaper than undoing this by hand.' : ''
+        }`,
+      }),
+    }],
+    isError: true,
+  };
+}
 
 async function executeToolCall(
   name: string,
@@ -238,6 +302,11 @@ async function executeToolCall(
       }]
     };
   }
+
+  // Checked before any dispatch path so it covers addon tools, LSP tools and
+  // debugger tools alike.
+  const blocked = confirmationBlock(name, toolArgs);
+  if (blocked) return blocked;
 
   // Language-server tools, same rationale as the debugger block below: they talk
   // to the editor's LSP listener (6005), not the addon.
@@ -778,7 +847,7 @@ async function startProxy(): Promise<void> {
           type: 'text',
           text: JSON.stringify({
             error: `Failed to reach primary server: ${msg}`,
-            hint: 'The primary godot-mcp-bridge may have shut down. Restart your AI client to spawn a new one.'
+            hint: 'The primary godot-mcp-server may have shut down. Restart your AI client to spawn a new one.'
           })
         }],
         isError: true

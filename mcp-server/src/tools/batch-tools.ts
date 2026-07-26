@@ -67,7 +67,7 @@ export const batchTools: ToolDefinition[] = [
   {
     name: 'rename_symbol_project_wide',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Rename a symbol (variable/function/signal name) across all .gd files in the project using word-boundary matching, updating every reference at once. Defaults to dry_run=true — call once to preview matches (file, line, count), then again with dry_run=false to actually apply. Pass include_scenes=true to also rewrite matching text in .tscn files (e.g. method names in signal connections) — off by default since .tscn edits are riskier.',
+    description: 'Rename a symbol across all .gd files by WORD-BOUNDARY TEXT MATCHING. Prefer gd_rename (toolset "code_intel") when it applies: it uses Godot\'s language server and understands scope, so it will not touch an unrelated symbol that happens to share the name — this tool will. Reach for this one when you need something the language server cannot do: renaming inside .tscn files (include_scenes=true, e.g. method names in signal connections), or a project-wide sweep of a name that is not a resolvable symbol. Defaults to dry_run=true — call once to preview matches (file, line, count), then again with dry_run=false to apply.',
     inputSchema: {
       type: 'object',
       properties: {
