@@ -16,6 +16,8 @@ var _status_label: Label
 func _enter_tree() -> void:
 	print("[Godot MCP] Plugin loading...")
 
+	_declare_port_setting()
+
 	# Create MCP client
 	_mcp_client = MCPClientScript.new()
 	_mcp_client.name = "MCPClient"
@@ -35,6 +37,7 @@ func _enter_tree() -> void:
 	_mcp_client.tool_requested.connect(_on_tool_requested)
 	_mcp_client.client_count_changed.connect(_on_client_count_changed)
 	_mcp_client.runtime_status_changed.connect(_on_runtime_status_changed)
+	_mcp_client.fatal_error.connect(_on_fatal_error)
 
 	# Add status indicator to editor
 	_setup_status_indicator()
@@ -47,6 +50,27 @@ func _enter_tree() -> void:
 	_mcp_client.connect_to_server()
 
 	print("[Godot MCP] Plugin loaded - connecting to MCP server...")
+
+## Make the port visible and editable in Project Settings.
+##
+## Only declares the property so it shows up with a sane default and type hint —
+## it is deliberately NOT saved to project.godot unless the user changes it, so
+## enabling the plugin doesn't dirty the project file. MCPClient.resolve_port()
+## falls back to the same default when the setting is absent.
+func _declare_port_setting() -> void:
+	var key := MCPClientScript.PORT_SETTING
+	if not ProjectSettings.has_setting(key):
+		ProjectSettings.set_setting(key, MCPClientScript.DEFAULT_PORT)
+	ProjectSettings.set_initial_value(key, MCPClientScript.DEFAULT_PORT)
+	ProjectSettings.add_property_info({
+		"name": key,
+		"type": TYPE_INT,
+		"hint": PROPERTY_HINT_RANGE,
+		"hint_string": "1024,65535,1",
+	})
+	# Set a different port here (and matching GODOT_MCP_PORT on the server) to
+	# run two projects side by side. The env var overrides this.
+	ProjectSettings.set_as_basic(key, true)
 
 func _enable_plugin() -> void:
 	# _enable_plugin() runs once when the user toggles the plugin ON in
@@ -123,6 +147,16 @@ func _on_disconnected() -> void:
 	print("[Godot MCP] Disconnected from MCP server")
 	if _status_label:
 		_status_label.text = "MCP: Disconnected"
+		_status_label.add_theme_color_override("font_color", Color.RED)
+
+func _on_fatal_error(reason: String) -> void:
+	# Distinct from "Disconnected": that one is retrying, this one has given up.
+	# The label is the only place a user who isn't reading the Output panel will
+	# notice, so it has to say the difference.
+	print("[Godot MCP] Refused by server, not retrying: ", reason)
+	if _status_label:
+		_status_label.text = "MCP: Wrong project"
+		_status_label.tooltip_text = reason
 		_status_label.add_theme_color_override("font_color", Color.RED)
 
 func _on_client_count_changed(count: int) -> void:

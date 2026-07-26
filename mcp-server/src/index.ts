@@ -64,6 +64,11 @@ const SERVER_VERSION = (() => {
   return '0.0.0-dev';
 })();
 const WEBSOCKET_PORT = parseInt(process.env.GODOT_MCP_PORT || '6505', 10);
+// When set, the bridge refuses any Godot editor that doesn't have this exact
+// project open. Off by default (the common case is one project, one server);
+// worth setting when several projects or a CI editor share a machine, since the
+// addon dials a fixed port and cannot tell which server it reached.
+const EXPECTED_PROJECT = process.env.GODOT_MCP_PROJECT || null;
 const HTTP_PORT = parseInt(process.env.GODOT_MCP_HTTP_PORT || '6506', 10);
 const TOOL_TIMEOUT = parseInt(process.env.GODOT_MCP_TIMEOUT_MS || '30000', 10);
 const IDLE_TIMEOUT = parseInt(process.env.GODOT_MCP_IDLE_TIMEOUT_MS || '30000', 10);
@@ -111,8 +116,9 @@ const SCENE_INTEGRITY_CHECK_TOOLS = new Set([
 
 // Operations that cannot be taken back from inside the editor.
 //
-// Deliberately NOT every destructive tool: an edit to a scene that's open goes
-// through Godot's undo history, so Ctrl+Z already covers it. What's listed here
+// Deliberately NOT every destructive tool: an edit to a scene that's OPEN goes
+// through Godot's undo history, so Ctrl+Z (or undo_last) already covers it —
+// including batch_scene_edit, which lands as a single entry. What's listed here
 // writes to disk or to project config with no undo entry — deleting or renaming
 // files, rewriting script text, mass renames, and settings/autoload changes.
 //
@@ -651,7 +657,7 @@ async function killProcessOnPort(port: number): Promise<boolean> {
 async function startPrimary(): Promise<void> {
   console.error(`[${SERVER_NAME}] Starting in PRIMARY mode v${SERVER_VERSION}...`);
 
-  godotBridge = new GodotBridge(WEBSOCKET_PORT, TOOL_TIMEOUT);
+  godotBridge = new GodotBridge(WEBSOCKET_PORT, TOOL_TIMEOUT, EXPECTED_PROJECT);
   setGodotBridge(godotBridge);
 
   godotBridge.onConnectionChange((connected) => {

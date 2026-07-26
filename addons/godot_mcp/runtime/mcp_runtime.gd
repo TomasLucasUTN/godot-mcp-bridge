@@ -12,7 +12,7 @@ extends Node
 
 const PathGuard = preload("res://addons/godot_mcp/utils/path_guard.gd")
 
-const SERVER_URL := "ws://127.0.0.1:6505"
+const MCPClientScript = preload("res://addons/godot_mcp/mcp_client.gd")
 const CACHE_SCREENSHOT_DIR := "res://addons/godot_mcp/cache/screenshots/"
 const LOG_RING_CAPACITY := 500
 
@@ -83,7 +83,10 @@ func _attempt_connect() -> void:
 	_socket = WebSocketPeer.new()
 	_socket.outbound_buffer_size = 8 * 1024 * 1024  # screenshots can be big
 	_socket.inbound_buffer_size = 256 * 1024
-	var err := _socket.connect_to_url(SERVER_URL)
+	# Same resolution as the editor client (env var, then project setting, then
+	# 6505) so a project on a non-default port doesn't leave the running game
+	# dialling the wrong server.
+	var err := _socket.connect_to_url(MCPClientScript.default_url())
 	_reconnect_at_msec = Time.get_ticks_msec() + 2000
 	if err != OK:
 		push_runtime_log("warn", "MCPRuntime connect_to_url failed: %d (%s)" % [err, error_string(err)])

@@ -24,6 +24,23 @@ const DEFAULT_PORT = 6505;
 const DEFAULT_TIMEOUT = 30000;
 const PING_INTERVAL = 10000;
 
+/** Close code for "you are the wrong project". Distinct from 4000/4001 (slot
+ *  already taken) so the addon can tell a collision from a misconfiguration. */
+export const CLOSE_WRONG_PROJECT = 4002;
+
+/**
+ * Canonical form of a project path for comparison: forward slashes, no trailing
+ * separator, lowercased.
+ *
+ * Case-folding is not correct on a case-sensitive filesystem, but the failure
+ * mode it prevents (Windows sending `C:/Users/...` where the server was told
+ * `c:/users/...` and refusing a legitimate editor) is far more likely than two
+ * projects whose paths differ only by case.
+ */
+export function normalizeProjectPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
 // Per-tool timeout overrides, in ms. Anything not listed here falls back to
 // the bridge's global timeout (this.timeout / GODOT_MCP_TIMEOUT_MS).
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
@@ -99,10 +116,16 @@ export class GodotBridge {
 
   private port: number;
   private timeout: number;
+  private expectedProjectPath: string | null;
 
-  constructor(port: number = DEFAULT_PORT, timeout: number = DEFAULT_TIMEOUT) {
+  constructor(
+    port: number = DEFAULT_PORT,
+    timeout: number = DEFAULT_TIMEOUT,
+    expectedProjectPath: string | null = null
+  ) {
     this.port = port;
     this.timeout = timeout;
+    this.expectedProjectPath = expectedProjectPath ? normalizeProjectPath(expectedProjectPath) : null;
   }
 
   start(): Promise<void> {
@@ -208,6 +231,38 @@ export class GodotBridge {
 
       if (message.type === 'godot_ready') {
         const desiredRole: 'editor' | 'runtime' = (message.role === 'runtime') ? 'runtime' : 'editor';
+
+        // Refuse an editor that has a different project open.
+        //
+        // The addon dials a fixed port, so ANY Godot editor running on this
+        // machine will attach to whatever is listening — it has no idea which
+        // server it reached. Without this check the first editor to connect
+        // wins and every subsequent tool call mutates ITS project. That is not
+        // hypothetical: the e2e suite once created a scene in a real game
+        // project this way, because the port freed up and an unrelated editor
+        // reconnected to the test's bridge.
+        //
+        // Only enforced when the caller said which project it expects; with no
+        // expectation set, behaviour is unchanged.
+        if (this.expectedProjectPath) {
+          const actual = normalizeProjectPath(message.project_path ?? '');
+          if (actual !== this.expectedProjectPath) {
+            this.log(
+              'warn',
+              `Rejecting ${desiredRole} connection: has "${message.project_path}" open, expected "${this.expectedProjectPath}"`
+            );
+            ws.close(
+              CLOSE_WRONG_PROJECT,
+              `This server is bound to a different Godot project (${this.expectedProjectPath})`
+            );
+            if (assignedRole === 'editor' && this.editor?.ws === ws) {
+              this.editor = null;
+              this.notifyConnectionChange(false);
+            }
+            assignedRole = null;
+            return;
+          }
+        }
 
         if (desiredRole === 'runtime') {
           if (this.runtime && this.runtime.ws !== ws) {
@@ -471,6 +526,10 @@ export function getDefaultBridge(): GodotBridge {
   if (!defaultBridge) defaultBridge = new GodotBridge();
   return defaultBridge;
 }
-export function createBridge(port?: number, timeout?: number): GodotBridge {
-  return new GodotBridge(port, timeout);
+export function createBridge(
+  port?: number,
+  timeout?: number,
+  expectedProjectPath?: string | null
+): GodotBridge {
+  return new GodotBridge(port, timeout, expectedProjectPath);
 }

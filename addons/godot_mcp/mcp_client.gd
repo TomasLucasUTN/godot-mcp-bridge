@@ -9,14 +9,21 @@ signal disconnected
 signal tool_requested(request_id: String, tool_name: String, args: Dictionary)
 signal client_count_changed(count: int)
 signal runtime_status_changed(connected: bool)
+## Emitted when the server refuses this editor outright and reconnecting is
+## pointless (currently: the server is bound to a different project).
+signal fatal_error(reason: String)
 
-const DEFAULT_URL := "ws://127.0.0.1:6505"
+const DEFAULT_PORT := 6505
+const PORT_SETTING := "godot_mcp/network/port"
+## Mirrors CLOSE_WRONG_PROJECT in mcp-server/src/godot-bridge.ts. Distinct from
+## 4000/4001 (a slot is already taken), which ARE worth retrying.
+const CLOSE_WRONG_PROJECT := 4002
 const RECONNECT_DELAY := 2.0
 const MAX_RECONNECT_DELAY := 10.0
 const MAX_PACKETS_PER_FRAME := 32
 
 var socket: WebSocketPeer = WebSocketPeer.new()
-var server_url: String = DEFAULT_URL
+var server_url: String = ""
 var _is_connected := false
 var _reconnect_timer: Timer
 var _current_reconnect_delay := RECONNECT_DELAY
@@ -25,8 +32,36 @@ var _project_path: String
 var _initialized := false
 var _runtime_connected: bool = false
 
+## Resolve the port, in precedence order: GODOT_MCP_PORT env var, then the
+## `godot_mcp/network/port` project setting, then 6505.
+##
+## The env var wins so a headless/CI editor can be pointed somewhere else
+## without editing (and dirtying) project.godot. The project setting is the
+## normal path for a developer running two projects at once — set a different
+## port per project and start each server with a matching GODOT_MCP_PORT.
+static func resolve_port() -> int:
+	var from_env := OS.get_environment("GODOT_MCP_PORT")
+	if not from_env.is_empty() and from_env.is_valid_int():
+		var env_port := from_env.to_int()
+		if env_port > 0 and env_port < 65536:
+			return env_port
+		push_warning("[MCP] Ignoring out-of-range GODOT_MCP_PORT=%s" % from_env)
+
+	if ProjectSettings.has_setting(PORT_SETTING):
+		var from_setting: int = int(ProjectSettings.get_setting(PORT_SETTING))
+		if from_setting > 0 and from_setting < 65536:
+			return from_setting
+		push_warning("[MCP] Ignoring out-of-range %s=%d" % [PORT_SETTING, from_setting])
+
+	return DEFAULT_PORT
+
+static func default_url() -> String:
+	return "ws://127.0.0.1:%d" % resolve_port()
+
 func _ready() -> void:
 	_project_path = ProjectSettings.globalize_path("res://")
+	if server_url.is_empty():
+		server_url = default_url()
 
 	# Create reconnect timer
 	_reconnect_timer = Timer.new()
@@ -39,6 +74,7 @@ func _process(_delta: float) -> void:
 	if not _initialized:
 		return
 	if socket.get_ready_state() == WebSocketPeer.STATE_CLOSED:
+		_check_fatal_close()
 		if _is_connected:
 			_handle_disconnect()
 		elif _should_reconnect and not _reconnect_timer.time_left > 0:
@@ -63,8 +99,8 @@ func _process(_delta: float) -> void:
 			if _is_connected:
 				_handle_disconnect()
 
-func connect_to_server(url: String = DEFAULT_URL) -> void:
-	server_url = url
+func connect_to_server(url: String = "") -> void:
+	server_url = url if not url.is_empty() else default_url()
 	_should_reconnect = true
 	_current_reconnect_delay = RECONNECT_DELAY
 	_attempt_connection()
@@ -106,6 +142,24 @@ func _handle_connect() -> void:
 	})
 
 	connected.emit()
+
+## Stop retrying when the server told us we're the wrong project.
+##
+## Reconnecting is right for a server that isn't up yet, but a project mismatch
+## is a configuration error: retrying every 2s just buries the reason in noise
+## and leaves the status indicator saying "connecting" forever. Say it once,
+## loudly, and stop.
+func _check_fatal_close() -> void:
+	if not _should_reconnect:
+		return
+	if socket.get_close_code() != CLOSE_WRONG_PROJECT:
+		return
+	_should_reconnect = false
+	if _reconnect_timer:
+		_reconnect_timer.stop()
+	push_error("[MCP] Server refused this project: %s" % socket.get_close_reason())
+	push_error("[MCP] This editor has '%s' open. Point the server at this project (GODOT_MCP_PROJECT), or give each project its own port via '%s'." % [_project_path, PORT_SETTING])
+	fatal_error.emit(socket.get_close_reason())
 
 func _handle_disconnect() -> void:
 	_is_connected = false
