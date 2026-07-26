@@ -5,6 +5,77 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.1.2] - 2026-07-27
+
+See [`release-notes/v1.1.2.md`](./release-notes/v1.1.2.md) for the narrative
+write-up.
+
+### Security
+- **The bridge accepted WebSocket connections from the local browser.** It binds
+  `127.0.0.1`, which stops remote hosts — but a WebSocket handshake is not
+  subject to the same-origin policy, so any page the developer visited while the
+  editor was open could connect to `ws://127.0.0.1:6505` and issue tool calls,
+  which include writing files into the project and `game_eval`. The bridge now
+  refuses any handshake carrying an `Origin` header; browsers always send one
+  and cannot suppress it, Godot's `WebSocketPeer` never does. Always on, no
+  configuration, no effect on the addon.
+- **Optional shared secret** — `GODOT_MCP_SECRET` on the server, the same value
+  in the editor via that env var or the `godot_mcp/network/secret` project
+  setting. Covers the case Origin rejection cannot: another native process on
+  this machine opening a plain WebSocket and claiming to be Godot. Compared in
+  constant time; a mismatch closes with 4003 and the addon stops retrying and
+  says which setting to fix, rather than reconnecting forever. Unset on either
+  side means no check, so existing setups are unaffected.
+- `SECURITY.md` now documents what actually guards the bridge, in order.
+
+### Fixed
+- **`remove_state_machine_transition` never worked.** It called
+  `find_transition()`, which does not exist on `AnimationNodeStateMachine`. The
+  call aborted the handler mid-edit, so the tool returned an empty dictionary —
+  neither success nor error, no message — with the undo action left open. The
+  transition index is now located by walking `get_transition_from/to`. Found by
+  writing the first automated coverage for the animation-tree tools.
+- **`tilemap_set_cell` and `tilemap_fill_rect` reported plain success on a layer
+  with no TileSet.** The cells are stored but nothing can render them, because a
+  `source_id` resolves against a TileSet there isn't one of. Refusing would break
+  assigning the TileSet afterwards, so both now return a `warning` saying the
+  cells cannot render yet. (`tilemap_set_terrain_cells` already refused; the
+  plain-cell path was the gap.)
+- **Tilemap coordinates rejected `[x, y]` silently.** Other tools here take an
+  array for a coordinate (`add_node`'s position, `setup_collision`'s size), so an
+  agent reasonably tries it — the tilemap tools fell through to `(0, 0)` and
+  reported success, painting the wrong cell. Arrays are now accepted alongside
+  `{x, y}`.
+
+### Added
+- **A live editor-activity feed the agent subscribes to instead of polling.**
+  `get_editor_activity` only reports when the agent remembers to ask, and the
+  digest attached to tool responses only arrives when a tool happens to be
+  called — between calls, exactly when the developer is doing something worth
+  knowing about, there was nothing. The server now exposes
+  `godot-mcp://editor/activity` as a subscribable MCP resource: subscribe once
+  and it pushes `notifications/resources/updated` when the developer touches
+  something, then `resources/read` returns what changed. Only the developer's
+  own actions fire it (the agent already knows its own edits), bursts are
+  coalesced into one notification, and nothing is polled while unsubscribed.
+- **Automated coverage for 29 more mutating tools** — 3D authoring, physics
+  presets, particles, audio, themes, shaders, animation-tree state machines,
+  navigation, tilemap bulk ops, the input map, autoloads, and the property
+  forwarder. The GDScript suite goes from 207 to 285 assertions; tools with
+  automated coverage go from 52 of 99 to 81 of 99. All three fixes above came
+  out of writing it.
+- **CI runs the GDScript and live-editor suites against two Godot versions**
+  (the advertised minimum and the latest stable) instead of one. Both engine
+  breaks this project has had — `NavigationRegion2D.get_bounds()` moving, and
+  the advertised 4.3 minimum never having worked in editor mode — were found by
+  hand, late. `fail-fast` is off so a break in one version still reports the
+  other.
+- **The MCP registry entry publishes itself** on a published GitHub release, via
+  GitHub OIDC (no secret). The registry sat at 1.0.0 while 1.1.0 and 1.1.1
+  shipped, because publishing was a manual step nobody re-ran. The workflow
+  fails loudly if `server.json` and `package.json` disagree on the version,
+  rather than advertising a version that does not exist on npm.
+
 ## [1.1.1] - 2026-07-26
 
 See [`release-notes/v1.1.1.md`](./release-notes/v1.1.1.md) for the narrative
