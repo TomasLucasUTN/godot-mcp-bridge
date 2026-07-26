@@ -185,28 +185,37 @@ func set_material_3d(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'material_override' property" % [node_path, target.get_class()]}
 
+	# Parse and validate every colour BEFORE touching the node. On an open scene
+	# _discard_scene is a no-op (target is the editor's live node, not a copy),
+	# so validating a later argument after already assigning an earlier one
+	# would leave those assignments applied while reporting total failure.
+	var parsed_albedo = null
+	if albedo_color != null:
+		parsed_albedo = _parse_value(albedo_color)
+		if not (parsed_albedo is Color):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'albedo_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+	var parsed_emission = null
+	if emission_color != null:
+		parsed_emission = _parse_value(emission_color)
+		if not (parsed_emission is Color):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'emission_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+
 	var material: StandardMaterial3D = target.get(&"material_override") as StandardMaterial3D
 	if not material:
 		material = StandardMaterial3D.new()
 		target.set(&"material_override", material)
 
-	if albedo_color != null:
-		var parsed = _parse_value(albedo_color)
-		if not (parsed is Color):
-			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'albedo_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
-		material.albedo_color = parsed
+	if parsed_albedo != null:
+		material.albedo_color = parsed_albedo
 	if metallic != null:
 		material.metallic = float(metallic)
 	if roughness != null:
 		material.roughness = float(roughness)
-	if emission_color != null:
-		var parsed = _parse_value(emission_color)
-		if not (parsed is Color):
-			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'emission_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+	if parsed_emission != null:
 		material.emission_enabled = true
-		material.emission = Color(parsed.r, parsed.g, parsed.b)
+		material.emission = Color(parsed_emission.r, parsed_emission.g, parsed_emission.b)
 	if emission_energy != null:
 		material.emission_enabled = true
 		material.emission_energy_multiplier = float(emission_energy)
@@ -231,6 +240,22 @@ func setup_environment(args: Dictionary) -> Dictionary:
 
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
+
+	# Validate colours BEFORE acquiring and mutating the scene. This function
+	# CREATES a WorldEnvironment node when none exists; on an open scene that
+	# node is added to the editor's live tree and _discard_scene cannot take it
+	# back, so a colour rejected further down would otherwise leave a stray node
+	# behind while reporting failure.
+	var parsed_sky_top = null
+	if sky_top_color != null:
+		parsed_sky_top = _parse_value(sky_top_color)
+		if not (parsed_sky_top is Color):
+			return {&"ok": false, &"error": "'sky_top_color' must be a Color"}
+	var parsed_sky_horizon = null
+	if sky_horizon_color != null:
+		parsed_sky_horizon = _parse_value(sky_horizon_color)
+		if not (parsed_sky_horizon is Color):
+			return {&"ok": false, &"error": "'sky_horizon_color' must be a Color"}
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():
@@ -267,18 +292,10 @@ func setup_environment(args: Dictionary) -> Dictionary:
 		if not sky_material:
 			sky_material = ProceduralSkyMaterial.new()
 			environment.sky.sky_material = sky_material
-		if sky_top_color != null:
-			var parsed = _parse_value(sky_top_color)
-			if not (parsed is Color):
-				_discard_scene(root, is_live)
-				return {&"ok": false, &"error": "'sky_top_color' must be a Color"}
-			sky_material.sky_top_color = parsed
-		if sky_horizon_color != null:
-			var parsed = _parse_value(sky_horizon_color)
-			if not (parsed is Color):
-				_discard_scene(root, is_live)
-				return {&"ok": false, &"error": "'sky_horizon_color' must be a Color"}
-			sky_material.sky_horizon_color = parsed
+		if parsed_sky_top != null:
+			sky_material.sky_top_color = parsed_sky_top
+		if parsed_sky_horizon != null:
+			sky_material.sky_horizon_color = parsed_sky_horizon
 
 	if fog_enabled != null:
 		environment.fog_enabled = bool(fog_enabled)

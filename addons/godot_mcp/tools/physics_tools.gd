@@ -248,24 +248,39 @@ func set_physics_layers(args: Dictionary) -> Dictionary:
 	# the dimension implied by the node's class. A raw (non-array) int stays a
 	# raw bitmask, unchanged from before.
 	var dim := "2d" if target is CollisionObject2D else ("3d" if target is CollisionObject3D else "")
-	if collision_layer != null:
+
+	# Resolve BOTH masks before applying EITHER. On an open scene _discard_scene
+	# is a no-op (target is the editor's live node, not a copy), so applying the
+	# layer and only then discovering the mask is invalid would leave the layer
+	# permanently applied while this call reports total failure.
+	var layer_value: int = 0
+	var has_layer := collision_layer != null
+	if has_layer:
 		if collision_layer is Array:
 			var r := _resolve_layers(collision_layer, dim)
 			if not r[1].is_empty():
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": r[1]}
-			target.set(&"collision_layer", r[0])
+			layer_value = r[0]
 		else:
-			target.set(&"collision_layer", int(collision_layer))
-	if collision_mask != null:
+			layer_value = int(collision_layer)
+
+	var mask_value: int = 0
+	var has_mask := collision_mask != null
+	if has_mask:
 		if collision_mask is Array:
 			var r := _resolve_layers(collision_mask, dim)
 			if not r[1].is_empty():
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": r[1]}
-			target.set(&"collision_mask", r[0])
+			mask_value = r[0]
 		else:
-			target.set(&"collision_mask", int(collision_mask))
+			mask_value = int(collision_mask)
+
+	if has_layer:
+		target.set(&"collision_layer", layer_value)
+	if has_mask:
+		target.set(&"collision_mask", mask_value)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
