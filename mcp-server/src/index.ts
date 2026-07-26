@@ -36,6 +36,7 @@ import { dirname, resolve as resolvePath } from 'path';
 import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from './tools/index.js';
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
+import { ActivityFeed, type ActivityEvent } from './activity-feed.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
@@ -99,6 +100,7 @@ if (subcommand === 'install' || subcommand === 'doctor' || subcommand === 'help'
 // ---------------------------------------------------------------------------
 
 let godotBridge: GodotBridge | null = null;
+let activityFeed: ActivityFeed | undefined;
 
 // Toolsets currently visible in list_tools, for this process. "core" is
 // always on; the rest are opt-in via enable_toolset so a fresh session
@@ -508,10 +510,26 @@ type ToolHandler = (name: string, args: Record<string, unknown>) => Promise<Tool
 function createMcpServer(handleTool: ToolHandler): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: { listChanged: true }, resources: {} } }
+    { capabilities: { tools: { listChanged: true }, resources: { subscribe: true } } }
   );
 
-  registerResources(server);
+  // The live editor-activity feed. Only wired in primary mode: a proxy client
+  // has no bridge to ask, and advertising a feed that can never fire is worse
+  // than not advertising it.
+  activityFeed = godotBridge
+    ? new ActivityFeed(
+        server,
+        async (sinceId) => {
+          if (!godotBridge?.isConnected()) return null;
+          const raw = await godotBridge.invokeTool('get_editor_activity', { since_id: sinceId, limit: 50 });
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          return parsed as { events: ActivityEvent[]; latest_id: number };
+        },
+        (level, message) => console.error(`[${SERVER_NAME}] [${level}] ${message}`)
+      )
+    : undefined;
+
+  registerResources(server, activityFeed);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const connectionStatusTool = {

@@ -13,7 +13,10 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { ActivityFeed, ACTIVITY_URI } from './activity-feed.js';
 
 export interface Guide {
   uri: string;
@@ -406,15 +409,40 @@ the same rule the addon's tools follow.
   },
 ];
 
-export function registerResources(server: Server): void {
+/** Description shown for the live activity resource in resources/list. */
+const ACTIVITY_RESOURCE = {
+  uri: ACTIVITY_URI,
+  name: 'Editor activity (live)',
+  description:
+    "What the DEVELOPER just did in the editor — scenes opened/saved, nodes selected, scripts focused, assets reimported, undo/redo. Subscribe to it and the server pushes a notification when they touch something, so you find out without polling. Only the developer's own actions are reported; your own edits are filtered out.",
+  mimeType: 'application/json',
+} as const;
+
+export function registerResources(server: Server, feed?: ActivityFeed): void {
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: GUIDES.map(({ uri, name, description, mimeType }) => ({
-      uri, name, description, mimeType,
-    })),
+    resources: [
+      ...GUIDES.map(({ uri, name, description, mimeType }) => ({
+        uri, name, description, mimeType,
+      })),
+      ...(feed ? [ACTIVITY_RESOURCE] : []),
+    ],
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
+
+    if (feed && uri === ACTIVITY_URI) {
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: ACTIVITY_RESOURCE.mimeType,
+            text: JSON.stringify(feed.snapshot(), null, 2),
+          },
+        ],
+      };
+    }
+
     const guide = GUIDES.find((g) => g.uri === uri);
     if (!guide) {
       throw new Error(`Unknown resource: ${uri}`);
@@ -428,5 +456,23 @@ export function registerResources(server: Server): void {
         },
       ],
     };
+  });
+
+  if (!feed) return;
+
+  // Subscribing starts the server-side watch; unsubscribing (or the last
+  // subscriber leaving) stops it, so an unsubscribed session costs nothing.
+  server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    const uri = request.params.uri;
+    if (uri !== ACTIVITY_URI) {
+      throw new Error(`Resource is not subscribable: ${uri}`);
+    }
+    feed.subscribe(uri);
+    return {};
+  });
+
+  server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    feed.unsubscribe(request.params.uri);
+    return {};
   });
 }
