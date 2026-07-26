@@ -18,6 +18,7 @@ import { scene3dTools } from './scene3d-tools.js';
 import { batchTools } from './batch-tools.js';
 import { navigationTools } from './navigation-tools.js';
 import { animationTreeTools } from './animation-tree-tools.js';
+import { debugTools } from './debug-tools.js';
 import { shaderTools } from './shader-tools.js';
 import { testingTools } from './testing-tools.js';
 import { analysisTools } from './analysis-tools.js';
@@ -29,7 +30,7 @@ const ALL_DEFS: ToolDefinition[] = [
   ...analysisTools, ...animationTools, ...animationTreeTools, ...physicsTools,
   ...audioTools, ...tilemapTools, ...scene3dTools, ...shaderTools,
   ...navigationTools, ...themeTools, ...particleTools, ...testingTools,
-  ...assetTools, ...visualizerTools,
+  ...assetTools, ...visualizerTools, ...debugTools,
 ];
 
 // The default-enabled set, chosen by name rather than by source file. It is the
@@ -102,6 +103,15 @@ const SEMANTIC_GROUPS: Record<string, string[]> = {
     'rename_symbol_project_wide', 'rename_file', 'create_folder', 'batch_set_property',
     'validate_script',
   ],
+  // Step-debug the running game through Godot's own debug adapter. Kept out of
+  // core deliberately: a debugger is a deep, deliberate move ("stop at the
+  // failure and read real values"), not something an agent should reach for
+  // while doing routine scene edits.
+  debug: [
+    'debug_launch', 'debug_attach', 'debug_set_breakpoints', 'debug_continue',
+    'debug_step', 'debug_stack_trace', 'debug_scopes', 'debug_variables',
+    'debug_evaluate', 'debug_status', 'debug_disconnect',
+  ],
 };
 
 // Where a tool goes when neither core nor a semantic group claims it: the group
@@ -127,6 +137,7 @@ const FILE_FALLBACK: Array<[string, ToolDefinition[]]> = [
   ['analysis', analysisTools],
   ['utility', assetTools],
   ['utility', visualizerTools],
+  ['debug', debugTools],
 ];
 
 function buildToolsets(): Record<string, ToolDefinition[]> {
@@ -186,6 +197,7 @@ export const TOOLSET_DESCRIPTIONS: Record<string, string> = {
   project_config: 'Project settings, input map, autoloads, resources.',
   export: 'Build and ship: export presets and async export jobs.',
   refactor: 'Project-wide renames, bulk property edits, file moves.',
+  debug: "Breakpoint debugging over Godot's Debug Adapter: stop the game and read real stack frames and variable values.",
   animation: 'AnimationPlayer tracks/keyframes and AnimationTree state machines.',
   physics: 'Collision shapes, raycasts, physics layers (by name or index), collision presets.',
   audio: 'AudioStreamPlayer nodes and buses.',

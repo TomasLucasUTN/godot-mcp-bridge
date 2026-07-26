@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { allTools, toolExists } from '../tools/index.js';
 import { RUNTIME_ONLY_TOOLS } from '../godot-bridge.js';
+import { isDebugTool, DEBUG_TOOL_NAMES } from '../debug-session.js';
 
 function getExecutorToolNames(): Set<string> {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -63,14 +64,29 @@ describe('Tool registry', () => {
     expect(toolExists('definitely_not_a_tool_xyz')).toBe(false);
   });
 
-  it('every advertised MCP tool is registered in the Godot executor map OR the runtime helper', () => {
+  it('every advertised MCP tool is registered in the Godot executor map OR the runtime helper OR handled server-side', () => {
     const executorTools = getExecutorToolNames();
     const runtimeTools = getRuntimeToolNames();
+    // debug_* tools speak DAP to the editor's own adapter from the Node server,
+    // so they have no GDScript handler by design — isDebugTool is the single
+    // source of truth for that set, and index.ts dispatches on the same check.
     const missing = allTools
       .map(tool => tool.name)
-      .filter(name => !executorTools.has(name) && !runtimeTools.has(name));
+      .filter(name => !executorTools.has(name) && !runtimeTools.has(name) && !isDebugTool(name));
 
     expect(missing).toEqual([]);
+  });
+
+  it('every name the debug dispatcher claims is actually advertised', () => {
+    // The reverse guard. The test above proves no advertised tool is unreachable;
+    // this one proves the exemption set isn't hiding a tool that was renamed or
+    // dropped. A name in DEBUG_TOOL_NAMES with no matching tool definition would
+    // be routed to a handler nobody can call, instead of erroring as unknown.
+    const advertised = new Set(allTools.map(t => t.name));
+    const claimed = [...DEBUG_TOOL_NAMES];
+    const orphaned = claimed.filter(name => !advertised.has(name));
+
+    expect(orphaned).toEqual([]);
   });
 
   it('runtime-only tools are declared in the runtime helper, not the editor map', () => {

@@ -36,6 +36,7 @@ import { dirname, resolve as resolvePath } from 'path';
 import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from './tools/index.js';
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
+import { isDebugTool, handleDebugTool } from './debug-session.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
@@ -235,6 +236,23 @@ async function executeToolCall(
         })
       }]
     };
+  }
+
+  // Debugger tools speak DAP straight to the editor's own adapter, not through
+  // the addon bridge, so they're answered here — and deliberately BEFORE the
+  // isConnected() guard below, since the adapter is reachable whether or not
+  // the addon has connected.
+  if (isDebugTool(name)) {
+    try {
+      const payload = await handleDebugTool(name, toolArgs, godotBridge!.getStatus().projectPath ?? null);
+      return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: message, tool: name }) }],
+        isError: true,
+      };
+    }
   }
 
   if (name === 'diagnose_connection') {
