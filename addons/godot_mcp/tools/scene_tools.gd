@@ -2148,6 +2148,23 @@ func set_node_properties(args: Dictionary) -> Dictionary:
 		# here accept.
 		var parsed = VariantCodec.parse_typed_value(raw_value, int(valid_props.get(prop_name, -1)))
 
+		# A res:// path for an Object-typed property means "load this and assign
+		# it". Every other tool here that takes a resource takes a path
+		# (attach_script, set_sprite_texture, assign_shader_material), so an
+		# agent writes one here too — and without this it silently no-ops,
+		# because set() rejects a String for an Object property.
+		if int(valid_props.get(prop_name, -1)) == TYPE_OBJECT and parsed is String:
+			var res_path := str(parsed)
+			if res_path.begins_with("res://"):
+				if not ResourceLoader.exists(res_path):
+					failed.append({&"property": prop_name, &"reason": "resource not found: " + res_path})
+					continue
+				var loaded := ResourceLoader.load(res_path)
+				if loaded == null:
+					failed.append({&"property": prop_name, &"reason": "could not load resource: " + res_path})
+					continue
+				parsed = loaded
+
 		if old_value is Resource and not (parsed is Resource):
 			failed.append({&"property": prop_name, &"reason": "expects a Resource (use set_resource_property or specialized tool)"})
 			continue

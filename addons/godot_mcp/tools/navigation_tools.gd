@@ -132,10 +132,12 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 				return {&"ok": false, &"error": "'outline' must be an array of at least 3 {x,y} points describing the walkable boundary in the region's local space"}
 			var pts := PackedVector2Array()
 			for p in outline_arg:
-				var parsed_p = _parse_value(p)
+				# Typed parse so [x, y] works alongside {x, y}, matching what
+				# every other coordinate-taking tool here accepts.
+				var parsed_p = VariantCodec.parse_typed_value(p, TYPE_VECTOR2)
 				if not (parsed_p is Vector2):
 					_discard_scene(root, is_live)
-					return {&"ok": false, &"error": "Each 'outline' point must be a {x,y} Vector2"}
+					return {&"ok": false, &"error": "Each 'outline' point must be a Vector2: {\"x\":0,\"y\":0} or [0, 0]"}
 				pts.append(parsed_p)
 			np.clear_outlines()
 			np.add_outline(pts)
