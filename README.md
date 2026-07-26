@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![211 tools](https://img.shields.io/badge/tools-211-brightgreen)](#-what-can-it-do)
+[![212 tools](https://img.shields.io/badge/tools-212-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 211 tools that were
+server, live-tree edits that never clobber your unsaved work, and 212 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -178,7 +178,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 211 (35 loaded by default) | 155 | 42 | ~14 |
+| Tools | 212 (35 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -304,7 +304,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 211 Tools, 35 Loaded by Default
+### 212 Tools, 35 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -367,7 +367,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 │  AI Client  │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
 │  (Claude,   │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
 │   Cursor)   │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  211 tool    │
+└─────────────┘                  │  Visualizer  │               │  212 tool    │
                                  │  HTTP :6510  │               │  handlers    │
                                  └──────┬───────┘               └──────────────┘
                                         │
