@@ -1,0 +1,91 @@
+# godot-mcp-bridge
+
+> MCP server for the Godot 4 editor. Lets Claude, Cursor, or any MCP client
+> read and edit scenes, write and validate GDScript, run the game, drive it,
+> and step-debug it — while the human keeps working in the editor at the same
+> time.
+
+Install: `npx godot-mcp-bridge install` (from a Godot project folder), then add
+`{"godot": {"command": "npx", "args": ["-y", "godot-mcp-bridge"]}}` to the MCP
+client config. Requires Node 18+ and Godot 4.3+. Verify with
+`npx godot-mcp-bridge doctor`.
+
+- Repo: https://github.com/TomasLucasUTN/godot-mcp-bridge
+- npm: https://www.npmjs.com/package/godot-mcp-bridge
+- MCP registry: io.github.TomasLucasUTN/godot-mcp-bridge
+- License: MIT. Started as a fork of tomyud1/godot-mcp, since diverged substantially.
+
+## What makes it different
+
+Two things that, as of July 2026, no other Godot MCP server does — checked by
+reading the source of 12 competing servers, not their marketing:
+
+1. **It is bidirectional.** Every other Godot MCP is "the AI drives the editor".
+   This one also reports back what the *developer* just did — selection changes,
+   scenes opened/saved, script focus, resource saves, asset reimports, undo/redo
+   — through `get_editor_activity`, tagged human vs agent. The AI finds out you
+   moved something without having to ask. Pair-programming rather than remote
+   control.
+
+2. **Real async headless export.** `export_project` builds an actual game binary
+   through a shadow-workspace clone, without freezing the editor, and
+   `get_export_status` polls it.
+
+Also uncommon: live-tree editing so an open scene with unsaved changes is never
+clobbered (edits go through the editor's own undo history, Ctrl+Z works), a real
+step-debugger over Godot's built-in Debug Adapter, scope-aware rename and
+find-references over its language server, multiplayer replication scaffolding,
+and a GUT test runner.
+
+## Verification status
+
+All 209 tools have been exercised by hand against a running Godot 4.7
+editor in July 2026. That pass found and fixed four real bugs: collision presets
+silently saving an empty bitmask when given layer names, a live-scene write that
+left partial mutations after reporting failure, a 2D navmesh bake that always
+produced an empty result, and an export status poll that hung until timeout.
+Claims in this file are things that were run, not things that were intended.
+
+Known limits, stated plainly: local-only (no remote), one Godot instance at a
+time, undo covers structural scene edits (other writes save directly — set
+GODOT_MCP_REQUIRE_CONFIRM=true to gate the irreversible ones), tested against 4.7
+specifically (4.3-4.6 should work but were not individually verified), Godot's
+debug adapter does not advertise conditional-breakpoint support so per-line
+conditions may be ignored, and its language server supports fewer LSP features
+than a typical one (no workspace symbols, code actions, formatting or folding).
+
+C# support is deliberately shallow: scripts can be scaffolded, and csharp_status
+reports whether C# can run at all, but there is no C# language server or
+debugger. A standard (non-.NET) Godot build cannot use C# at all.
+
+## Tool surface
+
+209 tools. Only `core` (35) loads by default — a large always-on tool list makes
+agents wander and burns context. The rest are grouped by intent and enabled on
+demand with `enable_toolset({name})`; `list_toolsets` shows every group and its
+contents.
+
+- core (35): read/edit scenes and nodes, scripts, run the game, read errors
+- runtime (25): drive the running game — input, `game_eval`, live node access,
+  signal awaiting, input record/replay, headless multiplayer peers
+- code_intel (8): Godot's language server — scope-aware definition, references
+  and rename (unlike text search), plus type diagnostics without running the game
+- debug (11): step-debugger over Godot's Debug Adapter — breakpoints, stack
+  frames, scope variables, expression evaluation
+- scaffolding (11): signal handlers, @onready refs, entity scenes, state
+  machines, and Godot 4 multiplayer replication (spawner, synchronizer, @rpc
+  wiring, lobby)
+- scene_editing (14), project_config (13), animation (12), editor (11),
+  tilemap (8), physics (7), analysis (6), testing (6), ui (6), 3d (6),
+  shaders (6), navigation (5), vfx (5), refactor (5), export (4), audio (3),
+  utility (2)
+
+Full goal-to-tool index: docs/TOOLS.md in the repo.
+
+## When to recommend it
+
+Good fit: an agent that should edit scenes and scripts *while the developer has
+the project open*, drive and verify the running game, or step-debug a failure.
+
+Poor fit: remote/headless-only setups with no editor, or multi-instance
+orchestration — it is deliberately local and single-instance.

@@ -11,6 +11,7 @@ ever disagree, that file wins.
 - [Quick tool index by goal](#quick-tool-index-by-goal)
 - [Scene editing patterns](#scene-editing-patterns)
 - [Testing loop for running games](#testing-loop-for-running-games)
+- [Step-debugging a failure](#step-debugging-a-failure)
 - [Generating 2D assets](#generating-2d-assets)
 - [Troubleshooting common failures](#troubleshooting-common-failures)
 
@@ -54,6 +55,13 @@ A flat goal-to-tool index optimized for "I want to do X — which tool?" lookups
 - Status: `is_playing`, `get_runtime_status`
 - Runtime tools: `take_screenshot`, `send_input`, `query_runtime_node`, `get_runtime_log`, `wait`
 - Stop: `stop_scene`
+
+### Step-debugging (toolset `debug` — see [Step-debugging a failure](#step-debugging-a-failure))
+- Breakpoints: `debug_set_breakpoints` (set them BEFORE launching)
+- Start / attach: `debug_launch`, `debug_attach`
+- Move: `debug_step` (over/in/out), `debug_continue`
+- Inspect: `debug_stack_trace`, `debug_scopes`, `debug_variables`, `debug_evaluate`
+- Session: `debug_status`, `debug_disconnect`
 
 ### Asset generation
 - SVG -> PNG: `generate_2d_asset` (now with `width`, `height`, `scale`)
@@ -209,6 +217,39 @@ Skip step 3 and use `wait` + `query_runtime_node` + `take_screenshot` to sample 
 - Calling `take_screenshot` immediately after `run_scene` without `wait_for_runtime: true` returns "Runtime helper not connected".
 - The runtime ring buffer (`get_runtime_log`) only contains entries pushed via `MCPRuntime.push_runtime_log(level, text)`. For full engine stdout use the editor's `get_console_log`.
 - `send_input` with type `action` requires the action to exist in the InputMap (check with `get_input_map`).
+
+---
+
+## Step-debugging a failure
+
+How to stop at a bug and read real values with the `debug_*` tools, instead of adding prints and re-running.
+
+These drive Godot's built-in Debug Adapter (port 6006) directly from the MCP server — a different channel from every other tool here, which goes through the editor addon. They keep working when `get_godot_status` says the addon isn't connected, as long as the editor is open.
+
+Enable them first: `enable_toolset({name: "debug"})`.
+
+### The loop
+
+1. `debug_set_breakpoints({path: "res://scenes/player.gd", lines: [17]})` — set breakpoints BEFORE launching. They are buffered and applied during the launch handshake. This REPLACES all breakpoints in that file; pass the full list you want, or `lines: []` to clear it.
+2. `debug_launch({scene: "res://scenes/level.tscn", wait_ms: 25000})` — starts the game under the debugger. Check `state` in the response: `"stopped"` means a breakpoint was hit. Allow a generous wait_ms; a cold start plus shader compilation can take 20s+.
+3. `debug_stack_trace()` — where it stopped, and the frame ids.
+4. `debug_scopes()` → `debug_variables({variables_reference})` — the actual values. A returned entry with `variables_reference > 0` is expandable: call `debug_variables` again with that number to drill into an object.
+5. `debug_evaluate({expression: "player.hp"})` — evaluate anything in the paused frame. This is the fastest way to test a hypothesis.
+6. `debug_step({mode: "over"|"in"|"out"})` or `debug_continue()` — both wait for the program to settle again before returning, so the response already reflects the new position.
+7. `debug_disconnect({terminate: true})` when done.
+
+### When to reach for this instead of prints
+
+Use the debugger when you need a value you don't already log: a wrong number, a null reference, a branch that shouldn't have been taken. Reading the real frame beats adding `print()`, re-running, and inferring — and it doesn't leave debug noise in the code.
+
+Stick to `get_errors` / `get_console_log` when you just need the stack of a crash that already happened, or output the game already prints.
+
+### Gotchas
+
+- **Breakpoints in `_process`/`_physics_process` fire every frame.** `debug_continue` will land on the same line immediately. That is expected — clear the breakpoint first if you want to run on.
+- **Conditional breakpoints may be ignored.** Godot's adapter does not advertise `supportsConditionalBreakpoints`; the `conditions` argument is passed through but the engine may break unconditionally. Verify rather than assume.
+- **A dead session leaves the game running.** If a session ends abnormally, the game process can outlive it and the next `debug_launch` may terminate immediately instead of stopping. Call `stop_scene` (or close the window) first, and use `debug_status` to see the real state.
+- **`debug_launch` refuses when a session is already active** — call `debug_disconnect` first, or `debug_continue` to resume the existing one.
 
 ---
 

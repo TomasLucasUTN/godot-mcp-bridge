@@ -168,6 +168,89 @@ This is a benign empty result, not a real failure. \`map_project\` will return a
 `,
   },
   {
+    uri: 'godot-mcp://guide/debugging',
+    slug: 'debugging',
+    name: 'Breakpoint debugging and code intelligence',
+    description: 'How to use the debug_* tools (Godot Debug Adapter, port 6006) and the gd_* tools (GDScript language server, port 6005).',
+    mimeType: 'text/markdown',
+    text: `# Debugging and code intelligence
+
+These two tool families do NOT go through the WebSocket bridge to the addon. They
+talk to servers the Godot editor already runs: the Debug Adapter on port 6006 and
+the GDScript language server on port 6005. Both are enabled by default.
+
+Practical consequence: they keep working when \`get_godot_status\` reports the
+addon as disconnected, and they need no plugin changes. They do need the editor
+to be open on the project.
+
+Neither family is in \`core\`. Turn them on first:
+\`enable_toolset({ name: 'debug' })\`, \`enable_toolset({ name: 'code_intel' })\`.
+
+## Breakpoint loop
+
+\`\`\`
+debug_set_breakpoints({ path: 'res://scenes/player.gd', lines: [17] })
+debug_launch({ scene: 'res://scenes/level.tscn' })
+  -> { state: 'stopped', stopped_reason: 'breakpoint' }
+debug_stack_trace()      // which frame, which line
+debug_scopes()           // returns variables_reference ids per scope
+debug_variables({ variables_reference: 1 })
+debug_evaluate({ expression: 'velocity.length()' })
+debug_step({ mode: 'over' })   // 'over' | 'into' | 'out'
+debug_continue()
+debug_disconnect()       // always, or the game stays paused
+\`\`\`
+
+\`debug_attach\` connects to a game that is already running (started by
+\`run_scene\` or by the user pressing F5) instead of launching one.
+
+\`debug_status\` reports whether a session is live and whether it is stopped —
+call it if you lose track after a \`continue\`.
+
+### Engine quirks worth knowing
+
+- **Variables arrive asynchronously.** \`scopes\` returns references immediately,
+  but the debuggee fills the values a moment later. A \`variables\` request that
+  lands too early is rejected with a bare \`"unknown"\`, which reads like a bug in
+  your own call. The client retries briefly, so this should be invisible — but if
+  you ever see \`unknown\`, retry rather than concluding the frame is empty.
+- **Conditional breakpoints may be ignored.** Godot's adapter does not advertise
+  \`supportsConditionalBreakpoints\`. The \`conditions\` argument is forwarded, but
+  the engine may break unconditionally. Check the state yourself after stopping.
+- **Breakpoints are per-file and replace the previous set.** Calling
+  \`debug_set_breakpoints\` with \`lines: []\` clears that file's breakpoints.
+
+### When to use this instead of print-debugging
+
+Reach for the debugger when the interesting value is not printed and adding a
+\`print()\` would mean another edit/run cycle — a wrong number inside a physics
+step, a null that only appears on frame 3, a branch you did not expect to run.
+For a value you already log, \`get_errors\` / \`get_runtime_log\` is cheaper.
+
+## Code intelligence
+
+The language server understands the real symbol table, so these are correct where
+text search is not:
+
+- \`gd_definition\` / \`gd_references\` — go to definition, find real usages.
+- \`gd_rename\` — a **correct** rename. Prefer it over
+  \`rename_symbol_project_wide\`, which does word-boundary text substitution and
+  will happily rename an unrelated class's identically-named member.
+- \`gd_diagnostics\` — type and parse errors **without running the game**.
+  \`validate_script\` only tells you whether a file parses.
+- \`gd_hover\`, \`gd_completion\`, \`gd_document_symbols\` — types, signatures, and
+  the symbol outline of one file.
+- \`gd_lsp_status\` — what the connected server actually advertises.
+
+Godot's server reports no support for workspace symbols, code actions,
+formatting, or folding ranges, so there are no tools pretending to offer them.
+Tools refuse cleanly rather than returning wrong results.
+
+Every \`path\` is resolved against the open project and rejected if it escapes it,
+the same rule the addon's tools follow.
+`,
+  },
+  {
     uri: 'godot-mcp://guide/tool-index',
     slug: 'tool-index',
     name: 'Quick tool index by goal',
@@ -295,6 +378,30 @@ This is a benign empty result, not a real failure. \`map_project\` will return a
 ## Export / build
 - Presets: \`list_export_presets\`, \`get_export_info\`
 - Run an export: \`export_project\`
+
+## Breakpoint debugging (toolset \`debug\`, see the debugging guide)
+- Start a session: \`debug_launch\` (new game), \`debug_attach\` (already running)
+- Breakpoints: \`debug_set_breakpoints\`
+- Control flow: \`debug_continue\`, \`debug_step\`
+- Inspect: \`debug_stack_trace\`, \`debug_scopes\`, \`debug_variables\`, \`debug_evaluate\`
+- Session state / teardown: \`debug_status\`, \`debug_disconnect\`
+
+## Code intelligence (toolset \`code_intel\`, see the debugging guide)
+- Navigate: \`gd_definition\`, \`gd_references\`, \`gd_document_symbols\`
+- **Correct** rename (prefer over \`rename_symbol_project_wide\`): \`gd_rename\`
+- Type errors without running the game: \`gd_diagnostics\`
+- Types and signatures: \`gd_hover\`, \`gd_completion\`
+- What the server supports: \`gd_lsp_status\`
+
+## Multiplayer
+- Replication nodes: \`mp_add_spawner\`, \`mp_add_synchronizer\`
+- Correctly-annotated RPC method: \`mp_wire_rpc\`
+- ENet host/join plumbing: \`mp_scaffold_lobby\`
+- Test it: \`spawn_headless_peers\`, \`call_rpc_runtime\`
+
+## C#
+- Can C# work in this editor and project? \`csharp_status\` (check BEFORE writing .cs)
+- Create a script: \`create_csharp_script\`
 `,
   },
 ];

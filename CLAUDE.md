@@ -1,7 +1,7 @@
 # godot-mcp-bridge — project guide
 
 Godot 4 MCP server: a GDScript editor addon (`addons/godot_mcp/`) talking over a
-WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 185 tools.
+WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 209 tools.
 Architecture is the converged standard for the space (Node stdio ↔ WS ↔ editor plugin).
 
 ## Two rules that keep the codebase healthy (apply these first)
@@ -28,11 +28,21 @@ edits survive. Two supported patterns:
 
 ## Adding or changing a tool
 
-A tool is wired in three places, and it stays dark until all three exist:
+Most tools run inside Godot and are wired in three places — the tool stays dark
+until all three exist:
 1. GDScript handler in `addons/godot_mcp/tools/<area>_tools.gd` (editor) or
    `addons/godot_mcp/runtime/mcp_runtime.gd` (in-game runtime tools).
 2. Dispatch entry in `addons/godot_mcp/tool_executor.gd` (`&"name": [_x_tools, &"fn"]`).
 3. JSON schema + `annotations` in `mcp-server/src/tools/<area>-tools.ts`.
+
+**Server-side tools are the exception.** `debug_*` (DAP, port 6006) and `gd_*`
+(LSP, port 6005) talk to listeners the editor owns, not to the addon, so they have
+no GDScript handler: schema in `tools/{debug,lsp}-tools.ts`, logic in
+`{debug,lsp}-session.ts`, dispatch in `index.ts` *before* the `isConnected()` guard
+(both are reachable even when the addon isn't). Both share the `Content-Length`
+transport in `framing.ts`. `isDebugTool()`/`isLspTool()` are the single source of
+truth — the registry test uses them to exempt those tools, so a new one that skips
+them fails the build.
 
 **Toolsets are by intent, not by file.** `mcp-server/src/tools/index.ts` builds them:
 `CORE_TOOL_NAMES` (35 tools, the only set on by default) and `SEMANTIC_GROUPS`

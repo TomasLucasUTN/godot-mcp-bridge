@@ -4,7 +4,7 @@
 
 Build games faster with Claude, Cursor, or any MCP-compatible AI — no copy-pasting, no context switching. The AI reads, writes, and manipulates your scenes, scripts, nodes, and project settings directly inside the running Godot editor.
 
-> Godot 4.3+ · 185 tools (35 loaded by default) · Live-tree editing with undo · Interactive project visualizer · MIT license
+> Godot 4.3+ · 209 tools (35 loaded by default) · Live-tree editing with undo · Interactive project visualizer · MIT license
 
 See the [project README](https://github.com/TomasLucasUTN/godot-mcp-bridge#readme) for the full tool breakdown, architecture, and setup guide. This file is the condensed version shown on npm.
 
@@ -46,7 +46,7 @@ Restart your AI client, then restart your Godot project. Check the **top-right c
 
 ## What Can It Do?
 
-185 tools grouped by intent; only `core` (35 tools) loads by default so the agent stays focused. `enable_toolset({ name: "..." })` pulls in more — runtime control, scene editing, project config, animation, physics, analysis, scaffolding, testing, and more. Edits to a scene that's open in the editor go through the **live tree and Godot's undo system** instead of silently overwriting the `.tscn` file on disk.
+209 tools grouped by intent; only `core` (35 tools) loads by default so the agent stays focused. `enable_toolset({ name: "..." })` pulls in more — runtime control, scene editing, project config, animation, physics, analysis, scaffolding, testing, and more. Edits to a scene that's open in the editor go through the **live tree and Godot's undo system** instead of silently overwriting the `.tscn` file on disk.
 
 ### Interactive Visualizer
 
