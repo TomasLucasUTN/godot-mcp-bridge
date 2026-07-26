@@ -1568,8 +1568,16 @@ func close_scene_tab(args: Dictionary) -> Dictionary:
 	var ei := _editor_plugin.get_editor_interface()
 	if scene_path not in ei.get_open_scenes():
 		return {&"ok": false, &"error": "Scene is not open in the editor: " + scene_path}
-	if scene_path in ei.get_unsaved_scenes() and not force:
-		return {&"ok": false, &"error": "Scene has unsaved changes: %s. Save it first, or pass force=true to discard changes." % scene_path}
+	# get_unsaved_scenes() is 4.6+. On 4.5 — the version this addon advertises as
+	# its minimum — calling it aborts the handler mid-way, and the tool returns
+	# nothing at all. Without it there is no way to ask which scenes are dirty,
+	# so the safe reading is "assume it might be": require force explicitly
+	# rather than closing a tab that could be holding unsaved work.
+	if ei.has_method(&"get_unsaved_scenes"):
+		if scene_path in ei.get_unsaved_scenes() and not force:
+			return {&"ok": false, &"error": "Scene has unsaved changes: %s. Save it first, or pass force=true to discard changes." % scene_path}
+	elif not force:
+		return {&"ok": false, &"error": "This Godot version (%s) cannot report which scenes have unsaved changes, so closing a tab might discard the developer's work. Save the scene first, or pass force=true to close it anyway." % Engine.get_version_info().get("string", "unknown")}
 
 	var edited_scene := ei.get_edited_scene_root()
 	if not edited_scene or edited_scene.scene_file_path != scene_path:
