@@ -7,6 +7,9 @@ on:
     branches: [main]
 
 jobs:
+  # Job id stays "test": it is the required status check on main, and renaming
+  # it would leave branch protection waiting forever for a check that no longer
+  # reports. The GDScript job below is additive.
   test:
     runs-on: ubuntu-latest
     defaults:
@@ -22,3 +25,48 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  gdscript:
+    # The Node suite exercises the bridge and the tool registry, but every
+    # GDScript handler — the half that actually mutates scenes — only runs
+    # inside Godot. This job downloads a real headless Godot and runs the
+    # on-disk tool tests against it, so a broken handler fails CI instead of
+    # waiting to be found by hand.
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Godot ${{ env.GODOT_VERSION }} (headless)
+        run: |
+          set -euo pipefail
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL -o godot.zip "$url"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          chmod +x godot
+          ./godot --version
+
+      - name: Sync addon into the test fixture
+        # The fixture keeps its own copy of the addon (it is what the tests
+        # load); mirror the repo's addon over it so CI tests the current code.
+        run: |
+          set -euo pipefail
+          fixture="mcp-server/src/tests/fixtures/e2e-project"
+          rm -rf "$fixture/addons/godot_mcp"
+          mkdir -p "$fixture/addons"
+          cp -r addons/godot_mcp "$fixture/addons/godot_mcp"
+          find "$fixture/addons" -name '*.uid' -delete
+
+      - name: Build the class cache
+        # `extends SceneToolBase` and the other class_name lookups only resolve
+        # once Godot has imported the project, so this pass is required before
+        # running anything with -s.
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project --import
+        # A cold import prints resource warnings and can report a nonzero exit
+        # even when it succeeded; the test run below is the real gate.
+        continue-on-error: true
+
+      - name: Run GDScript handler tests
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/run_tests.gd
