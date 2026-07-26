@@ -87,8 +87,11 @@ func add_mesh_instance(args: Dictionary) -> Dictionary:
 	mesh_instance.name = node_name
 	mesh_instance.mesh = _build_primitive_mesh(mesh_type, size)
 
-	parent.add_child(mesh_instance, true)
-	mesh_instance.owner = root
+	# Opened after the validations above so an early return can't leave an
+	# action open on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % mesh_instance.name, root)
+	_edit_add_child(ctx, parent, mesh_instance, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -146,8 +149,11 @@ func setup_lighting(args: Dictionary) -> Dictionary:
 
 	light.name = node_name if not node_name.strip_edges().is_empty() else node_type
 
-	parent.add_child(light, true)
-	light.owner = root
+	# Opened after the validations above so an early return can't leave an
+	# action open on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % light.name, root)
+	_edit_add_child(ctx, parent, light, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -202,23 +208,25 @@ func set_material_3d(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "'emission_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 
+	var ctx := _begin_edit(is_live, "MCP: set material on %s" % node_path, root)
 	var material: StandardMaterial3D = target.get(&"material_override") as StandardMaterial3D
 	if not material:
 		material = StandardMaterial3D.new()
-		target.set(&"material_override", material)
+		_edit_set(ctx, target, &"material_override", material)
 
 	if parsed_albedo != null:
-		material.albedo_color = parsed_albedo
+		_edit_set(ctx, material, &"albedo_color", parsed_albedo)
 	if metallic != null:
-		material.metallic = float(metallic)
+		_edit_set(ctx, material, &"metallic", float(metallic))
 	if roughness != null:
-		material.roughness = float(roughness)
+		_edit_set(ctx, material, &"roughness", float(roughness))
 	if parsed_emission != null:
-		material.emission_enabled = true
-		material.emission = Color(parsed_emission.r, parsed_emission.g, parsed_emission.b)
+		_edit_set(ctx, material, &"emission_enabled", true)
+		_edit_set(ctx, material, &"emission", Color(parsed_emission.r, parsed_emission.g, parsed_emission.b))
 	if emission_energy != null:
-		material.emission_enabled = true
-		material.emission_energy_multiplier = float(emission_energy)
+		_edit_set(ctx, material, &"emission_enabled", true)
+		_edit_set(ctx, material, &"emission_energy_multiplier", float(emission_energy))
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -269,40 +277,46 @@ func setup_environment(args: Dictionary) -> Dictionary:
 			world_env = child
 			break
 
+	# Every colour argument is parsed above, before this point: creating the node
+	# and then failing validation used to leave a stray WorldEnvironment in the
+	# scene while reporting failure, because a live scene has nothing to roll
+	# back to.
+	var ctx := _begin_edit(is_live, "MCP: set up environment", root)
+
 	var created := false
 	if not world_env:
 		world_env = WorldEnvironment.new()
 		world_env.name = "WorldEnvironment"
-		root.add_child(world_env, true)
-		world_env.owner = root
+		_edit_add_child(ctx, root, world_env, root)
 		created = true
 
 	var environment: Environment = world_env.environment
 	if not environment:
 		environment = Environment.new()
-		world_env.environment = environment
+		_edit_set(ctx, world_env, &"environment", environment)
 
 	var sky_material: ProceduralSkyMaterial = null
 	if environment.sky and environment.sky.sky_material is ProceduralSkyMaterial:
 		sky_material = environment.sky.sky_material
 	if sky_top_color != null or sky_horizon_color != null:
-		environment.background_mode = Environment.BG_SKY
+		_edit_set(ctx, environment, &"background_mode", Environment.BG_SKY)
 		if not environment.sky:
-			environment.sky = Sky.new()
+			_edit_set(ctx, environment, &"sky", Sky.new())
 		if not sky_material:
 			sky_material = ProceduralSkyMaterial.new()
-			environment.sky.sky_material = sky_material
+			_edit_set(ctx, environment.sky, &"sky_material", sky_material)
 		if parsed_sky_top != null:
-			sky_material.sky_top_color = parsed_sky_top
+			_edit_set(ctx, sky_material, &"sky_top_color", parsed_sky_top)
 		if parsed_sky_horizon != null:
-			sky_material.sky_horizon_color = parsed_sky_horizon
+			_edit_set(ctx, sky_material, &"sky_horizon_color", parsed_sky_horizon)
 
 	if fog_enabled != null:
-		environment.fog_enabled = bool(fog_enabled)
+		_edit_set(ctx, environment, &"fog_enabled", bool(fog_enabled))
 	if glow_enabled != null:
-		environment.glow_enabled = bool(glow_enabled)
+		_edit_set(ctx, environment, &"glow_enabled", bool(glow_enabled))
 	if ssao_enabled != null:
-		environment.ssao_enabled = bool(ssao_enabled)
+		_edit_set(ctx, environment, &"ssao_enabled", bool(ssao_enabled))
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -349,8 +363,11 @@ func setup_camera_3d(args: Dictionary) -> Dictionary:
 	if far != null:
 		camera.far = float(far)
 
-	parent.add_child(camera, true)
-	camera.owner = root
+	# Opened after the validations above so an early return can't leave an
+	# action open on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % camera.name, root)
+	_edit_add_child(ctx, parent, camera, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -404,8 +421,11 @@ func add_gridmap(args: Dictionary) -> Dictionary:
 			return {&"ok": false, &"error": "'cell_size' must be a {x,y,z} Vector3"}
 		gridmap.cell_size = parsed
 
-	parent.add_child(gridmap, true)
-	gridmap.owner = root
+	# Opened after the validations above so an early return can't leave an
+	# action open on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % gridmap.name, root)
+	_edit_add_child(ctx, parent, gridmap, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

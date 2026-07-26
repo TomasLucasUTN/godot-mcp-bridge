@@ -64,8 +64,11 @@ func add_audio_player(args: Dictionary) -> Dictionary:
 		player.set(&"bus", bus)
 	player.set(&"autoplay", autoplay)
 
-	parent.add_child(player, true)
-	player.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % player.name, root)
+	_edit_add_child(ctx, parent, player, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

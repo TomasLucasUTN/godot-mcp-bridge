@@ -58,8 +58,13 @@ func add_raycast(args: Dictionary) -> Dictionary:
 				return {&"ok": false, &"error": "'target_position' must be a {x,y,z} Vector3 for RayCast3D"}
 			raycast.set(&"target_position", parsed)
 
-	parent.add_child(raycast, true)
-	raycast.owner = root
+	# Opened only here, after every validation that can bail out: an action left
+	# open by an early return would sit unclosed on the editor's undo stack.
+	# Configuring the node above needs no undo entries — it isn't in the tree
+	# yet, and undoing the attach takes the whole node with it.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % node_name, root)
+	_edit_add_child(ctx, parent, raycast, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -146,8 +151,9 @@ func setup_collision(args: Dictionary) -> Dictionary:
 	collision_node.name = node_name
 	collision_node.set(&"shape", shape3d if is_3d else shape)
 
-	target.add_child(collision_node, true)
-	collision_node.owner = root
+	var ctx := _begin_edit(is_live, "MCP: set up collision on %s" % target.name, root)
+	_edit_add_child(ctx, target, collision_node, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -277,10 +283,15 @@ func set_physics_layers(args: Dictionary) -> Dictionary:
 		else:
 			mask_value = int(collision_mask)
 
+	# Both values are resolved above before anything is written: a bad mask name
+	# must not leave the layer applied, since on a live scene there is nothing to
+	# roll back to.
+	var ctx := _begin_edit(is_live, "MCP: set physics layers on %s" % node_path, root)
 	if has_layer:
-		target.set(&"collision_layer", layer_value)
+		_edit_set(ctx, target, &"collision_layer", layer_value)
 	if has_mask:
-		target.set(&"collision_mask", mask_value)
+		_edit_set(ctx, target, &"collision_mask", mask_value)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

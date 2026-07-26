@@ -29,6 +29,30 @@ func _get_tilemap_layer(root: Node, node_path: String) -> Array:
 		return [null, "Node '%s' is %s, expected TileMapLayer (Godot 4.3+)" % [node_path, target.get_class()]]
 	return [target, ""]
 
+# ---------------------------------------------------------------------------
+# Undo for cell edits
+# ---------------------------------------------------------------------------
+# A TileMapLayer keeps every cell in one `tile_map_data` blob, so a single
+# before/after pair covers one painted cell or a hundred-thousand-cell fill at
+# the same cost. Recording a do/undo per coordinate would make a large fill_rect
+# allocate two entries per cell and bloat the editor's undo history for nothing.
+
+func _begin_cells(is_live: bool, action_name: String, layer: TileMapLayer) -> Dictionary:
+	# The layer itself is the history context — it belongs to the edited scene,
+	# which is all EditorUndoRedoManager needs to file the entry correctly.
+	var ctx := _begin_edit(is_live, action_name, layer)
+	ctx[&"layer"] = layer
+	# PackedByteArray assignment copies, so this is a real snapshot.
+	ctx[&"before"] = layer.tile_map_data
+	return ctx
+
+func _commit_cells(ctx: Dictionary) -> void:
+	var layer: TileMapLayer = ctx.get(&"layer")
+	if layer and is_instance_valid(layer):
+		_edit_record(ctx, layer, &"set", [&"tile_map_data", layer.tile_map_data],
+			&"set", [&"tile_map_data", ctx.get(&"before")])
+	_edit_commit(ctx)
+
 # =============================================================================
 # tilemap_set_cell
 # =============================================================================
@@ -55,7 +79,9 @@ func tilemap_set_cell(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": layer_result[1]}
 	var layer: TileMapLayer = layer_result[0]
 
+	var ctx := _begin_cells(is_live, "MCP: set cell %s" % coords, layer)
 	layer.set_cell(coords, source_id, atlas_coords, alternative_tile)
+	_commit_cells(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -97,11 +123,13 @@ func tilemap_fill_rect(args: Dictionary) -> Dictionary:
 	var min_y := mini(from_coords.y, to_coords.y)
 	var max_y := maxi(from_coords.y, to_coords.y)
 
+	var ctx := _begin_cells(is_live, "MCP: fill tiles", layer)
 	var cell_count := 0
 	for x in range(min_x, max_x + 1):
 		for y in range(min_y, max_y + 1):
 			layer.set_cell(Vector2i(x, y), source_id, atlas_coords, alternative_tile)
 			cell_count += 1
+	_commit_cells(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -170,6 +198,7 @@ func tilemap_clear(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": layer_result[1]}
 	var layer: TileMapLayer = layer_result[0]
 
+	var ctx := _begin_cells(is_live, "MCP: clear tiles", layer)
 	var cleared := 0
 	if has_region:
 		var from_coords: Vector2i = _to_vector2i(args.get(&"from_coords"))
@@ -187,6 +216,7 @@ func tilemap_clear(args: Dictionary) -> Dictionary:
 	else:
 		cleared = layer.get_used_cells().size()
 		layer.clear()
+	_commit_cells(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -330,10 +360,12 @@ func tilemap_set_terrain_cells(args: Dictionary) -> Dictionary:
 	for raw in raw_cells:
 		cells.append(_to_vector2i(raw))
 
+	var ctx := _begin_cells(is_live, "MCP: terrain %s" % mode, layer)
 	if mode == "connect":
 		layer.set_cells_terrain_connect(cells, terrain_set, terrain, ignore_empty_terrains)
 	else:
 		layer.set_cells_terrain_path(cells, terrain_set, terrain, ignore_empty_terrains)
+	_commit_cells(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -417,6 +449,7 @@ func tilemap_autotile(args: Dictionary) -> Dictionary:
 
 	var painted := 0
 	var unmapped: Array = []
+	var ctx := _begin_cells(is_live, "MCP: autotile", layer)
 	for cell in targets:
 		var mask := 0
 		for i in range(offsets.size()):
@@ -428,6 +461,7 @@ func tilemap_autotile(args: Dictionary) -> Dictionary:
 			painted += 1
 		elif unmapped.size() < 20:
 			unmapped.append({&"cell": {&"x": cell.x, &"y": cell.y}, &"mask": mask})
+	_commit_cells(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

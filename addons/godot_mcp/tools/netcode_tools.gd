@@ -65,8 +65,11 @@ func mp_add_spawner(args: Dictionary) -> Dictionary:
 	for p in validated:
 		spawner.add_spawnable_scene(p)
 
-	parent.add_child(spawner, true)
-	spawner.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % spawner.name, root)
+	_edit_add_child(ctx, parent, spawner, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -148,8 +151,11 @@ func mp_add_synchronizer(args: Dictionary) -> Dictionary:
 	if replication_interval > 0.0:
 		sync.replication_interval = replication_interval
 
-	parent.add_child(sync, true)
-	sync.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % sync.name, root)
+	_edit_add_child(ctx, parent, sync, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

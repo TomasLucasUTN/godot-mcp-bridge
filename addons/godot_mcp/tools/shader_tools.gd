@@ -8,25 +8,36 @@ class_name ShaderTools
 
 ## Locate the material slot to use for a node, mirroring set_material_3d's
 ## CanvasItem (2D) vs MeshInstance3D/GeometryInstance3D (3D) decision.
-## Returns {&"ok": true, &"material": Material_or_null, &"setter": Callable}
+## Returns {&"ok": true, &"material": Material_or_null, &"setter": Callable,
+##          &"prop": StringName_or_empty, &"surface": int}
 ## or {&"ok": false, &"error": String}.
+##
+## `prop`/`surface` describe the same write as `setter` in a form the undo
+## helpers can record: a plain property, or the indexed surface-override method.
+## `setter` stays for callers that only need the effect.
 func _resolve_material_slot(target: Node, surface_index: int) -> Dictionary:
 	if target is CanvasItem:
 		return {
 			&"ok": true,
 			&"material": target.get(&"material"),
+			&"prop": &"material",
+			&"surface": -1,
 			&"setter": func(mat: Material): target.set(&"material", mat)
 		}
 	if target is MeshInstance3D and surface_index >= 0:
 		return {
 			&"ok": true,
 			&"material": target.get_surface_override_material(surface_index),
+			&"prop": &"",
+			&"surface": surface_index,
 			&"setter": func(mat: Material): target.set_surface_override_material(surface_index, mat)
 		}
 	if target is GeometryInstance3D:
 		return {
 			&"ok": true,
 			&"material": target.get(&"material_override"),
+			&"prop": &"material_override",
+			&"surface": -1,
 			&"setter": func(mat: Material): target.set(&"material_override", mat)
 		}
 	return {&"ok": false, &"error": "Node '%s' (%s) does not support materials" % [target.name, target.get_class()]}
@@ -164,7 +175,17 @@ func assign_shader_material(args: Dictionary) -> Dictionary:
 
 	var mat := ShaderMaterial.new()
 	mat.set_shader(shader)
-	slot[&"setter"].call(mat)
+
+	var ctx := _begin_edit(is_live, "MCP: assign shader to %s" % node_path, root)
+	var prev_material = slot[&"material"]
+	var surface: int = int(slot[&"surface"])
+	if surface >= 0:
+		target.set_surface_override_material(surface, mat)
+		_edit_record(ctx, target, &"set_surface_override_material", [surface, mat],
+			&"set_surface_override_material", [surface, prev_material])
+	else:
+		_edit_set(ctx, target, StringName(slot[&"prop"]), mat)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -209,7 +230,12 @@ func set_shader_param(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Node '%s' has no ShaderMaterial with a shader assigned" % node_path}
 
 	var parsed = VariantCodec.parse_value(value)
+	var prev_value = material.get_shader_parameter(StringName(param_name))
+	var ctx := _begin_edit(is_live, "MCP: set shader param '%s'" % param_name, root)
 	material.set_shader_parameter(StringName(param_name), parsed)
+	_edit_record(ctx, material, &"set_shader_parameter", [StringName(param_name), parsed],
+		&"set_shader_parameter", [StringName(param_name), prev_value])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

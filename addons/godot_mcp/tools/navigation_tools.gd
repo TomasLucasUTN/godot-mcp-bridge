@@ -58,8 +58,11 @@ func setup_navigation_region(args: Dictionary) -> Dictionary:
 	else:
 		region.set(&"navigation_mesh", NavigationMesh.new())
 
-	parent.add_child(region, true)
-	region.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % region.name, root)
+	_edit_add_child(ctx, parent, region, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -110,6 +113,14 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a NavigationRegion2D/3D" % [node_path, target.get_class()]}
 
+	# A bake rewrites the nav resource in place, so there is no per-property
+	# inverse to record. Deep-copy the resource first and let undo swap the whole
+	# thing back — the outline and the baked polygons go together anyway.
+	var nav_prop: StringName = &"navigation_polygon" if is_2d else &"navigation_mesh"
+	var pre_bake: Resource = target.get(nav_prop)
+	if pre_bake:
+		pre_bake = pre_bake.duplicate(true)
+
 	if is_2d:
 		if not target.get(&"navigation_polygon"):
 			target.set(&"navigation_polygon", NavigationPolygon.new())
@@ -154,6 +165,13 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 		bounds = target.call(&"get_bounds")
 	else:
 		bounds = _navigation_polygon_bounds(target.get(&"navigation_polygon"))
+
+	# Registered only here: every failure path above bails out before this, and
+	# an action opened earlier would have been left hanging on the undo stack.
+	var ctx := _begin_edit(is_live, "MCP: bake navigation for %s" % node_path, root)
+	_edit_record(ctx, target, &"set", [nav_prop, target.get(nav_prop)],
+		&"set", [nav_prop, pre_bake])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -212,8 +230,11 @@ func setup_navigation_agent(args: Dictionary) -> Dictionary:
 	if max_speed != null:
 		agent.set(&"max_speed", float(max_speed))
 
-	parent.add_child(agent, true)
-	agent.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % agent.name, root)
+	_edit_add_child(ctx, parent, agent, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -252,7 +273,9 @@ func set_navigation_layers(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'navigation_layers' property" % [node_path, target.get_class()]}
 
 	var mask: int = _layers_to_mask(layers) if layers is Array else int(layers)
-	target.set(&"navigation_layers", mask)
+	var ctx := _begin_edit(is_live, "MCP: set navigation layers on %s" % node_path, root)
+	_edit_set(ctx, target, &"navigation_layers", mask)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

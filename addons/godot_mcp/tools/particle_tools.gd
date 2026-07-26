@@ -61,8 +61,11 @@ func create_particles(args: Dictionary) -> Dictionary:
 	particles.set(&"lifetime", lifetime)
 	particles.set(&"one_shot", one_shot)
 
-	parent.add_child(particles, true)
-	particles.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % particles.name, root)
+	_edit_add_child(ctx, parent, particles, root)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -111,21 +114,23 @@ func set_particle_material(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "'gravity' must be a {x,y,z} Vector3"}
 
+	var ctx := _begin_edit(is_live, "MCP: set particle material on %s" % node_path, root)
 	var material: ParticleProcessMaterial = target.get(&"process_material") as ParticleProcessMaterial
 	if not material:
 		material = ParticleProcessMaterial.new()
-		target.set(&"process_material", material)
+		_edit_set(ctx, target, &"process_material", material)
 
 	if direction != null:
-		material.direction = _parse_direction(direction)
+		_edit_set(ctx, material, &"direction", _parse_direction(direction))
 	if spread != null:
-		material.spread = float(spread)
+		_edit_set(ctx, material, &"spread", float(spread))
 	if initial_velocity_min != null:
-		material.initial_velocity_min = float(initial_velocity_min)
+		_edit_set(ctx, material, &"initial_velocity_min", float(initial_velocity_min))
 	if initial_velocity_max != null:
-		material.initial_velocity_max = float(initial_velocity_max)
+		_edit_set(ctx, material, &"initial_velocity_max", float(initial_velocity_max))
 	if parsed_gravity != null:
-		material.gravity = parsed_gravity
+		_edit_set(ctx, material, &"gravity", parsed_gravity)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -180,11 +185,13 @@ func set_particle_color_gradient(args: Dictionary) -> Dictionary:
 	var gradient_texture := GradientTexture1D.new()
 	gradient_texture.gradient = gradient
 
+	var ctx := _begin_edit(is_live, "MCP: set particle gradient on %s" % node_path, root)
 	var material: ParticleProcessMaterial = target.get(&"process_material") as ParticleProcessMaterial
 	if not material:
 		material = ParticleProcessMaterial.new()
-		target.set(&"process_material", material)
-	material.color_ramp = gradient_texture
+		_edit_set(ctx, target, &"process_material", material)
+	_edit_set(ctx, material, &"color_ramp", gradient_texture)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -221,12 +228,14 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}
 
+	# Preset name is validated above, so opening the batch here is safe.
+	var ctx := _begin_edit(is_live, "MCP: apply '%s' particle preset" % preset, root)
 	var material := ParticleProcessMaterial.new()
 
 	match preset:
 		"fire":
-			target.set(&"amount", 32)
-			target.set(&"lifetime", 0.8)
+			_edit_set(ctx, target, &"amount", 32)
+			_edit_set(ctx, target, &"lifetime", 0.8)
 			material.direction = Vector3(0, -1, 0)
 			material.spread = 20.0
 			material.initial_velocity_min = 40.0
@@ -236,8 +245,8 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 			material.scale_max = 1.2
 			material.color = Color(1.0, 0.5, 0.1, 1.0)
 		"smoke":
-			target.set(&"amount", 16)
-			target.set(&"lifetime", 2.0)
+			_edit_set(ctx, target, &"amount", 16)
+			_edit_set(ctx, target, &"lifetime", 2.0)
 			material.direction = Vector3(0, -1, 0)
 			material.spread = 15.0
 			material.initial_velocity_min = 10.0
@@ -247,8 +256,8 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 			material.scale_max = 2.5
 			material.color = Color(0.5, 0.5, 0.5, 0.6)
 		"rain":
-			target.set(&"amount", 64)
-			target.set(&"lifetime", 1.5)
+			_edit_set(ctx, target, &"amount", 64)
+			_edit_set(ctx, target, &"lifetime", 1.5)
 			material.direction = Vector3(0, 1, 0)
 			material.spread = 2.0
 			material.initial_velocity_min = 200.0
@@ -258,8 +267,8 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 			material.scale_max = 0.5
 			material.color = Color(0.6, 0.7, 1.0, 0.7)
 		"snow":
-			target.set(&"amount", 48)
-			target.set(&"lifetime", 3.0)
+			_edit_set(ctx, target, &"amount", 48)
+			_edit_set(ctx, target, &"lifetime", 3.0)
 			material.direction = Vector3(0, 1, 0)
 			material.spread = 30.0
 			material.initial_velocity_min = 20.0
@@ -269,8 +278,8 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 			material.scale_max = 0.8
 			material.color = Color(1.0, 1.0, 1.0, 0.9)
 		"sparks":
-			target.set(&"amount", 24)
-			target.set(&"lifetime", 0.5)
+			_edit_set(ctx, target, &"amount", 24)
+			_edit_set(ctx, target, &"lifetime", 0.5)
 			material.direction = Vector3(0, -1, 0)
 			material.spread = 180.0
 			material.initial_velocity_min = 100.0
@@ -280,7 +289,8 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 			material.scale_max = 0.3
 			material.color = Color(1.0, 0.9, 0.3, 1.0)
 
-	target.set(&"process_material", material)
+	_edit_set(ctx, target, &"process_material", material)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

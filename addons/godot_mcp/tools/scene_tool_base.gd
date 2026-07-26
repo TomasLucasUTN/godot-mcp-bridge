@@ -160,3 +160,148 @@ func _finish_scene_edit(root: Node, scene_path: String, is_live: bool) -> Dictio
 func _discard_scene(root: Node, is_live: bool) -> void:
 	if not is_live and is_instance_valid(root):
 		root.queue_free()
+
+# ---------------------------------------------------------------------------
+# Undoable live edits
+# ---------------------------------------------------------------------------
+# Only scene_tools.gd's structural ops used to register undo entries. Every other
+# tool mutated the editor's live tree directly, so Ctrl+Z did nothing for them:
+# the change was in the scene and the only way back was closing without saving.
+#
+# These helpers put an edit on Godot's own undo stack without changing how tools
+# are written. The trick is that the write is applied IMMEDIATELY and the action
+# is committed with `commit_action(false)` ("don't execute the do, it already
+# happened"). That matters because tools routinely read a value back, or compute
+# the next step from the mutated node — deferring the write until commit would
+# silently break all of that.
+#
+# Usage, mirroring the plain code it replaces:
+#
+#     var ctx := _begin_edit(is_live, "MCP: set up lighting")
+#     _edit_add_child(ctx, parent, light, root)
+#     _edit_set(ctx, light, &"energy", 1.5)
+#     _edit_commit(ctx)
+#
+# On the disk path (is_live false) every helper degrades to the direct call, so
+# one code path covers both.
+
+## Open an edit batch. Everything until _edit_commit lands as one undo entry.
+##
+## `context` MUST be a node belonging to the edited scene (the root, or the node
+## being changed). It is not optional decoration: EditorUndoRedoManager keeps a
+## separate undo history per scene, and with no explicit context it infers one
+## from the FIRST object registered. Register a Resource first — a material, an
+## AnimationLibrary — and the entry can land in a history that Ctrl+Z on the
+## scene never reaches, so the edit looks undoable and isn't. That exact bug
+## shipped in add_node, whose first registered object was the tool node itself.
+func _begin_edit(is_live: bool, action_name: String, context: Object) -> Dictionary:
+	var ur: EditorUndoRedoManager = _get_undo_redo() if is_live else null
+	if ur:
+		ur.create_action(action_name, UndoRedo.MERGE_DISABLE, context)
+	return {&"ur": ur, &"dirty": false}
+
+## Set a property now, and record how to put it back.
+func _edit_set(ctx: Dictionary, obj: Object, prop: StringName, value: Variant) -> void:
+	if not is_instance_valid(obj):
+		return
+	var old: Variant = obj.get(prop)
+	obj.set(prop, value)
+	var ur: EditorUndoRedoManager = ctx.get(&"ur")
+	if ur:
+		ur.add_do_property(obj, prop, value)
+		ur.add_undo_property(obj, prop, old)
+		ctx[&"dirty"] = true
+
+## Apply a {name: value} batch, parsing each value the way tool args arrive.
+func _edit_set_many(ctx: Dictionary, obj: Object, properties: Dictionary) -> void:
+	for prop_name: String in properties:
+		_edit_set(ctx, obj, StringName(prop_name), _parse_value(properties[prop_name]))
+
+## Parent a node now, and record how to detach it.
+##
+## `owner` is set as part of the same action on purpose: a redo that re-adds the
+## node without restoring its owner produces a node the scene dock shows but that
+## never gets written to the .tscn — a corrupted-looking scene with no error.
+func _edit_add_child(ctx: Dictionary, parent: Node, node: Node, root: Node) -> void:
+	parent.add_child(node, true)
+	node.owner = root
+	var ur: EditorUndoRedoManager = ctx.get(&"ur")
+	if ur:
+		ur.add_do_method(parent, &"add_child", node, true)
+		ur.add_do_property(node, &"owner", root)
+		# Without this the node is freed once the action is undone, and redo
+		# resurrects a dangling reference.
+		ur.add_do_reference(node)
+		ur.add_undo_method(parent, &"remove_child", node)
+		ctx[&"dirty"] = true
+
+## Record an edit whose inverse is another method call, for changes that aren't
+## property writes: adding an animation track, inserting a keyframe, painting a
+## tilemap cell. The call itself has already been made — this only teaches the
+## undo stack how to replay and reverse it.
+##
+## Example, after `var idx := anim.add_track(type)`:
+##     _edit_record(ctx, anim, &"add_track", [type], &"remove_track", [idx])
+func _edit_record(ctx: Dictionary, obj: Object, do_method: StringName, do_args: Array,
+		undo_method: StringName, undo_args: Array) -> void:
+	var ur: EditorUndoRedoManager = ctx.get(&"ur")
+	if ur == null or not is_instance_valid(obj):
+		return
+	# callv because add_do_method is variadic and the argument list is dynamic.
+	ur.callv(&"add_do_method", [obj, do_method] + do_args)
+	ur.callv(&"add_undo_method", [obj, undo_method] + undo_args)
+	ctx[&"dirty"] = true
+
+## Abandon an edit that has ALREADY written to the scene, putting it back.
+##
+## This is the structural answer to a bug shape this codebase has produced six
+## times: a tool applies some properties, validates a later argument, fails, and
+## calls `_discard_scene` — which is a no-op on an open scene, because the target
+## IS the editor's live node rather than a copy. The tool then reports total
+## failure with half its writes still applied.
+##
+## Validating everything before the first write avoids it and is still the better
+## habit. But it isn't always possible (a value may only be checkable after an
+## earlier one is set), and "remember the rule" is exactly what failed six times.
+## With undo recorded for every live edit, the batch can simply be committed and
+## immediately undone, which reverts it through the same machinery Ctrl+Z uses.
+##
+## Use this instead of `_discard_scene` on any error path reached after the first
+## `_edit_*` call. Before the first write, `_discard_scene` is still correct and
+## cheaper.
+func _abort_edit(ctx: Dictionary, root: Node, is_live: bool) -> void:
+	if not is_live:
+		_edit_commit(ctx)
+		_discard_scene(root, is_live)
+		return
+
+	# Nothing was written, so there is nothing to take back. Undoing anyway would
+	# pop the PREVIOUS entry off the history and destroy unrelated work — caught
+	# by the live harness, where an aborted tool silently deleted a node an
+	# earlier test had added.
+	var wrote_something := bool(ctx.get(&"dirty", false))
+	_edit_commit(ctx)
+	if not wrote_something:
+		return
+
+	var manager: EditorUndoRedoManager = ctx.get(&"ur")
+	if manager == null or not is_instance_valid(root):
+		return
+	var ur: UndoRedo = manager.get_history_undo_redo(manager.get_object_history_id(root))
+	if ur and ur.has_undo():
+		ur.undo()
+
+## Close the batch. `false` = the writes already happened; don't replay them.
+func _edit_commit(ctx: Dictionary) -> void:
+	var ur: EditorUndoRedoManager = ctx.get(&"ur")
+	if ur:
+		ur.commit_action(false)
+
+## Abandon a batch that ended up writing nothing (a validation failure before the
+## first write). Committing an empty action would put a no-op entry on the user's
+## undo stack, so Ctrl+Z would appear to do nothing once.
+func _edit_abort(ctx: Dictionary) -> void:
+	var ur: EditorUndoRedoManager = ctx.get(&"ur")
+	if ur and not bool(ctx.get(&"dirty", false)):
+		ur.commit_action(false)
+	ctx[&"ur"] = null

@@ -39,12 +39,16 @@ func create_animation_tree(args: Dictionary) -> Dictionary:
 
 	var tree := AnimationTree.new()
 	tree.name = node_name
-	parent.add_child(tree, true)
-	tree.owner = root
+	# Undo entry opened here, after the validations above: an action left open
+	# by an early return would sit unclosed on the editor's undo stack.
+	var ctx := _begin_edit(is_live, "MCP: add %s" % tree.name, root)
+	_edit_add_child(ctx, parent, tree, root)
+	_edit_commit(ctx)
 
-	tree.set(&"anim_player", NodePath(anim_player_path))
-	tree.set(&"tree_root", AnimationNodeStateMachine.new())
-	tree.set(&"active", true)
+	_edit_set(ctx, tree, &"anim_player", NodePath(anim_player_path))
+	_edit_set(ctx, tree, &"tree_root", AnimationNodeStateMachine.new())
+	_edit_set(ctx, tree, &"active", true)
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -163,7 +167,11 @@ func add_state_machine_state(args: Dictionary) -> Dictionary:
 
 	var anim_node := AnimationNodeAnimation.new()
 	anim_node.set(&"animation", StringName(animation_name))
+	var ctx := _begin_edit(is_live, "MCP: add state '%s'" % state_name, root)
 	state_machine.add_node(state_name, anim_node, position)
+	_edit_record(ctx, state_machine, &"add_node", [state_name, anim_node, position],
+		&"remove_node", [state_name])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -214,7 +222,15 @@ func remove_state_machine_state(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "State '%s' does not exist" % state_name}
 
+	# Capture the node and its layout position first: without them undo could
+	# only recreate an empty state in the wrong place.
+	var removed_node := state_machine.get_node(state_name)
+	var removed_pos := state_machine.get_node_position(state_name)
+	var ctx := _begin_edit(is_live, "MCP: remove state '%s'" % state_name, root)
 	state_machine.remove_node(state_name)
+	_edit_record(ctx, state_machine, &"remove_node", [state_name],
+		&"add_node", [state_name, removed_node, removed_pos])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -303,7 +319,11 @@ func add_state_machine_transition(args: Dictionary) -> Dictionary:
 	if xfade_time != null:
 		transition.set(&"xfade_time", float(xfade_time))
 
+	var ctx := _begin_edit(is_live, "MCP: add transition %s -> %s" % [from, to], root)
 	state_machine.add_transition(from, to, transition)
+	_edit_record(ctx, state_machine, &"add_transition", [from, to, transition],
+		&"remove_transition", [from, to])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -356,7 +376,12 @@ func remove_state_machine_transition(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Transition '%s' -> '%s' does not exist" % [from, to]}
 
+	var removed_transition := state_machine.get_transition(state_machine.find_transition(from, to))
+	var ctx := _begin_edit(is_live, "MCP: remove transition %s -> %s" % [from, to], root)
 	state_machine.remove_transition(from, to)
+	_edit_record(ctx, state_machine, &"remove_transition", [from, to],
+		&"add_transition", [from, to, removed_transition])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():

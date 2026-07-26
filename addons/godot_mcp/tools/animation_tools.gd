@@ -108,7 +108,11 @@ func create_animation(args: Dictionary) -> Dictionary:
 	var anim := Animation.new()
 	anim.length = length
 	anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+	var ctx := _begin_edit(is_live, "MCP: create animation '%s'" % animation_name, root)
 	lib.add_animation(animation_name, anim)
+	_edit_record(ctx, lib, &"add_animation", [animation_name, anim],
+		&"remove_animation", [animation_name])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -164,8 +168,15 @@ func add_animation_track(args: Dictionary) -> Dictionary:
 	else:
 		np = NodePath(track_node_path)
 
+	var ctx := _begin_edit(is_live, "MCP: add %s track" % track_type, root)
 	var track_idx := anim.add_track(_TRACK_TYPES[track_type])
 	anim.track_set_path(track_idx, np)
+	# add_track appends, so the inverse is removing the index it landed on.
+	_edit_record(ctx, anim, &"add_track", [_TRACK_TYPES[track_type]],
+		&"remove_track", [track_idx])
+	_edit_record(ctx, anim, &"track_set_path", [track_idx, np],
+		&"track_set_path", [track_idx, np])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -236,6 +247,14 @@ func set_animation_keyframe(args: Dictionary) -> Dictionary:
 	if key_index < 0:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Failed to insert keyframe: value type doesn't match track type %d (position/rotation tracks require Vector3/Quaternion — for 2D nodes use track_type 'value' with property 'position'/'rotation' instead)" % track_type}
+
+	# Registered after the insert because the key index isn't known until the
+	# engine places it by time — and the failure above must not leave an action
+	# open on the undo stack.
+	var ctx := _begin_edit(is_live, "MCP: keyframe at %ss" % time, root)
+	_edit_record(ctx, anim, &"track_insert_key", [track_index, time, anim.track_get_key_value(track_index, key_index)],
+		&"track_remove_key", [track_index, key_index])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
@@ -329,7 +348,13 @@ func remove_animation(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation not found: " + animation_name}
 
+	# Grab the resource before dropping it, or undo has nothing to put back.
+	var removed_anim := lib.get_animation(animation_name)
+	var ctx := _begin_edit(is_live, "MCP: remove animation '%s'" % animation_name, root)
 	lib.remove_animation(animation_name)
+	_edit_record(ctx, lib, &"remove_animation", [animation_name],
+		&"add_animation", [animation_name, removed_anim])
+	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
 	if not err.is_empty():
