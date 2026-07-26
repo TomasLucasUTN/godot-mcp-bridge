@@ -5,6 +5,63 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.1.1] - 2026-07-26
+
+See [`release-notes/v1.1.1.md`](./release-notes/v1.1.1.md) for the narrative
+write-up. Almost everything here came out of writing one automated test for the
+live-scene path, which had no coverage at all.
+
+### Fixed
+- **Fifteen scene tools destroyed unsaved work.** They loaded the scene from
+  disk, mutated the copy and saved it; on an OPEN scene that discards the
+  editor's unsaved state and the reload wipes the live tree. Confirmed by hand —
+  an `attach_script` call deleted an unsaved node from a real project. Affected
+  `attach_script`, `detach_script`, `set_node_groups`, `set_collision_shape`,
+  `set_sprite_texture`, `set_mesh`, `set_material`, `set_anchor_preset`,
+  `snap_node_to_grid`, `set_scene_node_property`, `set_resource_property`,
+  `instance_scene`, `connect_signal`, `disconnect_signal`, `batch_scene_edit`.
+- **Eleven read tools returned last-saved state** on an open scene, so an agent
+  that edited and read back got stale values with no way to tell.
+- **Undo only covered seven structural actions**, and even those filed into the
+  wrong history — `EditorUndoRedoManager` infers the history from an action's
+  first object, and `add_node` registered a node living under the EditorPlugin
+  rather than in the scene, so Ctrl+Z never reached it. Every live edit now
+  registers, with the history pinned explicitly.
+- **`batch_scene_edit` reported "batch discarded, nothing saved" while leaving
+  earlier operations applied.** It is now one undo entry, committed and
+  immediately undone on failure.
+- **`validate_scripts` flagged a valid file.** It compiled a pathless copy, which
+  loses the path-sensitive `exclude_addons` warning exemption; any warning the
+  project promotes to an error then failed the compile with an empty error list.
+- **`query_runtime_node`** could not distinguish a null property from a
+  nonexistent one; missing properties are now reported separately.
+- **Stringified arguments** no longer coerce `"true"`/`"false"` on free-form text
+  keys (a node named `true` became a boolean).
+- **PathGuard** now covers five script-writing functions in `visualizer_tools.gd`.
+- Test suites no longer collide on ports; `primary-http` walks a 17-port range
+  that already swallowed `proxy-client`'s fixed port.
+
+### Added
+- **`undo_last` / `redo_last`** — step the editor's undo history, so the agent can
+  take back its own edit. The history is shared with the developer, and the
+  response names what was actually undone.
+- **Configurable bridge port** — `GODOT_MCP_PORT`, or the
+  `godot_mcp/network/port` project setting (env wins; out-of-range falls through).
+- **`GODOT_MCP_PROJECT`** — the bridge refuses any editor that does not have this
+  project open, with a close code distinct from "a slot is taken".
+- **`_abort_edit` in `SceneToolBase`** — reverts writes a tool has already made,
+  for error paths where validating first isn't possible.
+
+### Testing
+- **Live-scene harness**: 28 assertions against a real headless editor (no clobber,
+  no partial writes, undo, batch rollback), now running in CI where the e2e suite
+  previously skipped and went green by omission.
+- GDScript suite 150 → 207 assertions.
+- `parse_all.gd` compiles every addon script instead of calling `load()`, whose
+  resource cache let a genuinely broken file through three times in one session.
+- The e2e suite mirrors the addon into its fixture before starting the editor; the
+  fixture's copy is no longer tracked, since three runners generate it.
+
 ## [1.1.0] - 2026-07-26
 
 See [`release-notes/v1.1.0.md`](./release-notes/v1.1.0.md) for the narrative write-up.

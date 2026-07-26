@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.3+](https://img.shields.io/badge/Godot-4.3%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![209 tools](https://img.shields.io/badge/tools-209-brightgreen)](#-what-can-it-do)
+[![211 tools](https://img.shields.io/badge/tools-211-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 209 tools that were
+server, live-tree edits that never clobber your unsaved work, and 211 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -81,7 +81,7 @@ servers in July 2026, not their READMEs.)
 **It doesn't clobber your work.** Many Godot MCP servers edit your `.tscn` files on disk.
 If you have that scene open with unsaved changes, they silently overwrite it. Here, when
 a scene is open, every mutating tool edits the **live editor tree** instead — your
-unsaved edits survive and structural changes go through Godot's **undo system** (Ctrl+Z
+unsaved edits survive and every change goes through Godot's **undo system** (Ctrl+Z
 works). Closed scenes still edit on disk as usual.
 
 **The claims are tested, not asserted.** Every tool has been run against a real Godot
@@ -144,10 +144,30 @@ More of what it does:
   find that out before writing any.
 - **Opt-in confirmation gate** — set `GODOT_MCP_REQUIRE_CONFIRM=true` and operations with
   no undo path (file deletes/renames, script rewrites, mass renames, project settings)
-  require an explicit `confirm: true`. Scene edits are exempt: they already go through
-  Godot's undo history.
+  require an explicit `confirm: true`. Edits to an **open** scene are exempt — those do
+  land on Godot's undo history, so Ctrl+Z (or `undo_last`) already covers them.
 - **Pre-flight validation** — `validate_scripts` sweeps every `.gd`; `validate_scene_integrity`
   flags nodes left with an empty required resource; `validate_meshes` catches empty geometry.
+
+---
+
+## ⚙️ Running more than one project
+
+One project on one machine needs no configuration. If you run several — or a CI
+editor alongside your own — set two things, because the addon dials a fixed port
+and cannot tell which server answered:
+
+| Variable | Where | What it does |
+|---|---|---|
+| `GODOT_MCP_PORT` | server **and** editor | Port for the bridge. Give each project its own. |
+| `godot_mcp/network/port` | Project Settings | Per-project port, if you'd rather not set an env var on the editor. `GODOT_MCP_PORT` overrides it. |
+| `GODOT_MCP_PROJECT` | server | Absolute path of the project this server serves. Any editor with a different project open is refused. |
+
+`GODOT_MCP_PROJECT` is the one worth setting even with a single project. Without
+it the first editor to reach the port is trusted with every tool call, so an
+unrelated editor that happens to be open can end up receiving edits meant for
+this one. With it, that connection is refused and the editor says so instead of
+silently taking the work.
 
 ---
 
@@ -158,7 +178,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 209 (35 loaded by default) | 155 | 42 | ~14 |
+| Tools | 211 (35 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -284,7 +304,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 209 Tools, 35 Loaded by Default
+### 211 Tools, 35 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -347,7 +367,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 │  AI Client  │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
 │  (Claude,   │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
 │   Cursor)   │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  209 tool    │
+└─────────────┘                  │  Visualizer  │               │  211 tool    │
                                  │  HTTP :6510  │               │  handlers    │
                                  └──────┬───────┘               └──────────────┘
                                         │
@@ -363,7 +383,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 
 - **Local only** — runs on localhost, no remote connections
 - **Single connection** — one Godot instance at a time
-- **Undo covers structural scene edits** — when a scene is open, add/remove/rename/move/duplicate go through Godot's undo history; other writes save directly (use version control), and some destructive tools support `dry_run: true` to preview first
+- **Undo covers every edit to an open scene** — nodes, properties, resources, animation tracks, tilemap cells: all of it registers on Godot's undo history, and `undo_last` lets the agent take back its own change. A `batch_scene_edit` is one entry, so Ctrl+Z reverts the whole batch. The limit worth knowing: editing a scene that is **not** open writes straight to disk with no undo entry — use version control there. Some destructive tools also support `dry_run: true` to preview first
 - **AI is still limited in Godot knowledge** — it struggles with complex UI layouts, compositing scenes, and some node property manipulation; it can't create 100% of a game alone, but it can help debug, write scripts, and tag along for the journey. Still in active development — feedback is welcome.
 
 ---

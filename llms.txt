@@ -39,7 +39,7 @@ and a GUT test runner.
 
 ## Verification status
 
-All 209 tools have been exercised by hand against a running Godot 4.7
+All 211 tools have been exercised by hand against a running Godot 4.7
 editor in July 2026. That pass found and fixed four real bugs: collision presets
 silently saving an empty bitmask when given layer names, a live-scene write that
 left partial mutations after reporting failure, a 2D navmesh bake that always
@@ -47,7 +47,8 @@ produced an empty result, and an export status poll that hung until timeout.
 Claims in this file are things that were run, not things that were intended.
 
 Known limits, stated plainly: local-only (no remote), one Godot instance at a
-time, undo covers structural scene edits (other writes save directly — set
+time, undo covers every edit to an OPEN scene, including batches as one entry
+(a scene that is not open is written straight to disk with no undo — set
 GODOT_MCP_REQUIRE_CONFIRM=true to gate the irreversible ones), tested against 4.7
 specifically (4.3-4.6 should work but were not individually verified), Godot's
 debug adapter does not advertise conditional-breakpoint support so per-line
@@ -60,7 +61,7 @@ debugger. A standard (non-.NET) Godot build cannot use C# at all.
 
 ## Tool surface
 
-209 tools. Only `core` (35) loads by default — a large always-on tool list makes
+211 tools. Only `core` (35) loads by default — a large always-on tool list makes
 agents wander and burns context. The rest are grouped by intent and enabled on
 demand with `enable_toolset({name})`; `list_toolsets` shows every group and its
 contents.
