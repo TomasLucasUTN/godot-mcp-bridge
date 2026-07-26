@@ -1,8 +1,8 @@
 {
   "name": "godot-mcp-bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "mcpName": "io.github.TomasLucasUTN/godot-mcp-bridge",
-  "description": "MCP server for the Godot 4 editor — live-tree scene editing with undo, runtime game control, and 185 tools over MCP",
+  "description": "MCP server for the Godot 4 editor — live-tree scene editing with undo, runtime game control, and 209 tools over MCP",
   "author": "Tomas Lucas",
   "repository": {
     "type": "git",

@@ -6,6 +6,7 @@ These are narrative, feature-first write-ups aimed at users of the project. For 
 
 ## Index
 
+- [v1.1.0](./v1.1.0.md) — A real step-debugger over Godot's Debug Adapter (2026-07-26)
 - [v1.0.0](./v1.0.0.md) — Runtime loop, generic resource editing, and a serious crash purge (2026-07-25)
 
 ## Conventions
