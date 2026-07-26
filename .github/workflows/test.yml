@@ -32,9 +32,25 @@ jobs:
     # inside Godot. This job downloads a real headless Godot and runs the
     # on-disk tool tests against it, so a broken handler fails CI instead of
     # waiting to be found by hand.
+    #
+    # Matrixed because engine drift is otherwise invisible until a user hits it.
+    # Both failures this project has had of that shape — NavigationRegion2D's
+    # get_bounds() moving, and the advertised 4.3 minimum never actually working
+    # in editor mode — were found by hand, late. `godot-minimum` is the version
+    # the README promises; `godot-latest` is the one users are actually on.
+    # fail-fast is off so a break in one version still reports the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - godot: "4.5"
+            label: godot-minimum
+          - godot: "4.7"
+            label: godot-latest
+    name: gdscript (${{ matrix.label }} ${{ matrix.godot }})
     runs-on: ubuntu-latest
     env:
-      GODOT_VERSION: 4.5
+      GODOT_VERSION: ${{ matrix.godot }}
     steps:
       - uses: actions/checkout@v4
 
