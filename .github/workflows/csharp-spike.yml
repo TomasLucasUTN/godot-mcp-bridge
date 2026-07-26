@@ -1,0 +1,151 @@
+name: C# toolchain spike
+
+# A BOUNDED EXPERIMENT, not a feature. Nothing here gates a merge.
+#
+# The long-term plan (notes/LONGTERM.md 3.3) had C# depth blocked on "a .NET
+# Godot build to develop and test against", assuming that meant a local install.
+# A competitor (jlivingston-Cipher/godot-breakpoint-mcp) drives OmniSharp and
+# netcoredbg against a real Godot Mono build on a plain Linux runner, so the
+# prerequisite is CI configuration, not a local toolchain. This reproduces that
+# setup to find out whether it actually works here before any C# tools are
+# written.
+#
+# STATUS: UNVERIFIED. Written from the release artifacts (all three confirmed to
+# exist and be downloadable), never yet executed. Run it manually and read the
+# summary before treating any of its conclusions as fact. It is deliberately
+# `workflow_dispatch`-only so it costs nothing until someone asks for it.
+#
+# What a green run proves: the toolchain installs, a Godot Mono editor boots
+# headless, a C# project builds, and both servers start and answer. That is the
+# floor for `cs_*` tools. It does NOT prove the tools would work — that needs
+# the tools.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download Godot Mono (headless-capable editor)
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot-mono.zip "$base/Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64.zip"
+          unzip -q godot-mono.zip
+          mv "Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64" godot-mono
+          chmod +x godot-mono/Godot_v${GODOT_VERSION}-stable_mono_linux.x86_64
+          echo "GODOT_MONO=$PWD/godot-mono/Godot_v${GODOT_VERSION}-stable_mono_linux.x86_64" >> "$GITHUB_ENV"
+          "$PWD/godot-mono/Godot_v${GODOT_VERSION}-stable_mono_linux.x86_64" --version
+
+      - name: Install netcoredbg (the C# debug adapter)
+        run: |
+          set -euo pipefail
+          url=$(gh api repos/Samsung/netcoredbg/releases/latest --jq '.assets[] | select(.name == "netcoredbg-linux-amd64.tar.gz") | .browser_download_url')
+          curl -fsSL -o netcoredbg.tar.gz "$url"
+          tar xzf netcoredbg.tar.gz
+          ./netcoredbg/netcoredbg --version
+          echo "NETCOREDBG=$PWD/netcoredbg/netcoredbg" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Install OmniSharp (the C# language server)
+        run: |
+          set -euo pipefail
+          url=$(gh api repos/OmniSharp/omnisharp-roslyn/releases/latest --jq '.assets[] | select(.name == "omnisharp-linux-x64-net6.0.tar.gz") | .browser_download_url')
+          curl -fsSL -o omnisharp.tar.gz "$url"
+          mkdir -p omnisharp && tar xzf omnisharp.tar.gz -C omnisharp
+          chmod +x omnisharp/OmniSharp
+          echo "OMNISHARP=$PWD/omnisharp/OmniSharp" >> "$GITHUB_ENV"
+
+      - name: Build a throwaway Godot C# project
+        # The question this answers: does a Mono editor headlessly generate the
+        # .csproj/.sln and build them? If this fails, everything downstream is
+        # moot and the spike has its answer early.
+        run: |
+          set -euo pipefail
+          proj="$RUNNER_TEMP/cs-probe"
+          mkdir -p "$proj"
+          cat > "$proj/project.godot" <<'CFG'
+          config_version=5
+
+          [application]
+
+          config/name="cs-probe"
+          config/features=PackedStringArray("4.5", "C#", "Forward Plus")
+          CFG
+          cat > "$proj/Probe.cs" <<'CS'
+          using Godot;
+
+          public partial class Probe : Node
+          {
+              public override void _Ready()
+              {
+                  GD.Print("probe ready");
+              }
+          }
+          CS
+          # --import builds the C# project files; a cold import warns a lot and
+          # can exit nonzero even on success, so the dotnet build below is the
+          # real gate.
+          "$GODOT_MONO" --headless --path "$proj" --import || true
+          ls -la "$proj"
+          if ls "$proj"/*.csproj >/dev/null 2>&1; then
+            dotnet build "$proj" -v quiet
+            echo "CSPROJ_OK=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::the Mono editor did not generate a .csproj headlessly"
+            echo "CSPROJ_OK=0" >> "$GITHUB_ENV"
+          fi
+          echo "CS_PROBE=$proj" >> "$GITHUB_ENV"
+
+      - name: Can OmniSharp start against it?
+        if: env.CSPROJ_OK == '1'
+        run: |
+          set -euo pipefail
+          # -lsp makes it speak LSP on stdio, which is what a client would drive.
+          timeout 40s "$OMNISHARP" -s "$CS_PROBE" -lsp < /dev/null > omnisharp.log 2>&1 || true
+          echo "--- first lines of omnisharp.log ---"
+          head -20 omnisharp.log || true
+
+      - name: Can netcoredbg start?
+        run: |
+          set -euo pipefail
+          timeout 20s "$NETCOREDBG" --interpreter=vscode < /dev/null > netcoredbg.log 2>&1 || true
+          echo "--- first lines of netcoredbg.log ---"
+          head -20 netcoredbg.log || true
+
+      - name: Verdict
+        # One place to read the outcome instead of expanding four step logs.
+        run: |
+          {
+            echo "## C# toolchain spike"
+            echo ""
+            echo "| Step | Result |"
+            echo "|---|---|"
+            echo "| Godot Mono boots headless | $( [ -x "$GODOT_MONO" ] && echo yes || echo NO ) |"
+            echo "| Editor generated a .csproj | $( [ "$CSPROJ_OK" = "1" ] && echo yes || echo NO ) |"
+            echo "| netcoredbg runs | $( [ -s netcoredbg.log ] && echo "see log" || echo "no output" ) |"
+            echo "| OmniSharp runs | $( [ -s omnisharp.log ] && echo "see log" || echo "not run / no output" ) |"
+            echo ""
+            echo "A green run only proves the toolchain installs and starts."
+            echo "Whether \`cs_*\` tools are worth building is a separate decision."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: csharp-spike-logs
+          path: |
+            omnisharp.log
+            netcoredbg.log
+          if-no-files-found: ignore
