@@ -340,6 +340,11 @@ func set_editor_plugin(plugin: EditorPlugin) -> void:
 	if _animation_tree_tools: _animation_tree_tools.set_editor_plugin(plugin)
 	if _shader_tools: _shader_tools.set_editor_plugin(plugin)
 	if _testing_tools: _testing_tools.set_editor_plugin(plugin)
+	# Missing this made every analysis tool read the LAST SAVED scene: without
+	# the plugin, _edited_root_if_open can never find the live tree, so
+	# scene_diff reported "no changes" for an edit sitting unsaved in the editor
+	# — the exact stale-read class 1.1.1 fixed for the other read tools.
+	if _analysis_tools: _analysis_tools.set_editor_plugin(plugin)
 	if _visualizer_tools:
 		_visualizer_tools.set_editor_plugin(plugin)
 		# Pass scene_tools reference for visualizer internal scene functions

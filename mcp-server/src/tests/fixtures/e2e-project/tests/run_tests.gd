@@ -67,6 +67,7 @@ func _initialize() -> void:
 	_test_tilemap_terrain_and_autotile()
 	_test_bake_navigation_mesh()
 	_test_export_and_peer_contracts()
+	_test_every_tool_node_gets_the_plugin()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1956,3 +1957,35 @@ func _test_export_and_peer_contracts() -> void:
 	_check(stop_none.has("ok"), "stop_headless_peers answers even with nothing running")
 
 	pt.free()
+
+# Every tool node the executor creates must be handed the EditorPlugin.
+#
+# analysis_tools was missing from that list, and nothing caught it: without the
+# plugin, _edited_root_if_open can never find the live tree, so every analysis
+# tool silently read the last SAVED scene. scene_diff reported "no changes" for
+# an edit sitting unsaved in the editor — the same stale-read shape that eleven
+# read tools were fixed for in 1.1.1, reintroduced in a new file.
+func _test_every_tool_node_gets_the_plugin() -> void:
+	print("\n[executor wiring]")
+	var src := FileAccess.get_file_as_string("res://addons/godot_mcp/tool_executor.gd")
+
+	# The node fields the executor declares, and the ones it wires up.
+	var declared: Array = []
+	var re_decl := RegEx.new()
+	re_decl.compile("(?m)^var (_[a-z0-9_]+_tools): Node")
+	for m in re_decl.search_all(src):
+		declared.append(m.get_string(1))
+
+	var wired: Array = []
+	var re_wire := RegEx.new()
+	re_wire.compile("(_[a-z0-9_]+_tools)\\.set_editor_plugin\\(plugin\\)")
+	for m in re_wire.search_all(src):
+		if not wired.has(m.get_string(1)):
+			wired.append(m.get_string(1))
+
+	_check(declared.size() > 10, "found the executor's tool node fields (%d)" % declared.size())
+	var missing: Array = []
+	for name in declared:
+		if not wired.has(name):
+			missing.append(name)
+	_check(missing.is_empty(), "every tool node is given the editor plugin (missing: %s)" % str(missing))
