@@ -7,7 +7,7 @@
 
 Install: `npx godot-mcp-bridge install` (from a Godot project folder), then add
 `{"godot": {"command": "npx", "args": ["-y", "godot-mcp-bridge"]}}` to the MCP
-client config. Requires Node 18+ and Godot 4.3+. Verify with
+client config. Requires Node 18+ and Godot 4.5+. Verify with
 `npx godot-mcp-bridge doctor`.
 
 - Repo: https://github.com/TomasLucasUTN/godot-mcp-bridge
@@ -50,7 +50,9 @@ Known limits, stated plainly: local-only (no remote), one Godot instance at a
 time, undo covers every edit to an OPEN scene, including batches as one entry
 (a scene that is not open is written straight to disk with no undo — set
 GODOT_MCP_REQUIRE_CONFIRM=true to gate the irreversible ones), tested against 4.7
-specifically (4.3-4.6 should work but were not individually verified), Godot's
+specifically. 4.3 and 4.4 do NOT work: the editor-mode scene path fails there,
+measured by running the live test harness against each. 4.5 is the verified
+minimum and is what CI pins. Godot's
 debug adapter does not advertise conditional-breakpoint support so per-line
 conditions may be ignored, and its language server supports fewer LSP features
 than a typical one (no workspace symbols, code actions, formatting or folding).

@@ -7,7 +7,7 @@
 **An AI that works *with* you in the Godot editor — not instead of you.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Godot 4.3+](https://img.shields.io/badge/Godot-4.3%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
+[![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
 [![211 tools](https://img.shields.io/badge/tools-211-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)

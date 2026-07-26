@@ -38,12 +38,14 @@ live-scene path, which had no coverage at all.
 - **Stringified arguments** no longer coerce `"true"`/`"false"` on free-form text
   keys (a node named `true` became a boolean).
 - **PathGuard** now covers five script-writing functions in `visualizer_tools.gd`.
-- **The addon did not actually run on the Godot 4.3 it advertises.** Three
-  constructs required newer engines: a typed `Dictionary` (4.4+),
-  `OS.get_temp_dir()` (4.5+), and an inferred return from `EditorInterface.close_scene()`.
-  The old parse check used `load()`, which was too weak to see it; compiling the
-  source surfaced it immediately. All three replaced with 4.3-compatible
-  equivalents, and CI pins the claimed minimum so the badge stays checkable.
+- **The advertised minimum Godot version was wrong.** The badge said 4.3+; the
+  editor-mode scene path does not work there. Measured by running the live
+  harness against each release: 4.3 fails, 4.4 fails, 4.5 passes 28/28. The
+  minimum is now stated as 4.5 and CI pins it, so the badge is checkable rather
+  than aspirational. Three constructs that needed even newer engines were also
+  replaced with portable equivalents (a typed `Dictionary`, `OS.get_temp_dir()`,
+  and an inferred return from `EditorInterface.close_scene()`); the old parse
+  check used `load()` and was too weak to see them at all.
 - Test suites no longer collide on ports; `primary-http` walks a 17-port range
   that already swallowed `proxy-client`'s fixed port.
 

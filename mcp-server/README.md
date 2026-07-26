@@ -4,7 +4,7 @@
 
 Build games faster with Claude, Cursor, or any MCP-compatible AI — no copy-pasting, no context switching. The AI reads, writes, and manipulates your scenes, scripts, nodes, and project settings directly inside the running Godot editor.
 
-> Godot 4.3+ · 211 tools (35 loaded by default) · Live-tree editing with undo · Interactive project visualizer · MIT license
+> Godot 4.5+ · 211 tools (35 loaded by default) · Live-tree editing with undo · Interactive project visualizer · MIT license
 
 See the [project README](https://github.com/TomasLucasUTN/godot-mcp-bridge#readme) for the full tool breakdown, architecture, and setup guide. This file is the condensed version shown on npm.
 

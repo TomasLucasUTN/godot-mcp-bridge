@@ -34,7 +34,7 @@ jobs:
     # waiting to be found by hand.
     runs-on: ubuntu-latest
     env:
-      GODOT_VERSION: 4.3
+      GODOT_VERSION: 4.5
     steps:
       - uses: actions/checkout@v4
 
