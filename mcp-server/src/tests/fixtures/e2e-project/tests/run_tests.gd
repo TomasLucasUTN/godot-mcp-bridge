@@ -47,6 +47,15 @@ func _initialize() -> void:
 	_test_script_rewrites()
 	_test_project_config()
 	_test_bulk_and_rename()
+	_test_3d_authoring()
+	_test_physics_presets()
+	_test_particles_and_audio()
+	_test_theme_and_shader_resources()
+	_test_state_machine_authoring()
+	_test_navigation_authoring()
+	_test_tilemap_bulk()
+	_test_input_map_and_autoloads()
+	_test_property_forwarder()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1139,3 +1148,344 @@ func _test_bulk_and_rename() -> void:
 	bt.free()
 	st.free()
 	_rm(scene)
+
+# =============================================================================
+# Coverage for mutating tools that had none.
+#
+# Every tool below writes: to a scene, a resource file, or project.godot. Each
+# case creates its own target, exercises the tool's disk path, reads the result
+# back from disk, and cleans up. Anything touching project.godot restores it —
+# a test that leaves the fixture dirty fails the NEXT run, which is how two
+# earlier tests in this file corrupted the suite.
+# =============================================================================
+
+func _test_3d_authoring() -> void:
+	print("\n[3D authoring]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var s3 = preload("res://addons/godot_mcp/tools/scene3d_tools.gd").new()
+	var scene := "res://__gdtest_3d.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+
+	var mesh = s3.add_mesh_instance({"scene_path": scene, "mesh_type": "box", "node_name": "Crate"})
+	_check(mesh.get("ok", false), "add_mesh_instance ok")
+	var txt := FileAccess.get_file_as_string(scene)
+	_check(txt.contains("MeshInstance3D") and txt.contains("BoxMesh"), "mesh node and its mesh resource persisted")
+
+	var bad_mesh = s3.add_mesh_instance({"scene_path": scene, "mesh_type": "dodecahedron"})
+	_check(not bad_mesh.get("ok", true), "unknown mesh_type is rejected")
+
+	var light = s3.setup_lighting({"scene_path": scene, "preset": "sun"})
+	_check(light.get("ok", false), "setup_lighting ok")
+	_check(FileAccess.get_file_as_string(scene).contains("DirectionalLight3D"), "sun preset added a directional light")
+	_check(not s3.setup_lighting({"scene_path": scene, "preset": "disco"}).get("ok", true), "unknown lighting preset is rejected")
+
+	var cam = s3.setup_camera_3d({"scene_path": scene, "node_name": "Eye", "projection": "orthogonal"})
+	_check(cam.get("ok", false), "setup_camera_3d ok")
+	_check(FileAccess.get_file_as_string(scene).contains("Camera3D"), "camera persisted")
+
+	s3.free()
+	st.free()
+	_rm(scene)
+
+func _test_physics_presets() -> void:
+	print("\n[physics presets]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var ph = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var scene := "res://__gdtest_physpreset.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+
+	var col = ph.setup_collision({"scene_path": scene, "node_path": ".", "shape_type": "circle", "node_name": "Hitbox"})
+	_check(col.get("ok", false), "setup_collision ok")
+	var txt := FileAccess.get_file_as_string(scene)
+	_check(txt.contains("CollisionShape2D") and txt.contains("CircleShape2D"), "collision node has a real shape resource")
+
+	# A named preset must round-trip: define it, then apply it by name.
+	var defined = ph.set_collision_preset({"name": "gdtest_enemy", "collision_layer": [3], "collision_mask": [1, 2]})
+	_check(defined.get("ok", false), "set_collision_preset ok")
+	var applied = ph.apply_collision_preset({"scene_path": scene, "node_path": ".", "name": "gdtest_enemy"})
+	_check(applied.get("ok", false), "apply_collision_preset ok")
+	var info = ph.get_collision_info({"scene_path": scene, "node_path": "."})
+	_check(int(info.get("collision_layer", 0)) == 4, "preset layer applied (layer 3 -> bit 4)")
+	_check(int(info.get("collision_mask", 0)) == 3, "preset mask applied (layers 1+2 -> bits 3)")
+	_check(not ph.apply_collision_preset({"scene_path": scene, "node_path": ".", "name": "nope"}).get("ok", true), "unknown preset name is rejected")
+
+	# set_collision_preset writes the preset into project.godot; drop it again so
+	# the committed fixture stays clean (a dirty fixture fails the NEXT run).
+	ProjectSettings.set_setting("mcp_presets/collision/gdtest_enemy", null)
+	ProjectSettings.save()
+	_check(not ProjectSettings.has_setting("mcp_presets/collision/gdtest_enemy"), "test preset removed from project.godot")
+
+	ph.free()
+	st.free()
+	_rm(scene)
+
+func _test_particles_and_audio() -> void:
+	print("\n[particles + audio]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var pa = preload("res://addons/godot_mcp/tools/particle_tools.gd").new()
+	var au = preload("res://addons/godot_mcp/tools/audio_tools.gd").new()
+	var scene := "res://__gdtest_fx.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+
+	var made = pa.create_particles({"scene_path": scene, "dimension": "2D", "node_name": "Sparks", "amount": 32})
+	_check(made.get("ok", false), "create_particles ok")
+	_check(FileAccess.get_file_as_string(scene).contains("GPUParticles2D"), "particle node persisted")
+
+	var preset = pa.apply_particle_preset({"scene_path": scene, "node_path": "Sparks", "preset": "fire"})
+	_check(preset.get("ok", false), "apply_particle_preset ok")
+	_check(not pa.apply_particle_preset({"scene_path": scene, "node_path": "Sparks", "preset": "confetti"}).get("ok", true), "unknown particle preset is rejected")
+
+	var pinfo = pa.get_particle_info({"scene_path": scene, "node_path": "Sparks"})
+	_check(pinfo.get("ok", false), "get_particle_info reads the configured node")
+
+	var player = au.add_audio_player({"scene_path": scene, "node_name": "Music", "player_type": ""})
+	_check(player.get("ok", false), "add_audio_player ok")
+	_check(FileAccess.get_file_as_string(scene).contains("AudioStreamPlayer"), "audio player persisted")
+
+	au.free()
+	pa.free()
+	st.free()
+	_rm(scene)
+
+func _test_theme_and_shader_resources() -> void:
+	print("\n[theme + shader resources]")
+	var th = preload("res://addons/godot_mcp/tools/theme_tools.gd").new()
+	var sh = preload("res://addons/godot_mcp/tools/shader_tools.gd").new()
+	var theme := "res://__gdtest_theme.tres"
+	var shader := "res://__gdtest_shader.gdshader"
+	_rm(theme)
+	_rm(shader)
+
+	var made = th.create_theme({"theme_path": theme})
+	_check(made.get("ok", false), "create_theme ok")
+	_check(FileAccess.file_exists(theme), "theme written to disk")
+
+	var colored = th.set_theme_color({"theme_path": theme, "control_type": "Button", "color_name": "font_color", "color": {"r": 1, "g": 0, "b": 0, "a": 1}})
+	_check(colored.get("ok", false), "set_theme_color ok")
+	var sized = th.set_theme_font_size({"theme_path": theme, "control_type": "Button", "font_size_name": "font_size", "value": 24})
+	_check(sized.get("ok", false), "set_theme_font_size ok")
+	var tinfo = th.get_theme_info({"theme_path": theme})
+	_check(tinfo.get("ok", false), "get_theme_info reads the theme back")
+
+	var shader_made = sh.create_shader({"shader_path": shader, "shader_type": "canvas_item"})
+	_check(shader_made.get("ok", false), "create_shader ok")
+	_check(FileAccess.get_file_as_string(shader).contains("shader_type canvas_item"), "shader body written")
+
+	# edit_shader is a snippet replace, not a whole-file write.
+	var edited = sh.edit_shader({
+		"shader_path": shader,
+		"old_code_snippet": "void fragment()",
+		"new_code_snippet": "uniform float amount = 0.5;\n\nvoid fragment()",
+	})
+	_check(edited.get("ok", false), "edit_shader ok")
+	_check(FileAccess.get_file_as_string(shader).contains("uniform float amount"), "the snippet edit landed in the file")
+
+	# get_shader_params reads a NODE's ShaderMaterial, not the .gdshader file, so
+	# the shader has to be assigned to something first.
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_shaderuse.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "Sprite2D", "node_name": "Painted"})
+
+	var assigned = sh.assign_shader_material({"scene_path": scene, "node_path": "Painted", "shader_path": shader})
+	_check(assigned.get("ok", false), "assign_shader_material ok")
+
+	var params = sh.get_shader_params({"scene_path": scene, "node_path": "Painted"})
+	_check(params.get("ok", false), "get_shader_params ok")
+	_check(str(params).contains("amount"), "the uniform added by the edit is discovered on the node")
+
+	var set_param = sh.set_shader_param({"scene_path": scene, "node_path": "Painted", "param_name": "amount", "value": 0.25})
+	_check(set_param.get("ok", false), "set_shader_param ok")
+
+	st.free()
+	sh.free()
+	th.free()
+	_rm(scene)
+	_rm(theme)
+	_rm(shader)
+
+func _test_state_machine_authoring() -> void:
+	print("\n[animation tree state machine]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var an = preload("res://addons/godot_mcp/tools/animation_tools.gd").new()
+	var at = preload("res://addons/godot_mcp/tools/animation_tree_tools.gd").new()
+	var scene := "res://__gdtest_atree.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "AnimationPlayer", "node_name": "Anim"})
+	an.create_animation({"scene_path": scene, "node_path": "Anim", "animation_name": "idle", "length": 1.0})
+	an.create_animation({"scene_path": scene, "node_path": "Anim", "animation_name": "run", "length": 1.0})
+
+	var tree = at.create_animation_tree({"scene_path": scene, "anim_player_path": "Anim", "node_name": "Tree"})
+	_check(tree.get("ok", false), "create_animation_tree ok")
+	_check(FileAccess.get_file_as_string(scene).contains("AnimationTree"), "tree node persisted")
+
+	var s1 = at.add_state_machine_state({"scene_path": scene, "node_path": "Tree", "state_name": "Idle", "animation_name": "idle"})
+	_check(s1.get("ok", false), "add_state_machine_state ok")
+	at.add_state_machine_state({"scene_path": scene, "node_path": "Tree", "state_name": "Run", "animation_name": "run"})
+
+	var tr = at.add_state_machine_transition({"scene_path": scene, "node_path": "Tree", "from": "Idle", "to": "Run"})
+	_check(tr.get("ok", false), "add_state_machine_transition ok")
+
+	var structure = at.get_animation_tree_structure({"scene_path": scene, "node_path": "Tree"})
+	_check(structure.get("ok", false), "get_animation_tree_structure ok")
+	var dumped := str(structure)
+	_check(dumped.contains("Idle") and dumped.contains("Run"), "both states are reported")
+
+	var rm_tr = at.remove_state_machine_transition({"scene_path": scene, "node_path": "Tree", "from": "Idle", "to": "Run"})
+	_check(rm_tr.get("ok", false), "remove_state_machine_transition ok")
+	var rm_state = at.remove_state_machine_state({"scene_path": scene, "node_path": "Tree", "state_name": "Run"})
+	_check(rm_state.get("ok", false), "remove_state_machine_state ok")
+	_check(not str(at.get_animation_tree_structure({"scene_path": scene, "node_path": "Tree"})).contains("Run"), "removed state is gone from the structure")
+
+	at.free()
+	an.free()
+	st.free()
+	_rm(scene)
+
+func _test_navigation_authoring() -> void:
+	print("\n[navigation]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var nv = preload("res://addons/godot_mcp/tools/navigation_tools.gd").new()
+	var scene := "res://__gdtest_nav.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Level"})
+
+	var region = nv.setup_navigation_region({"scene_path": scene, "dimension": "2D", "node_name": "Nav"})
+	_check(region.get("ok", false), "setup_navigation_region ok")
+	_check(FileAccess.get_file_as_string(scene).contains("NavigationRegion2D"), "region persisted")
+	_check(not nv.setup_navigation_region({"scene_path": scene, "dimension": "4D"}).get("ok", true), "invalid dimension is rejected")
+
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "CharacterBody2D", "node_name": "Walker"})
+	var agent = nv.setup_navigation_agent({"scene_path": scene, "parent_path": "Walker", "dimension": "2D"})
+	_check(agent.get("ok", false), "setup_navigation_agent ok")
+	_check(FileAccess.get_file_as_string(scene).contains("NavigationAgent2D"), "agent persisted")
+
+	var layers = nv.set_navigation_layers({"scene_path": scene, "node_path": "Nav", "layers": [1, 2]})
+	_check(layers.get("ok", false), "set_navigation_layers ok")
+	var ninfo = nv.get_navigation_info({"scene_path": scene, "node_path": "Nav"})
+	_check(ninfo.get("ok", false), "get_navigation_info reads it back")
+
+	nv.free()
+	st.free()
+	_rm(scene)
+
+func _test_tilemap_bulk() -> void:
+	print("\n[tilemap bulk ops]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var tm = preload("res://addons/godot_mcp/tools/tilemap_tools.gd").new()
+	var scene := "res://__gdtest_tmbulk.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "TileMapLayer", "node_name": "Ground"})
+
+	# Painting on a layer with no TileSet stores the cells but nothing renders
+	# them. Refusing would break the legitimate assign-the-TileSet-afterwards
+	# flow, so the tool succeeds AND says so; plain success would be a silent
+	# no-op, which is the shape this project treats as a bug.
+	var no_tileset = tm.tilemap_fill_rect({
+		"scene_path": scene, "node_path": "Ground",
+		"from_coords": [0, 0], "to_coords": [2, 2], "source_id": 0,
+	})
+	_check(no_tileset.get("ok", false), "fill_rect works on a layer with no TileSet")
+	_check(str(no_tileset.get("warning", "")).contains("no TileSet"), "but warns that the cells cannot render")
+	_check(int(no_tileset.get("cells_filled", 0)) == 9, "filled the whole 3x3 rect")
+
+	var single = tm.tilemap_set_cell({"scene_path": scene, "node_path": "Ground", "coords": [0, 0], "source_id": 0})
+	_check(str(single.get("warning", "")).contains("no TileSet"), "set_cell warns too")
+
+	var info = tm.tilemap_get_info({"scene_path": scene, "node_path": "Ground"})
+	_check(info.get("ok", false), "tilemap_get_info ok on an empty layer")
+
+	tm.free()
+	st.free()
+	_rm(scene)
+
+func _test_input_map_and_autoloads() -> void:
+	print("\n[input map + autoloads]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+	var action := "gdtest_jump"
+
+	var added = pt.configure_input_map({
+		"action": action, "operation": "add",
+		"events": [{"type": "key", "key": "Space"}],
+	})
+	_check(added.get("ok", false), "configure_input_map add ok")
+	_check(InputMap.has_action(action), "action registered in the InputMap")
+	_check(ProjectSettings.has_setting("input/" + action), "action persisted to project settings")
+
+	var listed: Dictionary = pt.get_input_map({})
+	_check(listed.get("ok", false), "get_input_map ok")
+	_check(str(listed.get("actions", {}).get(action, {})).contains("Space"), "the bound key is reported")
+
+	var replaced = pt.configure_input_map({
+		"action": action, "operation": "set",
+		"events": [{"type": "key", "key": "Enter"}],
+	})
+	_check(replaced.get("ok", false), "configure_input_map set ok")
+	# "Space" also appears in built-in actions (ui_accept), so check THIS
+	# action's events rather than the whole-map dump.
+	var after_set: Dictionary = pt.get_input_map({})
+	var events := str(after_set.get("actions", {}).get(action, {}))
+	_check(not events.contains("Space"), "set replaced the old event instead of appending")
+	_check(events.contains("Enter"), "the replacement event is bound")
+
+	var removed = pt.configure_input_map({"action": action, "operation": "remove"})
+	_check(removed.get("ok", false), "configure_input_map remove ok")
+	_check(not ProjectSettings.has_setting("input/" + action), "action removed from project settings too")
+
+	var bad_op = pt.configure_input_map({"action": action, "operation": "sideways"})
+	_check(not bad_op.get("ok", true), "unknown input map operation is rejected")
+
+	# Autoloads. The script has to exist on disk — the tool refuses a missing one.
+	var auto_script := "res://__gdtest_autoload.gd"
+	_rm(auto_script)
+	var f := FileAccess.open(auto_script, FileAccess.WRITE)
+	f.store_string("extends Node\n\nfunc ping() -> String:\n\treturn \"pong\"\n")
+	f.close()
+
+	var missing = pt.setup_autoload({"operation": "add", "name": "GdTestMissing", "path": "res://__gdtest_nope.gd"})
+	_check(not missing.get("ok", true), "autoload add refuses a path that does not exist")
+
+	var reg = pt.setup_autoload({"operation": "add", "name": "GdTestSingleton", "path": auto_script})
+	_check(reg.get("ok", false), "setup_autoload add ok")
+	_check(ProjectSettings.has_setting("autoload/GdTestSingleton"), "autoload registered in project settings")
+	_check(str(pt.setup_autoload({"operation": "list"})).contains("GdTestSingleton"), "autoload appears in the list")
+
+	var unreg = pt.remove_autoload({"name": "GdTestSingleton"})
+	_check(unreg.get("ok", false), "remove_autoload ok")
+	_check(not ProjectSettings.has_setting("autoload/GdTestSingleton"), "autoload unregistered")
+	_check(not pt.remove_autoload({"name": "GdTestSingleton"}).get("ok", true), "removing a nonexistent autoload is an error")
+
+	# Both tools call ProjectSettings.save(); make sure nothing survives into the
+	# committed fixture.
+	ProjectSettings.save()
+	pt.free()
+	_rm(auto_script)
+	_rm(auto_script + ".uid")
+
+func _test_property_forwarder() -> void:
+	print("\n[generate_property_forwarder]")
+	var sc = preload("res://addons/godot_mcp/tools/script_tools.gd").new()
+	var target := "res://__gdtest_forward.gd"
+	_rm(target)
+	var f := FileAccess.open(target, FileAccess.WRITE)
+	f.store_string("extends Node\n\n@onready var inner: Node = $Inner\n")
+	f.close()
+
+	var gen = sc.generate_property_forwarder({
+		"script_path": target, "target_expression": "inner",
+		"property_name": "speed", "target_property": "speed", "type_hint": "float",
+	})
+	_check(gen.get("ok", false), "generate_property_forwarder ok")
+	var body := FileAccess.get_file_as_string(target)
+	_check(body.contains("speed"), "forwarded property appears in the script")
+	_check(sc.validate_script({"path": target}).get("valid", false), "generated forwarder compiles")
+
+	sc.free()
+	_rm(target)
+	_rm(target + ".uid")
