@@ -46,3 +46,17 @@ mcp-server/src/tests/fixtures/e2e-project/gut_results.xml
 
 # Build artifact: staged copy of addons/godot_mcp for the npm package
 mcp-server/bundled-addon/
+
+# The e2e fixture's copy of the addon. Generated, not authored: scripts/test-gd.ps1,
+# CI and the e2e suite each mirror addons/godot_mcp over it before running. Tracking
+# it meant every addon change had to be duplicated by hand or the committed copy went
+# stale — pure diff noise, and a stale copy silently tests the wrong code.
+mcp-server/src/tests/fixtures/e2e-project/addons/godot_mcp/
+
+# Internal planning and research: audits, competitive analysis, roadmaps.
+# Kept in the working tree so they live next to the code they describe, but never
+# committed — this repo is public. Nothing here has ever been in a commit, which
+# is the point: on a public repo, deleting a branch or force-pushing does NOT
+# remove the objects (they stay reachable by SHA through the fork network), so
+# "commit now, hide later" is not an option. See notes/LONGTERM.md.
+notes/
