@@ -41,6 +41,7 @@ import { ActivityFeed, type ActivityEvent } from './activity-feed.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
+import { findUnusedResources } from './project-scan.js';
 import { isDebugTool, handleDebugTool } from './debug-session.js';
 import { isLspTool, handleLspTool } from './lsp-session.js';
 
@@ -576,6 +577,23 @@ async function executeToolCall(
       ? ` Did you mean: ${close.map(n => `${n} (toolset: ${toolsetOf(n)})`).join(', ')}?`
       : ` Call list_toolsets to see every toolset and the tools it holds.`;
     throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}.${hint}`);
+  }
+
+  // Answered here rather than in the editor: it only reads files, and doing it
+  // on the editor's main thread froze the UI long enough to kill the bridge's
+  // own connection on a large project. Deliberately before the isConnected()
+  // guard — with GODOT_MCP_PROJECT set it works with Godot closed.
+  if (name === 'find_unused_resources') {
+    const root = godotBridge!.getStatus().projectPath ?? EXPECTED_PROJECT;
+    if (root) {
+      const payload = await findUnusedResources(root, {
+        includeAddons: toolArgs.include_addons === true,
+        includeScripts: toolArgs.include_scripts === true,
+        limit: typeof toolArgs.limit === 'number' ? toolArgs.limit : undefined,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    }
+    // No project path to scan; fall through to the editor-side implementation.
   }
 
   if (!godotBridge!.isConnected()) {

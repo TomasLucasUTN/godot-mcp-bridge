@@ -118,6 +118,45 @@ func _find_node(scene_root: Node, node_path: String) -> Node:
 		return scene_root
 	return scene_root.get_node_or_null(node_path)
 
+## Standard error for a node path that did not resolve.
+##
+## "Node not found: Player/Sprite" tells an agent that it was wrong; it does not
+## tell it what to try instead, and the usual next move is another guess. This
+## answers with the paths that DO exist, so one failed call is enough.
+## `label` distinguishes which argument was bad ("Parent node", "from_node").
+func _node_not_found(scene_root: Node, node_path: String, label: String = "Node") -> Dictionary:
+	var available := _node_paths_in(scene_root)
+	var near: Array[String] = []
+	for candidate in available:
+		# Godot's own similarity, so a near-miss on case or a missing segment
+		# still surfaces. 0.6 keeps the list short enough to be a suggestion.
+		if node_path.similarity(candidate) >= 0.6:
+			near.append(candidate)
+
+	var hint := ""
+	if not near.is_empty():
+		hint = " Did you mean: %s?" % ", ".join(near.slice(0, 5))
+	elif not available.is_empty():
+		var shown: Array[String] = available.slice(0, 20)
+		hint = " Paths in this scene: %s%s." % [
+			", ".join(shown),
+			" (+%d more)" % (available.size() - shown.size()) if available.size() > shown.size() else "",
+		]
+	return {&"ok": false, &"error": "%s not found: '%s'.%s" % [label, node_path, hint]}
+
+## Every node path in the scene, relative to its root, "." for the root itself.
+func _node_paths_in(scene_root: Node) -> Array[String]:
+	var out: Array[String] = ["."]
+	if scene_root == null:
+		return out
+	_collect_node_paths(scene_root, scene_root, out)
+	return out
+
+func _collect_node_paths(scene_root: Node, node: Node, out: Array[String]) -> void:
+	for child in node.get_children():
+		out.append(str(scene_root.get_path_to(child)))
+		_collect_node_paths(scene_root, child, out)
+
 func _parse_value(value: Variant) -> Variant:
 	return VariantCodec.parse_value(value)
 

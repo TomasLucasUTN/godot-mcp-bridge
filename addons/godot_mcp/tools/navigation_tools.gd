@@ -47,8 +47,9 @@ func setup_navigation_region(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var region: Node = ClassDB.instantiate(node_type)
 	region.name = node_name
@@ -104,8 +105,9 @@ func bake_navigation_mesh(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var is_2d := target is NavigationRegion2D
 	var is_3d := target is NavigationRegion3D
@@ -222,8 +224,9 @@ func setup_navigation_agent(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var agent: Node = ClassDB.instantiate(node_type)
 	agent.name = node_name
@@ -268,8 +271,9 @@ func set_navigation_layers(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"navigation_layers" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'navigation_layers' property" % [node_path, target.get_class()]}
@@ -305,8 +309,9 @@ func get_navigation_info(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var info: Dictionary = {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"node_type": target.get_class()}

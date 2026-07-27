@@ -156,6 +156,11 @@ func get_project_statistics(args: Dictionary) -> Dictionary:
 # =============================================================================
 # find_unused_resources
 # =============================================================================
+## NOTE: the MCP server normally answers this itself, from disk, and never
+## reaches this handler — a full sweep on the editor's main thread froze the UI
+## for 26s on a large project and outlived the bridge's own ping watchdog. See
+## mcp-server/src/project-scan.ts. This stays as the fallback for when the
+## server has no project path to scan; keep the two in step.
 func find_unused_resources(args: Dictionary) -> Dictionary:
 	var include_addons: bool = bool(args.get(&"include_addons", false))
 	var include_scripts: bool = bool(args.get(&"include_scripts", false))

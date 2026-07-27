@@ -34,8 +34,9 @@ func create_animation_tree(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var tree := AnimationTree.new()
 	tree.name = node_name
@@ -75,8 +76,9 @@ func get_animation_tree_structure(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is AnimationTree):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not an AnimationTree" % [node_path, target.get_class()]}
@@ -143,8 +145,9 @@ func add_state_machine_state(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is AnimationTree):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not an AnimationTree" % [node_path, target.get_class()]}
@@ -202,8 +205,9 @@ func remove_state_machine_state(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is AnimationTree):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not an AnimationTree" % [node_path, target.get_class()]}
@@ -285,8 +289,9 @@ func add_state_machine_transition(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is AnimationTree):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not an AnimationTree" % [node_path, target.get_class()]}
@@ -356,8 +361,9 @@ func remove_state_machine_transition(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is AnimationTree):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not an AnimationTree" % [node_path, target.get_class()]}

@@ -33,8 +33,9 @@ func add_raycast(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var raycast: Node = ClassDB.instantiate(node_type)
 	if not raycast:
@@ -101,8 +102,9 @@ func setup_collision(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var is_physics_node := false
 	for base_class: String in _PHYSICS_BASE_CLASSES:
@@ -285,8 +287,9 @@ func set_physics_layers(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"collision_layer" in target and &"collision_mask" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no collision_layer/collision_mask properties" % [node_path, target.get_class()]}
@@ -367,8 +370,9 @@ func get_collision_info(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"collision_layer" in target and &"collision_mask" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no collision_layer/collision_mask properties" % [node_path, target.get_class()]}
