@@ -21,17 +21,26 @@ var _connected := false
 var _reconnect_at_msec := 0
 var _project_path := ""
 
-# Circular buffer of recent runtime log lines. We grow it via push_runtime_log()
-# (called by user scripts that opt in) and via captured push_error/push_warning
-# through Engine.print_error_messages — but most prints come from the engine
-# via the editor's debugger, so get_runtime_log mirrors what the editor
-# already sees with a runtime-focused timestamp.
+# Circular buffer of recent runtime log lines, grown only by push_runtime_log():
+# MCPRuntime's own connection events, plus whatever user scripts opt into by
+# calling it. There is no supported way to intercept engine errors from inside a
+# running game, so those are NOT here — the editor sees them over the debugger
+# channel instead, and the debugger plugin in plugin.gd reports them as activity.
 var _log_ring: Array = []
 var _started_at_msec := 0
 # Active monitor_properties jobs: each samples get_indexed() on a node's
 # properties once per _process frame for N frames, then sends its tool_result.
 var _monitor_jobs: Array = []
 var _replay_jobs: Array = []
+
+# Activity the agent is told about as it happens, over the same push channel the
+# editor plugin uses. Scoped to what only the running game can see: the editor
+# has no way to know that change_scene_to_file() just swapped the scene out, and
+# every runtime node path the agent is holding is relative to that scene.
+# Ids are this instance's own sequence, not the editor activity log's — the two
+# streams are told apart by `source`, not by id.
+var _activity_seq := 0
+var _last_scene: Node = null
 
 
 func _ready() -> void:
@@ -76,6 +85,7 @@ func _process(_delta: float) -> void:
 
 		_tick_monitors()
 		_tick_replays()
+		_tick_scene_awareness()
 
 	elif st == WebSocketPeer.STATE_CLOSED:
 		if _connected:
@@ -910,6 +920,44 @@ func push_runtime_log(level: String, text: String) -> void:
 		"ts_ms": Time.get_ticks_msec(),
 		"level": level,
 		"text": text,
+	})
+
+
+# =============================================================================
+# Runtime awareness — push what changed in the running game, unsolicited
+# =============================================================================
+## Notice when the running game swaps its scene. Compared by object identity
+## rather than path so that reloading the same scene still counts as a change:
+## every node the agent resolved is gone either way.
+func _tick_scene_awareness() -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	var current := tree.current_scene
+	if current == _last_scene:
+		return
+	# The first scene seen is the game starting, not a change. Distinguished
+	# because the two mean different things to an agent: one invalidates node
+	# paths it already holds, the other is just "there is a game now".
+	var first := _last_scene == null
+	_last_scene = current
+	_push_activity(
+		"game_started" if first else "game_scene_changed",
+		current.scene_file_path if current else ""
+	)
+
+
+func _push_activity(type: String, detail) -> void:
+	_activity_seq += 1
+	_send({
+		"type": "editor_activity",
+		"event": {
+			"id": _activity_seq,
+			"t_ms": Time.get_ticks_msec(),
+			"type": type,
+			"detail": detail,
+			"source": "runtime",
+		},
 	})
 
 

@@ -37,11 +37,26 @@ const COALESCE_MS = 250;
 const BUFFER_CAP = 50;
 
 export interface ActivityEvent {
+  /**
+   * Per-source sequence, not global: the editor's activity log, the runtime
+   * autoload and the debugger watch each number their own. `source` is what
+   * tells the streams apart; only the editor's ids drive the poll cursor.
+   */
   id: number;
   type: string;
   detail: unknown;
-  source: 'human' | 'agent' | string;
+  /**
+   * `human` — the developer did it in the editor. `agent` — the agent's own
+   * tool call caused it, and is filtered out. `runtime` — the running game
+   * reported it (a scene swap from the autoload, a crash from the debugger).
+   */
+  source: 'human' | 'agent' | 'runtime' | string;
   t_ms?: number;
+}
+
+/** Sources worth waking the agent for: everything except its own edits. */
+function isNoteworthy(source: unknown): boolean {
+  return source === 'human' || source === 'runtime';
 }
 
 /** Calls get_editor_activity. Returns null when the editor is not connected. */
@@ -53,7 +68,7 @@ export class ActivityFeed {
   private coalesceTimer: NodeJS.Timeout | null = null;
   private cursor = 0;
   private buffered: ActivityEvent[] = [];
-  private lastNotifiedId = 0;
+  private pendingNotify = false;
   private pushSeen = false;
 
   constructor(
@@ -74,14 +89,20 @@ export class ActivityFeed {
 
   /**
    * An event the addon pushed, unsolicited. Same filtering as a polled one: the
-   * agent is only told about what the DEVELOPER did.
+   * agent is told about the developer and about the running game, never about
+   * its own edits.
    */
   push(event: ActivityEvent): void {
     this.pushSeen = true;
     if (this.subscribers.size === 0) return;
-    if (event?.source !== 'human') return;
-    const id = Number(event.id ?? 0);
-    if (id > this.cursor) this.cursor = id;
+    if (!isNoteworthy(event?.source)) return;
+    // Only the editor's ids belong to the poll cursor. A runtime event carries
+    // its own sequence, and letting it advance the cursor would skip whatever
+    // the editor buffered under those same numbers.
+    if (event.source === 'human') {
+      const id = Number(event.id ?? 0);
+      if (id > this.cursor) this.cursor = id;
+    }
     this.buffered = [...this.buffered, event].slice(-BUFFER_CAP);
     this.scheduleNotify();
     // Polling was only ever a stand-in for this; slow it right down now that
@@ -151,23 +172,24 @@ export class ActivityFeed {
 
     this.cursor = result.latest_id ?? this.cursor;
 
-    // Only the developer's own actions are worth waking the agent for: the
-    // agent already knows what it did itself, and notifying on its own edits
-    // would make every tool call trigger a round trip.
-    const human = (result.events ?? []).filter((e) => e.source === 'human');
-    if (human.length === 0) return;
+    // The agent already knows what it did itself, and notifying on its own
+    // edits would make every tool call trigger a round trip.
+    const noteworthy = (result.events ?? []).filter((e) => isNoteworthy(e.source));
+    if (noteworthy.length === 0) return;
 
-    this.buffered = [...this.buffered, ...human].slice(-BUFFER_CAP);
+    this.buffered = [...this.buffered, ...noteworthy].slice(-BUFFER_CAP);
     this.scheduleNotify();
   }
 
   private scheduleNotify(): void {
+    this.pendingNotify = true;
     if (this.coalesceTimer) return;
     this.coalesceTimer = setTimeout(() => {
       this.coalesceTimer = null;
-      const newest = this.buffered.at(-1)?.id ?? 0;
-      if (newest <= this.lastNotifiedId) return;
-      this.lastNotifiedId = newest;
+      // A flag rather than a high-water id: ids are per-source now, so "newer
+      // than the last one notified" is not a question a single number answers.
+      if (!this.pendingNotify) return;
+      this.pendingNotify = false;
       void this.server
         .notification({ method: 'notifications/resources/updated', params: { uri: ACTIVITY_URI } })
         .catch((err) => this.log('debug', `activity notification failed: ${err}`));
@@ -190,6 +212,48 @@ export class ActivityFeed {
  */
 export function summarizeActivity(events: ActivityEvent[]): string {
   if (events.length === 0) return 'Nothing since you last looked.';
+
+  const sentences = [
+    summarizeDeveloper(events.filter((e) => e.source !== 'runtime')),
+    summarizeGame(events.filter((e) => e.source === 'runtime')),
+  ].filter(Boolean);
+  return sentences.length > 0 ? sentences.join(' ') : `${events.length} event(s).`;
+}
+
+/**
+ * The running game's events are state transitions, not a tally — three scene
+ * changes in a row mean the game is in the third scene, and counting them helps
+ * nobody. So this reports the latest state, with a crash always called out
+ * because it is the one an agent must not silently work past.
+ */
+function summarizeGame(events: ActivityEvent[]): string {
+  if (events.length === 0) return '';
+  if (events.some((e) => e.type === 'game_crashed')) {
+    return 'The game crashed — call get_runtime_log for the error.';
+  }
+  const last = events[events.length - 1];
+  const where = describeDetail(last.detail);
+  switch (last.type) {
+    case 'game_paused':
+      return 'The game is paused in the debugger.';
+    case 'game_stopped':
+      return 'The game stopped.';
+    case 'game_scene_changed':
+      // The consequence matters more than the fact: every runtime node path the
+      // agent resolved before this points at a freed node.
+      return `The game switched to ${where || 'another scene'}, so runtime node paths from before it are stale.`;
+    case 'game_started':
+    case 'game_running':
+      return `The game is running${where ? ` (${where})` : ''}.`;
+    case 'game_resumed':
+      return 'The game resumed.';
+    default:
+      return '';
+  }
+}
+
+function summarizeDeveloper(events: ActivityEvent[]): string {
+  if (events.length === 0) return '';
 
   const counts = new Map<string, number>();
   const detailsByType = new Map<string, string[]>();
@@ -236,7 +300,7 @@ export function summarizeActivity(events: ActivityEvent[]): string {
   const screen = detailsByType.get('main_screen');
   if (screen?.length) parts.push(`switched to the ${screen[screen.length - 1]} screen`);
 
-  if (parts.length === 0) return `${events.length} editor event(s).`;
+  if (parts.length === 0) return '';
   const last = parts.pop() as string;
   const joined = parts.length > 0 ? `${parts.join(', ')} and ${last}` : last;
   return `The developer ${joined}.`;

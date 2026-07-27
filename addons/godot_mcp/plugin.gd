@@ -48,6 +48,11 @@ func _enter_tree() -> void:
 	# Push each human action to the server as it happens, rather than having the
 	# server poll for them on a timer.
 	_activity.human_activity.connect(_on_human_activity)
+	# A running game's crash is only visible on this side, over the debugger
+	# channel — the game itself cannot report its own death.
+	_debugger_watch = McpDebuggerWatchScript.new()
+	_debugger_watch.game_event.connect(_on_debugger_game_event)
+	add_debugger_plugin(_debugger_watch)
 
 	# Start connection
 	_mcp_client.connect_to_server()
@@ -98,6 +103,10 @@ func _exit_tree() -> void:
 	if _status_label:
 		remove_control_from_container(EditorPlugin.CONTAINER_TOOLBAR, _status_label)
 		_status_label.queue_free()
+
+	if _debugger_watch:
+		remove_debugger_plugin(_debugger_watch)
+		_debugger_watch = null
 
 	print("[Godot MCP] Plugin unloaded")
 
@@ -180,6 +189,8 @@ func _on_client_count_changed(count: int) -> void:
 # headless (an EditorPlugin cannot be instantiated outside the editor).
 const McpActivityLogScript = preload("res://addons/godot_mcp/utils/activity_log.gd")
 var _activity := McpActivityLogScript.new()
+const McpDebuggerWatchScript = preload("res://addons/godot_mcp/utils/debugger_watch.gd")
+var _debugger_watch: EditorDebuggerPlugin = null
 
 func _connect_awareness_signals() -> void:
 	# EditorPlugin's own scene lifecycle signals.
@@ -220,6 +231,17 @@ func _record_activity(type: String, detail) -> void:
 	_activity.record(type, detail)
 
 func _on_human_activity(event: Dictionary) -> void:
+	if _mcp_client:
+		_mcp_client.send_editor_activity(event)
+
+## The debugger's view of the running game. Recorded with the agent window
+## deliberately bypassed: the game crashing is worth telling the agent about
+## even when the agent is the one who just launched it.
+func _on_debugger_game_event(type: String, detail) -> void:
+	var event := {
+		&"id": 0, &"t_ms": Time.get_ticks_msec(),
+		&"type": type, &"detail": detail, &"source": &"runtime",
+	}
 	if _mcp_client:
 		_mcp_client.send_editor_activity(event)
 

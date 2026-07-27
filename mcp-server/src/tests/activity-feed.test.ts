@@ -256,3 +256,85 @@ describe('summarizeActivity', () => {
     expect(s.endsWith('.')).toBe(true);
   });
 });
+
+/**
+ * The running game is a second source. It reports what only it can see — the
+ * autoload knows its scene was swapped, the editor's debugger knows the game
+ * died — and neither is the developer, so neither may be filtered out as the
+ * agent's own work.
+ */
+describe('ActivityFeed — the running game', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const runtime = (type: string, detail: unknown = '', id = 1): ActivityEvent =>
+    ({ id, type, detail, source: 'runtime' });
+
+  it('notifies on a pushed runtime event', async () => {
+    const server = makeServer();
+    const feed = new ActivityFeed(server, vi.fn().mockResolvedValue(null));
+    feed.subscribe(ACTIVITY_URI);
+
+    feed.push(runtime('game_crashed', { can_debug: false }));
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(server.notification).toHaveBeenCalledTimes(1);
+    feed.stop();
+  });
+
+  it('keeps runtime ids out of the editor poll cursor', () => {
+    // The two sources number their events independently. A runtime event with
+    // id 900 must not make the feed skip the editor's events 1..900.
+    const feed = new ActivityFeed(makeServer(), vi.fn().mockResolvedValue(null));
+    feed.subscribe(ACTIVITY_URI);
+
+    feed.push(runtime('game_started', 'res://main.tscn', 900));
+
+    expect(feed.snapshot().latest_id).toBe(0);
+    feed.stop();
+  });
+
+  it('notifies again for a second runtime event with a lower id', async () => {
+    // Regression: dedup used to be "id higher than the last notified", which a
+    // second source's independent sequence silently defeats.
+    const server = makeServer();
+    const feed = new ActivityFeed(server, vi.fn().mockResolvedValue(null));
+    feed.subscribe(ACTIVITY_URI);
+
+    feed.push(runtime('game_started', 'res://a.tscn', 50));
+    await vi.advanceTimersByTimeAsync(500);
+    feed.push(runtime('game_crashed', { can_debug: false }, 1));
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(server.notification).toHaveBeenCalledTimes(2);
+    feed.stop();
+  });
+
+  it('reports the game state rather than counting transitions', () => {
+    const s = summarizeActivity([
+      runtime('game_started', 'res://menu.tscn', 1),
+      runtime('game_scene_changed', 'res://level_1.tscn', 2),
+      runtime('game_scene_changed', 'res://level_2.tscn', 3),
+    ]);
+    expect(s).toContain('level_2.tscn');
+    expect(s).toContain('stale');
+    expect(s).not.toContain('menu.tscn');
+  });
+
+  it('calls out a crash even when a later event superseded it', () => {
+    const s = summarizeActivity([
+      runtime('game_crashed', { can_debug: false }, 1),
+      runtime('game_stopped', '', 2),
+    ]);
+    expect(s).toContain('crashed');
+  });
+
+  it('reports the developer and the game in one summary', () => {
+    const s = summarizeActivity([
+      { id: 1, type: 'scene_saved', detail: 'res://a.tscn', source: 'human' },
+      runtime('game_crashed', { can_debug: false }, 1),
+    ]);
+    expect(s).toContain('The developer saved a.tscn');
+    expect(s).toContain('The game crashed');
+  });
+});
