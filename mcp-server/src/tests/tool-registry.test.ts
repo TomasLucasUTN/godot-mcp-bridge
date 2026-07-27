@@ -100,3 +100,26 @@ describe('Tool registry', () => {
     }
   });
 });
+
+/**
+ * server.json is what the MCP registry publishes, and it is a separate file from
+ * package.json with its own copy of the version. `npm version` does not touch it.
+ *
+ * That drift is not theoretical: 1.1.4 was tagged and released with server.json
+ * still saying 1.1.3. The release workflow caught it, but only at release time —
+ * after npm was already published and the tag already pushed, which then had to
+ * be moved. Checking it here means a mismatch fails on the push that caused it.
+ */
+describe('version consistency', () => {
+  const read = (p: string) =>
+    JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8')) as Record<string, any>;
+
+  it('server.json agrees with package.json', () => {
+    const pkg = read('../../package.json');
+    const server = read('../../server.json');
+    expect(server.version).toBe(pkg.version);
+    // The registry installs packages[0]; a stale entry there advertises a
+    // version that npm may not have.
+    expect(server.packages[0].version).toBe(pkg.version);
+  });
+});
