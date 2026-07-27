@@ -369,7 +369,9 @@ func _collect_mesh_files(dir_path: String, out: PackedStringArray, depth: int = 
 		fname = dir.get_next()
 	dir.list_dir_end()
 
-func _walk_for_issues(node: Node, issues: Array) -> void:
+func _walk_for_issues(node: Node, issues: Array, root: Node = null) -> void:
+	if root == null:
+		root = node
 	var node_class := node.get_class()
 	if _REQUIRED_RESOURCE_PROPS.has(node_class):
 		for prop_name in _REQUIRED_RESOURCE_PROPS[node_class]:
@@ -381,8 +383,47 @@ func _walk_for_issues(node: Node, issues: Array) -> void:
 					&"property": prop_name,
 					&"issue": "'%s' is empty on this %s" % [prop_name, node_class],
 				})
+	if node != root and not node.scene_file_path.is_empty():
+		var lost := _script_lost_by_instance(node)
+		if not lost.is_empty():
+			issues.append({
+				&"node_path": _relative_path(node),
+				&"node_class": node_class,
+				&"property": "script",
+				&"issue": "Instance of %s has no script, but that scene's root carries %s. A 'script = null' override silently disables the node - it stops running _ready/_process with no error." % [node.scene_file_path, lost],
+			})
 	for child in node.get_children():
-		_walk_for_issues(child, issues)
+		_walk_for_issues(child, issues, root)
+
+## Script an instanced node should have inherited from its source scene but
+## does not, or "" when nothing is wrong.
+##
+## This exists because of a real incident: a Player instance came back with
+## `script = null` written as an instance override, and the character simply
+## stopped moving - no script, no _physics_process, no error anywhere. Neither
+## the disk path nor the live path reproduces it, so rather than keep guessing
+## at the cause, the failure mode is at least no longer silent.
+##
+## The source scene is read through SceneState instead of being instantiated:
+## instantiating it here would pull in its whole dependency chain for every
+## instanced node in the tree.
+func _script_lost_by_instance(node: Node) -> String:
+	if node.get_script() != null:
+		return ""
+	var packed := load(node.scene_file_path) as PackedScene
+	if packed == null:
+		return ""
+	var state := packed.get_state()
+	if state == null or state.get_node_count() == 0:
+		return ""
+	for i in range(state.get_node_property_count(0)):
+		if state.get_node_property_name(0, i) != &"script":
+			continue
+		var value = state.get_node_property_value(0, i)
+		if value is Script:
+			var path: String = value.resource_path
+			return path if not path.is_empty() else "a built-in script"
+	return ""
 
 func _relative_path(node: Node) -> String:
 	# The scene root has owner == null; walk up via owner to find it so the

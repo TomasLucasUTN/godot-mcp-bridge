@@ -80,8 +80,9 @@ func add_mesh_instance(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.name = node_name
@@ -122,8 +123,9 @@ func setup_lighting(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var light: Node3D
 	var node_type: String
@@ -185,8 +187,9 @@ func set_material_3d(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"material_override" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'material_override' property" % [node_path, target.get_class()]}
@@ -350,8 +353,9 @@ func setup_camera_3d(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var camera := Camera3D.new()
 	camera.name = node_name
@@ -397,8 +401,9 @@ func add_gridmap(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var gridmap := GridMap.new()
 	gridmap.name = node_name
@@ -483,8 +488,9 @@ func get_skeleton_info(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var out := {&"ok": true, &"scene_path": scene_path, &"node_path": node_path}
 
@@ -549,8 +555,9 @@ func add_bone(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	if target is Skeleton3D:
 		var sk := target as Skeleton3D
@@ -656,8 +663,9 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	if target is Skeleton3D:
 		var sk := target as Skeleton3D

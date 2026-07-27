@@ -38,8 +38,9 @@ func add_audio_player(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var player: Node = ClassDB.instantiate(node_type)
 	if not player:

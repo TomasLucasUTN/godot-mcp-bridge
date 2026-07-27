@@ -36,22 +36,64 @@ export async function probeExistingServer(port: number): Promise<ProbeResult> {
 }
 
 /**
- * Register this proxy client with the primary (increments AI client count).
+ * Identity of this proxy process, stable for its lifetime. The primary keys its
+ * client set on this, so repeated registrations are the same client saying it is
+ * still alive rather than a new one arriving.
+ */
+export const PROXY_CLIENT_ID = `proxy-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * How often to re-announce. Comfortably under the primary's 90s TTL, so a
+ * missed beat or two does not drop us off the list.
+ */
+const HEARTBEAT_INTERVAL = 30_000;
+
+let heartbeat: NodeJS.Timeout | null = null;
+
+/**
+ * Register this proxy client with the primary and keep re-announcing.
+ *
+ * The heartbeat is what makes the primary's count self-correcting: the
+ * unregister below only runs on a graceful shutdown, so anything harder —
+ * SIGKILL, a crash, a host going to sleep — is caught by the entry simply
+ * going stale.
  */
 export async function registerProxyClient(port: number): Promise<void> {
+  await announce(port);
+
+  if (!heartbeat) {
+    heartbeat = setInterval(() => { void announce(port); }, HEARTBEAT_INTERVAL);
+    // Do not hold the event loop open on our account.
+    heartbeat.unref();
+  }
+}
+
+async function announce(port: number): Promise<void> {
   try {
-    await httpPost(`http://127.0.0.1:${port}/client/register`, '', REQUEST_TIMEOUT);
+    await httpPost(
+      `http://127.0.0.1:${port}/client/register`,
+      JSON.stringify({ client_id: PROXY_CLIENT_ID }),
+      REQUEST_TIMEOUT
+    );
   } catch {
-    // Non-fatal — primary may not support this endpoint yet
+    // Non-fatal — primary may be gone, or predate this endpoint.
   }
 }
 
 /**
- * Unregister this proxy client from the primary (decrements AI client count).
+ * Unregister this proxy client from the primary and stop the heartbeat.
  */
 export async function unregisterProxyClient(port: number): Promise<void> {
+  if (heartbeat) {
+    clearInterval(heartbeat);
+    heartbeat = null;
+  }
   try {
-    await httpPost(`http://127.0.0.1:${port}/client/unregister`, '', REQUEST_TIMEOUT);
+    await httpPost(
+      `http://127.0.0.1:${port}/client/unregister`,
+      JSON.stringify({ client_id: PROXY_CLIENT_ID }),
+      REQUEST_TIMEOUT
+    );
   } catch {
     // Non-fatal
   }

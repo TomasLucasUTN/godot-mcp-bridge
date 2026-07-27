@@ -165,8 +165,9 @@ func assign_shader_material(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var slot := _resolve_material_slot(target, surface_index)
 	if not slot[&"ok"]:
@@ -216,8 +217,9 @@ func set_shader_param(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var slot := _resolve_material_slot(target, int(args.get(&"surface_index", -1)))
 	if not slot[&"ok"]:
@@ -262,8 +264,9 @@ func get_shader_params(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var slot := _resolve_material_slot(target, int(args.get(&"surface_index", -1)))
 	if not slot[&"ok"]:

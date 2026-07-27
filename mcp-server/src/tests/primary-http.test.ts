@@ -164,44 +164,81 @@ describe('PrimaryHttpServer — endpoints', () => {
     expect(executor).toHaveBeenCalledWith('some_tool', {});
   });
 
-  it('POST /client/register increments proxy client count', async () => {
+  it('POST /client/register counts distinct client ids', async () => {
     const port = getPort();
     const executor: ToolExecutor = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
     server = new PrimaryHttpServer(port, '1.2.3', executor, 0);
     await server.start();
 
-    const res1 = await request(port, 'POST', '/client/register', '');
+    const res1 = await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'a' }));
     expect(res1.body.proxy_clients).toBe(1);
 
-    const res2 = await request(port, 'POST', '/client/register', '');
+    const res2 = await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'b' }));
     expect(res2.body.proxy_clients).toBe(2);
 
     expect(server.getProxyClientCount()).toBe(2);
   });
 
-  it('POST /client/unregister decrements proxy client count', async () => {
+  it('re-registering the same id is a heartbeat, not a new client', async () => {
     const port = getPort();
     const executor: ToolExecutor = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
     server = new PrimaryHttpServer(port, '1.2.3', executor, 0);
     await server.start();
 
-    await request(port, 'POST', '/client/register', '');
-    await request(port, 'POST', '/client/register', '');
+    const body = JSON.stringify({ client_id: 'a' });
+    await request(port, 'POST', '/client/register', body);
+    await request(port, 'POST', '/client/register', body);
+    const res = await request(port, 'POST', '/client/register', body);
 
-    const res = await request(port, 'POST', '/client/unregister', '');
     expect(res.body.proxy_clients).toBe(1);
     expect(server.getProxyClientCount()).toBe(1);
   });
 
-  it('POST /client/unregister does not go below 0', async () => {
+  it('POST /client/unregister drops only that id', async () => {
     const port = getPort();
     const executor: ToolExecutor = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
     server = new PrimaryHttpServer(port, '1.2.3', executor, 0);
     await server.start();
 
-    const res = await request(port, 'POST', '/client/unregister', '');
+    await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'a' }));
+    await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'b' }));
+
+    const res = await request(port, 'POST', '/client/unregister', JSON.stringify({ client_id: 'a' }));
+    expect(res.body.proxy_clients).toBe(1);
+    expect(server.getProxyClientCount()).toBe(1);
+  });
+
+  it('unregistering an unknown id is a no-op', async () => {
+    const port = getPort();
+    const executor: ToolExecutor = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
+    server = new PrimaryHttpServer(port, '1.2.3', executor, 0);
+    await server.start();
+
+    const res = await request(port, 'POST', '/client/unregister', JSON.stringify({ client_id: 'ghost' }));
     expect(res.body.proxy_clients).toBe(0);
     expect(server.getProxyClientCount()).toBe(0);
+  });
+
+  // The bug this whole scheme exists for: a client that dies without
+  // unregistering used to be counted forever, so the editor toolbar drifted up
+  // to "Agents (4)" with one client open.
+  it('a client that stops heartbeating expires', async () => {
+    const port = getPort();
+    const executor: ToolExecutor = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
+    server = new PrimaryHttpServer(port, '1.2.3', executor, 0);
+    await server.start();
+
+    await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'a' }));
+    expect(server.getProxyClientCount()).toBe(1);
+
+    const realNow = Date.now;
+    try {
+      const gone = realNow() + PrimaryHttpServer.CLIENT_TTL_MS + 1;
+      Date.now = () => gone;
+      expect(server.getProxyClientCount()).toBe(0);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it('client count change callback fires on register/unregister', async () => {
@@ -212,9 +249,9 @@ describe('PrimaryHttpServer — endpoints', () => {
     server.setClientCountChangeCallback((c) => counts.push(c));
     await server.start();
 
-    await request(port, 'POST', '/client/register', '');
-    await request(port, 'POST', '/client/register', '');
-    await request(port, 'POST', '/client/unregister', '');
+    await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'a' }));
+    await request(port, 'POST', '/client/register', JSON.stringify({ client_id: 'b' }));
+    await request(port, 'POST', '/client/unregister', JSON.stringify({ client_id: 'b' }));
 
     expect(counts).toEqual([1, 2, 1]);
   });

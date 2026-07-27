@@ -49,8 +49,9 @@ func create_particles(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var particles: Node = ClassDB.instantiate(node_type)
 	if not particles:
@@ -97,8 +98,9 @@ func set_particle_material(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not _is_particles_node(target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}
@@ -160,8 +162,9 @@ func set_particle_color_gradient(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not _is_particles_node(target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}
@@ -222,8 +225,9 @@ func apply_particle_preset(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not _is_particles_node(target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}
@@ -317,8 +321,9 @@ func get_particle_info(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not _is_particles_node(target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a GPUParticles2D/3D" % [node_path, target.get_class()]}

@@ -55,8 +55,9 @@ func mp_add_spawner(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var spawner := MultiplayerSpawner.new()
 	spawner.name = node_name
@@ -135,8 +136,9 @@ func mp_add_synchronizer(args: Dictionary) -> Dictionary:
 
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var config := SceneReplicationConfig.new()
 	for spec in prop_specs:

@@ -5,13 +5,15 @@
  * Endpoints:
  *   GET  /health             → { server, version, godot_connected }
  *   POST /tool               → { name, args } → MCP-formatted result
- *   POST /client/register    → increment proxy client count
- *   POST /client/unregister  → decrement proxy client count
+ *   POST /client/register    → { client_id } — register/heartbeat a proxy client
+ *   POST /client/unregister  → { client_id } — drop a proxy client
  */
 
 import http from 'node:http';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+
+const ANONYMOUS_CLIENT_ID = 'anonymous';
 
 export interface ToolCallResult {
   content: Array<{ type: string; text: string }>;
@@ -24,13 +26,34 @@ export type ToolExecutor = (
 ) => Promise<ToolCallResult>;
 
 export class PrimaryHttpServer {
+  /**
+   * How long a client may go unheard-from before it is presumed gone. Proxies
+   * re-register on a shorter interval, so this only expires something that has
+   * genuinely stopped running.
+   */
+  static readonly CLIENT_TTL_MS = 90_000;
+
   private server: http.Server | null = null;
   private port: number;
   private serverVersion: string;
   private executeToolCall: ToolExecutor;
   private lastActivityTime = Date.now();
-  private proxyClientCount = 0;
+  /**
+   * Connected proxy clients, by id, with the time each was last heard from.
+   *
+   * This used to be a bare counter: +1 on register, -1 on unregister. A proxy
+   * only unregisters from its own shutdown handler (stdin close, SIGINT,
+   * SIGTERM), so anything harder — SIGKILL, a client that force-terminates its
+   * MCP servers, a crash, a sleeping machine — skipped it and the primary never
+   * found out. The number could only climb, and the editor toolbar ended up
+   * advertising "Agents (4)" with one client open.
+   *
+   * A set with a last-seen stamp cannot leak: an entry nothing has refreshed
+   * within CLIENT_TTL_MS is gone, whether or not its process said goodbye.
+   */
+  private proxyClients = new Map<string, number>();
   private onClientCountChange: ((count: number) => void) | null = null;
+  private sweepTimer: NodeJS.Timeout | null = null;
 
   private toolCount: number;
 
@@ -45,12 +68,44 @@ export class PrimaryHttpServer {
     return this.lastActivityTime;
   }
 
+  /** Live clients, stale entries dropped first. */
   getProxyClientCount(): number {
-    return this.proxyClientCount;
+    this.reapStaleClients();
+    return this.proxyClients.size;
+  }
+
+  /**
+   * Forget clients nothing has heard from in a while.
+   *
+   * Called on every register/unregister and on every read of the count, plus
+   * from the sweep timer — the last client to die has nobody left to trigger a
+   * lazy reap, and the editor's toolbar would otherwise keep advertising it.
+   */
+  private reapStaleClients(): void {
+    const cutoff = Date.now() - PrimaryHttpServer.CLIENT_TTL_MS;
+    for (const [id, seen] of this.proxyClients) {
+      if (seen < cutoff) this.proxyClients.delete(id);
+    }
+  }
+
+  /** Record a client as alive right now. Returns the live count. */
+  private touchClient(id: string): number {
+    this.proxyClients.set(id, Date.now());
+    this.reapStaleClients();
+    return this.proxyClients.size;
   }
 
   setClientCountChangeCallback(cb: (count: number) => void): void {
     this.onClientCountChange = cb;
+  }
+
+  /** Drop expired clients and report if that changed the count. */
+  private sweep(): void {
+    const before = this.proxyClients.size;
+    this.reapStaleClients();
+    if (this.proxyClients.size !== before) {
+      this.onClientCountChange?.(this.proxyClients.size);
+    }
   }
 
   start(): Promise<void> {
@@ -60,6 +115,9 @@ export class PrimaryHttpServer {
       this.server.on('error', (err) => {
         reject(err);
       });
+
+      this.sweepTimer = setInterval(() => this.sweep(), PrimaryHttpServer.CLIENT_TTL_MS / 3);
+      this.sweepTimer.unref();
 
       this.server.listen(this.port, '127.0.0.1', () => {
         resolve();
@@ -72,6 +130,10 @@ export class PrimaryHttpServer {
   }
 
   stop(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
     if (this.server) {
       this.server.close();
       this.server = null;
@@ -111,18 +173,27 @@ export class PrimaryHttpServer {
       }
 
       if (req.method === 'POST' && req.url === '/client/register') {
-        this.proxyClientCount++;
-        this.onClientCountChange?.(this.proxyClientCount);
+        // Doubles as the heartbeat: a proxy re-posts here periodically, which
+        // refreshes its entry. The id keeps that idempotent — re-registering
+        // means "still here", not "here is another one".
+        const id = clientIdFrom(await readBody(req));
+        const count = this.touchClient(id);
+        this.onClientCountChange?.(count);
         res.writeHead(200);
-        res.end(JSON.stringify({ proxy_clients: this.proxyClientCount }));
+        res.end(JSON.stringify({
+          proxy_clients: count,
+          client_id: id,
+          ttl_ms: PrimaryHttpServer.CLIENT_TTL_MS,
+        }));
         return;
       }
 
       if (req.method === 'POST' && req.url === '/client/unregister') {
-        this.proxyClientCount = Math.max(0, this.proxyClientCount - 1);
-        this.onClientCountChange?.(this.proxyClientCount);
+        this.proxyClients.delete(clientIdFrom(await readBody(req)));
+        const count = this.getProxyClientCount();
+        this.onClientCountChange?.(count);
         res.writeHead(200);
-        res.end(JSON.stringify({ proxy_clients: this.proxyClientCount }));
+        res.end(JSON.stringify({ proxy_clients: count }));
         return;
       }
 
@@ -137,6 +208,23 @@ export class PrimaryHttpServer {
         res.end(JSON.stringify({ error: message }));
       }
     }
+  }
+}
+
+/**
+ * Pull the client id out of a register/unregister body.
+ *
+ * A proxy from an older build posts an empty body. Those collapse onto one
+ * shared id: they never heartbeat either, so their entry expires on the TTL —
+ * an old client can be undercounted, but no version of it can inflate the tally.
+ */
+function clientIdFrom(body: string): string {
+  if (!body) return ANONYMOUS_CLIENT_ID;
+  try {
+    const id = (JSON.parse(body) as { client_id?: unknown }).client_id;
+    return typeof id === 'string' && id ? id : ANONYMOUS_CLIENT_ID;
+  } catch {
+    return ANONYMOUS_CLIENT_ID;
   }
 }
 

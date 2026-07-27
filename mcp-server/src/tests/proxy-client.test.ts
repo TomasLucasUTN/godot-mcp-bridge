@@ -73,22 +73,25 @@ describe('registerProxyClient / unregisterProxyClient', () => {
   let server: PrimaryHttpServer;
   const noop: ToolExecutor = async () => ({ content: [{ type: 'text', text: 'ok' }] });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Also stops the heartbeat this process may have started.
+    await unregisterProxyClient(TEST_PORT);
     server?.stop();
   });
 
-  it('register increments and unregister decrements the count', async () => {
+  it('registering twice from one process still counts as one client', async () => {
     server = new PrimaryHttpServer(TEST_PORT, '0.4.1', noop, 0);
     await server.start();
 
     await registerProxyClient(TEST_PORT);
     expect(server.getProxyClientCount()).toBe(1);
 
+    // A second call is the same process re-announcing, not a new agent.
     await registerProxyClient(TEST_PORT);
-    expect(server.getProxyClientCount()).toBe(2);
+    expect(server.getProxyClientCount()).toBe(1);
 
     await unregisterProxyClient(TEST_PORT);
-    expect(server.getProxyClientCount()).toBe(1);
+    expect(server.getProxyClientCount()).toBe(0);
   });
 
   it('register does not throw when server is down', async () => {

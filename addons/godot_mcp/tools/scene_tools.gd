@@ -334,8 +334,9 @@ func add_node(args: Dictionary) -> Dictionary:
 	var root: Node = result[0]
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		root.queue_free()
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var new_node: Node = ClassDB.instantiate(node_type) as Node
 	if not new_node:
@@ -417,8 +418,9 @@ func remove_node(args: Dictionary) -> Dictionary:
 	var root: Node = result[0]
 	var target = root.get_node_or_null(node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var n_name = target.name
 	var n_type = target.get_class()
@@ -518,8 +520,9 @@ func rename_node(args: Dictionary) -> Dictionary:
 	var root: Node = result[0]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var old_name = target.name
 	target.name = new_name
@@ -556,13 +559,15 @@ func move_node(args: Dictionary) -> Dictionary:
 	var root: Node = result[0]
 	var target = root.get_node_or_null(node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var new_parent = _find_node(root, new_parent_path)
 	if not new_parent:
+		var err := _node_not_found(root, new_parent_path, "New parent")
 		root.queue_free()
-		return {&"ok": false, &"error": "New parent not found: " + new_parent_path}
+		return err
 
 	# Clear the owner before reparenting so add_child doesn't warn about an owner
 	# that isn't an ancestor of the new location yet; re-own the whole subtree after.
@@ -605,8 +610,9 @@ func duplicate_node(args: Dictionary) -> Dictionary:
 	var root: Node = result[0]
 	var target = root.get_node_or_null(node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var parent = target.get_parent()
 	if not parent:
@@ -687,7 +693,7 @@ func _reparent_node(node: Node, new_parent: Node, owner: Node, index: int) -> vo
 func _add_node_live(root: Node, scene_path: String, node_name: String, node_type: String, parent_path: String, properties: Dictionary, script_path: String, children: Array, groups: Array) -> Dictionary:
 	var parent := _find_node(root, parent_path)
 	if not parent:
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return _node_not_found(root, parent_path, "Parent node")
 	var new_node: Node = ClassDB.instantiate(node_type) as Node
 	if not new_node:
 		return {&"ok": false, &"error": "Failed to create node of type: " + node_type}
@@ -741,7 +747,7 @@ func _add_node_live(root: Node, scene_path: String, node_name: String, node_type
 func _remove_node_live(root: Node, scene_path: String, node_path: String) -> Dictionary:
 	var target := root.get_node_or_null(node_path)
 	if not target:
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return _node_not_found(root, node_path)
 	if target == root:
 		return {&"ok": false, &"error": "Cannot remove root node"}
 	var parent := target.get_parent()
@@ -764,7 +770,7 @@ func _remove_node_live(root: Node, scene_path: String, node_path: String) -> Dic
 func _rename_node_live(root: Node, node_path: String, new_name: String) -> Dictionary:
 	var target := _find_node(root, node_path)
 	if not target:
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return _node_not_found(root, node_path)
 	var old_name = target.name
 	var ur := _get_undo_redo()
 	if ur:
@@ -780,12 +786,12 @@ func _rename_node_live(root: Node, node_path: String, new_name: String) -> Dicti
 func _move_node_live(root: Node, node_path: String, new_parent_path: String, sibling_index: int) -> Dictionary:
 	var target := root.get_node_or_null(node_path)
 	if not target:
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return _node_not_found(root, node_path)
 	if target == root:
 		return {&"ok": false, &"error": "Cannot move root node"}
 	var new_parent := _find_node(root, new_parent_path)
 	if not new_parent:
-		return {&"ok": false, &"error": "New parent not found: " + new_parent_path}
+		return _node_not_found(root, new_parent_path, "New parent")
 	var old_parent := target.get_parent()
 	var old_index := target.get_index()
 	var ur := _get_undo_redo()
@@ -802,7 +808,7 @@ func _move_node_live(root: Node, node_path: String, new_parent_path: String, sib
 func _duplicate_node_live(root: Node, node_path: String, new_name: String) -> Dictionary:
 	var target := root.get_node_or_null(node_path)
 	if not target:
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return _node_not_found(root, node_path)
 	if target == root:
 		return {&"ok": false, &"error": "Cannot duplicate root node"}
 	var parent := target.get_parent()
@@ -1035,8 +1041,9 @@ func set_anchor_preset(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is Control):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Control" % [node_path, target.get_class()]}
@@ -1075,8 +1082,9 @@ func reorder_node(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = root.get_node_or_null(node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var parent = target.get_parent()
 	if not parent:
@@ -1129,8 +1137,9 @@ func attach_script(args: Dictionary) -> Dictionary:
 
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var script_res = load(script_path)
 	if not script_res:
@@ -1168,8 +1177,9 @@ func detach_script(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	target.set_script(null)
 
@@ -1215,8 +1225,9 @@ func set_collision_shape(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"shape" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'shape' property — point node_path at a CollisionShape2D/3D" % [node_path, target.get_class()]}
@@ -1265,8 +1276,9 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (&"texture" in target):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) has no 'texture' property" % [node_path, target.get_class()]}
@@ -1387,8 +1399,9 @@ func instance_scene(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var parent = _find_node(root, parent_path)
 	if not parent:
+		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Parent node not found: " + parent_path}
+		return err
 
 	var instance = _instantiate_packed_scene_for_edit(instance_packed, true)
 	if not instance:
@@ -1437,8 +1450,9 @@ func set_mesh(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	if not (target is MeshInstance3D):
 		_discard_scene(root, is_live)
@@ -1542,8 +1556,9 @@ func set_material(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var material: Material = null
 
@@ -1631,8 +1646,9 @@ func get_node_spatial_info(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is Node3D):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [node_path, target.get_class()]}
@@ -1763,11 +1779,13 @@ func measure_node_distance(args: Dictionary) -> Dictionary:
 	var to_node = _find_node(root, to_node_path)
 
 	if not from_node:
+		var err := _node_not_found(root, from_node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + from_node_path}
+		return err
 	if not to_node:
+		var err := _node_not_found(root, to_node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + to_node_path}
+		return err
 	if not (from_node is Node3D):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [from_node_path, from_node.get_class()]}
@@ -1822,8 +1840,9 @@ func snap_node_to_grid(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 	if not (target is Node3D):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' (%s) is not a Node3D" % [node_path, target.get_class()]}
@@ -1976,8 +1995,9 @@ func get_scene_node_properties(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var node_type = target.get_class()
 	var properties: Array = []
@@ -2115,8 +2135,9 @@ func set_scene_node_property(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target = _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var parsed_value = _parse_typed_value(value, value_type)
 	var old_value = target.get(property_name)
@@ -2174,9 +2195,10 @@ func set_node_properties(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		if not is_live:
 			root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	# Build the set of valid property names once, keeping each one's declared
 	# type so values can be parsed against it (see _parse_value call below).
@@ -2339,8 +2361,9 @@ func set_node_groups(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var requested: Array[String] = []
 	for g in groups_arg:
@@ -2407,8 +2430,9 @@ func get_node_groups(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var groups := target.get_groups()
 	_discard_scene(root, is_live)
@@ -2488,8 +2512,9 @@ func set_resource_property(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	# Walk to the resource.
 	var resource: Object = target
@@ -2565,8 +2590,9 @@ func save_resource_to_file(args: Dictionary) -> Dictionary:
 
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		if not is_live: root.queue_free()
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	# Walk to the resource. Track parent for re-assignment.
 	var parent_obj: Object = target
@@ -2684,8 +2710,9 @@ func get_resource_info(args: Dictionary) -> Dictionary:
 		scene_is_live = sacq[1]
 		var target := _find_node(loaded_root, node_path)
 		if not target:
+			var err := _node_not_found(loaded_root, node_path)
 			_discard_scene(loaded_root, scene_is_live)
-			return {&"ok": false, &"error": "Node not found: " + node_path}
+			return err
 		var prop_value = target.get(resource_property)
 		if prop_value == null or not (prop_value is Resource):
 			_discard_scene(loaded_root, scene_is_live)
@@ -2797,8 +2824,9 @@ func list_signal_connections(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target := _find_node(root, node_path)
 	if not target:
+		var err := _node_not_found(root, node_path)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "Node not found: " + node_path}
+		return err
 
 	var outgoing: Array = []
 	var incoming: Array = []
@@ -2886,11 +2914,13 @@ func connect_signal(args: Dictionary) -> Dictionary:
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src:
+		var err := _node_not_found(root, from_node, "from_node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "from_node not found: " + from_node}
+		return err
 	if not dst:
+		var err := _node_not_found(root, to_node, "to_node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "to_node not found: " + to_node}
+		return err
 	if not src.has_signal(signal_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Signal '%s' not found on %s" % [signal_name, src.get_class()]}
@@ -2984,11 +3014,13 @@ func wire_signal(args: Dictionary) -> Dictionary:
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src:
+		var err := _node_not_found(root, from_node, "from_node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "from_node not found: " + from_node}
+		return err
 	if not dst:
+		var err := _node_not_found(root, to_node, "to_node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "to_node not found: " + to_node}
+		return err
 	if not src.has_signal(signal_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Signal '%s' not found on %s" % [signal_name, src.get_class()]}
@@ -3085,8 +3117,9 @@ func generate_onready_refs(args: Dictionary) -> Dictionary:
 	var is_live: bool = acq[1]
 	var target := _find_node(root, target_node)
 	if not target:
+		var err := _node_not_found(root, target_node, "target_node")
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "target_node not found: " + target_node}
+		return err
 
 	var nodes: Array = []
 	if include_nested:

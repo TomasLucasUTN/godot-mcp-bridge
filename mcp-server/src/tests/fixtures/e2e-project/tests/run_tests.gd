@@ -74,6 +74,8 @@ func _initialize() -> void:
 	_test_deterministic_runtime_tools()
 	_test_unknown_tool_error_is_cheap()
 	_test_instanced_child_keeps_its_script()
+	_test_integrity_flags_an_instance_that_lost_its_script()
+	_test_node_not_found_suggests_real_paths()
 	_test_resource_paths_load_on_every_entry_point()
 	_test_collision_sits_on_the_origin()
 	_test_numeric_value_match()
@@ -94,6 +96,11 @@ func _check(cond: bool, msg: String) -> void:
 	else:
 		_fail += 1
 		printerr("  FAIL ", msg)
+
+func _write_text(res_path: String, contents: String) -> void:
+	var f := FileAccess.open(res_path, FileAccess.WRITE)
+	f.store_string(contents)
+	f.close()
 
 func _rm(res_path: String) -> void:
 	var abs := ProjectSettings.globalize_path(res_path)
@@ -2341,6 +2348,86 @@ func _test_instanced_child_keeps_its_script() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(child_path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(parent_path))
 	st.free()
+
+# A "Node not found" that only repeats the path back is a guaranteed second
+# wrong guess. The error now carries what the scene actually contains.
+func _test_node_not_found_suggests_real_paths() -> void:
+	print("\n[node-not-found errors suggest real paths]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_notfound.tscn"
+	_rm(scene)
+
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Player", "node_type": "Node2D", "parent_path": "."})
+	st.add_node({"scene_path": scene, "node_name": "Sprite", "node_type": "Sprite2D", "parent_path": "Player"})
+
+	# A near miss should be named outright.
+	var typo: Dictionary = st.set_node_properties({"scene_path": scene, "node_path": "Playr", "properties": {"visible": false}})
+	_check(not typo.get("ok", true), "a wrong node path still fails")
+	_check(str(typo.get("error", "")).contains("Player"), "and the near miss is suggested by name")
+
+	# Nothing close: fall back to listing what is there.
+	var wild: Dictionary = st.set_node_properties({"scene_path": scene, "node_path": "Zzz", "properties": {"visible": false}})
+	var msg := str(wild.get("error", ""))
+	_check(msg.contains("Player/Sprite"), "with no near miss, the real paths are listed")
+	_check(msg.contains("Zzz"), "and the offending value is still in the message")
+
+	_rm(scene)
+	st.free()
+
+# The other half of the same incident. Neither the disk path nor the live path
+# reproduces the `script = null` override, so we stopped guessing at the cause
+# and made the symptom loud instead: a scene carrying one now fails
+# validate_scene_integrity, which already runs automatically after mutations.
+func _test_integrity_flags_an_instance_that_lost_its_script() -> void:
+	print("\n[integrity catches a script=null instance override]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var tt = preload("res://addons/godot_mcp/tools/testing_tools.gd").new()
+	var script_path := "res://__gdtest_lost_script.gd"
+	var child_path := "res://__gdtest_lost_child.tscn"
+	var parent_path := "res://__gdtest_lost_parent.tscn"
+
+	var f := FileAccess.open(script_path, FileAccess.WRITE)
+	f.store_string("extends Node2D\n\nfunc _ready() -> void:\n\tpass\n")
+	f.close()
+
+	st.create_scene({"scene_path": child_path, "root_node_type": "Node2D", "root_node_name": "Child"})
+	st.attach_script({"scene_path": child_path, "node_path": ".", "script_path": script_path})
+
+	# The parent is written as text rather than built with instance_scene: this
+	# needs the exact on-disk shape the incident had, a bare instance line with
+	# `script = null` under it and nothing else.
+	_write_text(parent_path, "\n".join([
+		"[gd_scene load_steps=2 format=3]",
+		"",
+		"[ext_resource type=\"PackedScene\" path=\"%s\" id=\"1_child\"]" % child_path,
+		"",
+		"[node name=\"Parent\" type=\"Node2D\"]",
+		"",
+		"[node name=\"Kid\" parent=\".\" instance=ExtResource(\"1_child\")]",
+		"",
+	]))
+
+	# Healthy first, so a passing test cannot be the checker flagging everything.
+	var clean: Dictionary = tt.validate_scene_integrity({"scene_path": parent_path})
+	_check(clean.get("issue_count", -1) == 0, "a healthy instance raises no issue")
+
+	_write_text(parent_path, FileAccess.get_file_as_string(parent_path).replace(
+		"instance=ExtResource(\"1_child\")]",
+		"instance=ExtResource(\"1_child\")]\nscript = null"))
+
+	var broken: Dictionary = tt.validate_scene_integrity({"scene_path": parent_path})
+	var found := false
+	for issue in broken.get("issues", []):
+		if issue.get("property", "") == "script" and str(issue.get("node_path", "")) == "Kid":
+			found = true
+	_check(found, "validate_scene_integrity reports the instance that lost its script")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(script_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(child_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(parent_path))
+	st.free()
+	tt.free()
 
 # A res:// path assigned to an Object-typed property must LOAD, on every tool
 # that takes properties — not just on set_node_properties.
