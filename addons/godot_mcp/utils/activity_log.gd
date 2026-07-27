@@ -11,6 +11,13 @@ const CAP := 200
 ## them returns. So instead of an "is a tool running" flag, a window runs through
 ## the call and a little past it; activity inside it is the agent's own.
 const AGENT_GRACE_MS := 350
+## Longest a single tool call is assumed to run. The window is bounded by this
+## even while a call is still in flight, because a handler that dies mid-coroutine
+## never reaches end_agent_call() — and an unbounded window would then tag every
+## later human action as the agent's own, silencing the feed until the editor is
+## restarted. Overshooting on a genuinely long call only mis-tags that call's own
+## late events; the failure it prevents costs the whole session.
+const AGENT_MAX_CALL_MS := 120000
 ## How many events ride along on a tool response. The full history is available
 ## through get_editor_activity; this is only a nudge, so it stays cheap.
 const DIGEST_MAX := 5
@@ -23,22 +30,29 @@ signal human_activity(event: Dictionary)
 
 var _ring: Array = []
 var _seq: int = 0
-var _agent_until_ms: int = 0
+var _agent_depth: int = 0
+var _agent_deadline_ms: int = 0
 var _digest_cursor: int = 0
 
-## Open the agent window for the duration of a tool call.
+## Open the agent window for the duration of a tool call. Counted rather than a
+## flag: calls can overlap across their await points, and an inner one finishing
+## must not un-tag the work the outer one is still doing.
 func begin_agent_call() -> void:
-	_agent_until_ms = Time.get_ticks_msec() + 3600000
+	_agent_depth += 1
+	_agent_deadline_ms = Time.get_ticks_msec() + AGENT_MAX_CALL_MS
 
-## Close it, leaving the grace period for deferred signals.
+## Close it, leaving the grace period for deferred signals. Only the outermost
+## call closes the window.
 func end_agent_call() -> void:
-	_agent_until_ms = Time.get_ticks_msec() + AGENT_GRACE_MS
+	_agent_depth = maxi(0, _agent_depth - 1)
+	if _agent_depth == 0:
+		_agent_deadline_ms = Time.get_ticks_msec() + AGENT_GRACE_MS
 
 func record(type: String, detail) -> void:
 	_seq += 1
 	# Best-effort attribution: a human action within the grace window can be
 	# mis-tagged agent, and a very slow deferred signal can slip to human.
-	var source := "agent" if Time.get_ticks_msec() < _agent_until_ms else "human"
+	var source := "agent" if Time.get_ticks_msec() < _agent_deadline_ms else "human"
 	var event := {&"id": _seq, &"t_ms": Time.get_ticks_msec(), &"type": type, &"detail": detail, &"source": source}
 	_ring.append(event)
 	if _ring.size() > CAP:
