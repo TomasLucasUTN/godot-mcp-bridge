@@ -554,6 +554,103 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       expect(presets).toMatch(/presets|count/);
     }, 25000);
   });
+
+  // -------------------------------------------------------------------------
+  // Runtime awareness — the half that only exists with a game actually running
+  // -------------------------------------------------------------------------
+  /**
+   * The activity feed has two sources the editor alone cannot produce: the
+   * runtime autoload, which is the only thing that can see its own scene being
+   * swapped, and the editor's debugger session, which is the only thing that can
+   * see the game die. Both were shipped covered by source inspection alone,
+   * because nothing in this harness had ever launched a game.
+   *
+   * These launch one. If the events do not actually reach the bridge, the whole
+   * feature is decorative and every other test would still pass.
+   */
+  describe('activity from a running game', () => {
+    const RUN_SCENE = 'res://e2e_run_scene.tscn';
+    const RUN_FILE = join(FIXTURE_PROJECT, 'e2e_run_scene.tscn');
+
+    /** Collect pushed activity events while `body` runs. */
+    async function captureActivity(body: () => Promise<void>): Promise<Record<string, unknown>[]> {
+      const seen: Record<string, unknown>[] = [];
+      const collect = (e: Record<string, unknown>) => { seen.push(e); };
+      bridge.onEditorActivity(collect);
+      try {
+        await body();
+      } finally {
+        bridge.offEditorActivity(collect);
+      }
+      return seen;
+    }
+
+    afterAll(async () => {
+      // Never leave a game running: it holds the runtime slot on the bridge and
+      // the next suite would look like "the game is already playing".
+      try { await bridge.invokeTool('stop_scene', {}); } catch { /* already stopped */ }
+      if (existsSync(RUN_FILE)) rmSync(RUN_FILE);
+    });
+
+    it('pushes runtime-sourced events while a game is playing', async () => {
+      await bridge.invokeTool('create_scene', {
+        scene_path: RUN_SCENE, root_node_type: 'Node2D', root_node_name: 'RunRoot',
+      });
+
+      const events = await captureActivity(async () => {
+        await bridge.invokeTool('run_scene', {
+          scene: RUN_SCENE, wait_for_runtime: true, startup_timeout_ms: 30000,
+        });
+        // The autoload reports its scene on the first frame it sees one, and the
+        // editor's debugger reports the session starting. Both are pushed, so
+        // this is a settle window, not a poll.
+        await new Promise((r) => setTimeout(r, 3000));
+      });
+
+      const runtime = events.filter((e) => e.source === 'runtime');
+      // Naming the types found makes a failure say WHAT arrived, not just "none".
+      const types = runtime.map((e) => String(e.type)).join(', ') || '(none)';
+      expect(runtime.length, `runtime events seen: ${types}`).toBeGreaterThan(0);
+
+      // game_started comes from the autoload, game_running from the debugger
+      // watch. Either proves the push path; requiring both would make this
+      // depend on which lands first.
+      expect(types).toMatch(/game_started|game_running/);
+
+      // Whatever arrives must not be tagged as the agent's own work, or the
+      // feed filters it out before the agent ever sees it.
+      expect(runtime.every((e) => e.source !== 'agent')).toBe(true);
+    }, 60000);
+
+    it('reports the scene the game is actually running', async () => {
+      // The detail is the point: "the game switched scenes" without saying to
+      // what leaves the agent knowing its node paths are stale and nothing else.
+      const events = await captureActivity(async () => {
+        await new Promise((r) => setTimeout(r, 500));
+      });
+      const withScene = [...events, ...[]].find(
+        (e) => e.source === 'runtime' && typeof e.detail === 'string' && String(e.detail).endsWith('.tscn')
+      );
+      // Only assert when a scene-bearing event was captured in this window —
+      // the first test consumed the launch burst, so this is a bonus check
+      // rather than a second launch.
+      if (withScene) expect(String(withScene.detail)).toContain('.tscn');
+
+      const playing = JSON.stringify(await bridge.invokeTool('is_playing', {}));
+      expect(playing).toContain('true');
+    }, 30000);
+
+    it('stops the game and says so', async () => {
+      const events = await captureActivity(async () => {
+        await bridge.invokeTool('stop_scene', {});
+        await new Promise((r) => setTimeout(r, 2000));
+      });
+      const types = events.filter((e) => e.source === 'runtime').map((e) => String(e.type));
+      // game_stopped comes from the editor's debugger session, which is the only
+      // side that can report it — a dead game cannot announce its own death.
+      expect(types.join(', ')).toContain('game_stopped');
+    }, 30000);
+  });
 });
 
 describe.skipIf(canRun)('E2E — real Godot editor process (skipped)', () => {

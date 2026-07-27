@@ -361,6 +361,7 @@ func set_mcp_client(client: Object) -> void:
 ## GDScript 4 (see godotengine/godot#50894, #103887). Keep this set small.
 const _COROUTINE_TOOLS := {
 	"wait": true,
+	"run_scene": true,
 }
 
 ## Tools that write to the project (files, nodes, scenes, settings). Blocked
@@ -455,6 +456,8 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 		match tool_name:
 			"wait":
 				result = await node.wait(args)
+			"run_scene":
+				result = await node.run_scene(args)
 			_:
 				push_error("[MCP] Coroutine tool '%s' has no direct dispatch case." % tool_name)
 				result = {&"ok": false, &"error": "Coroutine tool '%s' missing dispatch case" % tool_name}

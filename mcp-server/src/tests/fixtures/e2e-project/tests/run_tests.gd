@@ -68,6 +68,8 @@ func _initialize() -> void:
 	_test_bake_navigation_mesh()
 	_test_export_and_peer_contracts()
 	_test_every_tool_node_gets_the_plugin()
+	_test_debugger_watch_is_passive()
+	_test_coroutine_tools_are_registered()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -698,8 +700,25 @@ func _test_activity_digest() -> void:
 	_check(log.human_digest().is_empty(), "agent-caused activity is not reported as human")
 	_check(int(log.query(0, 50, "agent").get("count", 0)) == 1, "agent event is still queryable by source")
 
+	# Overlapping calls: the inner one finishing must not un-tag the outer one,
+	# which is still running.
+	log.begin_agent_call()
+	log.end_agent_call()
+	log.record("selection", ["Enemy2"])
+	_check(int(log.query(0, 50, "agent").get("count", 0)) == 2, "an inner call ending leaves the outer call's window open")
+	log.end_agent_call()
+
+	# A handler that dies mid-coroutine never reaches end_agent_call. The window
+	# has to lapse on its own, or every later human action is mis-tagged agent
+	# and the activity feed goes silent for the rest of the editor session.
+	log._agent_depth = 0
+	log._agent_deadline_ms = 0
+	log.begin_agent_call()  # deliberately unmatched: the abort case
+	_check(log._agent_deadline_ms - Time.get_ticks_msec() <= log.AGENT_MAX_CALL_MS, "an abandoned agent window is bounded, not open-ended")
+
 	# The digest stays small even after a burst.
-	log._agent_until_ms = 0
+	log._agent_depth = 0
+	log._agent_deadline_ms = 0
 	for i in range(20):
 		log.record("selection", ["N%d" % i])
 	var d2: Dictionary = log.human_digest()
@@ -1989,3 +2008,98 @@ func _test_every_tool_node_gets_the_plugin() -> void:
 		if not wired.has(name):
 			missing.append(name)
 	_check(missing.is_empty(), "every tool node is given the editor plugin (missing: %s)" % str(missing))
+
+# The debugger watch must only LISTEN. An EditorDebuggerPlugin that claims a
+# capture prefix takes those messages away from the debugger that would
+# otherwise handle them, so a stray `_has_capture` returning true would break the
+# developer's own debugger UI while looking like it works from our side.
+#
+# Source inspection, not behaviour: EditorDebuggerPlugin is a virtual class, so
+# it cannot even be instantiated outside a real editor — and the session signals
+# it hangs off only fire with a real game running under one. This checks the
+# contract the two sides agree on, which is what a rename would break.
+func _test_debugger_watch_is_passive() -> void:
+	print("\n[debugger watch]")
+	var src := FileAccess.get_file_as_string("res://addons/godot_mcp/utils/debugger_watch.gd")
+	_check(not src.is_empty(), "debugger_watch.gd is present")
+	_check(src.contains("func _has_capture") and src.contains("return false"), "captures nothing, so the editor's debugger keeps its messages")
+	_check(src.contains("signal game_event"), "exposes the game_event signal plugin.gd connects to")
+
+	# plugin.gd records these as activity and the server's summary switches on
+	# the exact strings, so a rename here has to be a deliberate two-sided change.
+	for type in ["game_running", "game_stopped", "game_resumed", "game_paused", "game_crashed"]:
+		_check(src.contains('"%s"' % type), "still emits %s" % type)
+
+	var plug := FileAccess.get_file_as_string("res://addons/godot_mcp/plugin.gd")
+	_check(plug.contains("add_debugger_plugin(") and plug.contains("remove_debugger_plugin("), "the plugin both registers and unregisters the watch")
+
+	# The runtime autoload reports the other half: the editor cannot see a
+	# change_scene_to_file(), and the game cannot report its own crash.
+	var rt := FileAccess.get_file_as_string("res://addons/godot_mcp/runtime/mcp_runtime.gd")
+	_check(rt.contains("_tick_scene_awareness()") and rt.contains("game_scene_changed"), "the runtime reports its own scene swaps")
+	_check(rt.contains('"source": "runtime"'), "and tags them runtime, so the server does not filter them as agent noise")
+
+# A handler that contains `await` is a coroutine, and GDScript 4 will not return
+# its value through a generic call() — the caller gets a GDScriptFunctionState
+# and the agent sees "Tool returned no status". The executor works around that
+# with _COROUTINE_TOOLS plus an explicit dispatch case per tool, which is a list
+# somebody has to remember to update.
+#
+# run_scene is why this test exists: it blocked the main thread with
+# OS.delay_msec instead of yielding, which froze the editor's WebSocket pump for
+# the whole startup timeout and got the connection killed by the server's ping
+# watchdog on every single call.
+func _test_coroutine_tools_are_registered() -> void:
+	print("\n[coroutine dispatch]")
+	var exec_src := FileAccess.get_file_as_string("res://addons/godot_mcp/tool_executor.gd")
+
+	# The names the executor declares as coroutines, and the ones it can dispatch.
+	var declared: Array = []
+	var re_set := RegEx.new()
+	re_set.compile('(?s)_COROUTINE_TOOLS\\s*:=\\s*\\{(.*?)\\}')
+	var block := re_set.search(exec_src)
+	if block:
+		var re_name := RegEx.new()
+		re_name.compile('"([a-z_0-9]+)"\\s*:')
+		for m in re_name.search_all(block.get_string(1)):
+			declared.append(m.get_string(1))
+	_check(declared.size() >= 2, "found the coroutine tool list (%s)" % str(declared))
+
+	for name in declared:
+		_check(exec_src.contains('"%s":\n\t\t\t\tresult = await node.%s(args)' % [name, name]),
+			"%s has a direct await dispatch case" % name)
+
+	# The other direction, which is the one that actually rots: a handler that
+	# gained an `await` and was never added to the list above.
+	#
+	# Scanned line by line rather than by slicing on a regex. The first attempt
+	# sliced between `func <name>(args: Dictionary)` matches and flagged three
+	# tools that were fine: two had the word "await" inside a comment and a
+	# user-facing message string, and the third inherited the body of a private
+	# helper declared between two handlers. A wiring test that cries wolf gets
+	# muted, so this one only counts `await` in statement position.
+	var missing: Array = []
+	for file in ["project_tools", "scene_tools", "script_tools", "testing_tools", "netcode_tools"]:
+		var src := FileAccess.get_file_as_string("res://addons/godot_mcp/tools/%s.gd" % file)
+		if src.is_empty():
+			continue
+		var current := ""  # name of the handler we are inside, "" when in a private helper
+		for raw_line in src.split("\n"):
+			var line: String = raw_line
+			var hash_at := line.find("#")
+			if hash_at >= 0:
+				line = line.substr(0, hash_at)
+			if line.begins_with("func "):
+				# Any func ends the previous body; only args-handlers start one.
+				current = ""
+				var open := line.find("(")
+				if open > 5 and line.substr(open).begins_with("(args: Dictionary)"):
+					current = line.substr(5, open - 5)
+				continue
+			if current.is_empty() or declared.has(current):
+				continue
+			var code := line.strip_edges()
+			if code.begins_with("await ") or code.contains("= await "):
+				missing.append("%s.%s" % [file, current])
+				current = ""  # one report per handler is enough
+	_check(missing.is_empty(), "every awaiting tool handler is registered as a coroutine (missing: %s)" % str(missing))

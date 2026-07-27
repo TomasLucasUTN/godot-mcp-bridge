@@ -103,6 +103,13 @@ jobs:
           cache: npm
           cache-dependency-path: mcp-server/package-lock.json
 
+      - name: Install Xvfb
+        # Part of the harness plays a scene. The editor itself runs --headless,
+        # but the game it launches is a separate process that does NOT inherit
+        # that flag, so on a runner with no display it cannot open a window and
+        # the runtime-activity tests would fail for an environmental reason.
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Run the live-scene e2e harness
         working-directory: mcp-server
         env:
@@ -110,4 +117,4 @@ jobs:
         run: |
           npm ci
           npm run build
-          npx vitest run src/tests/e2e-godot.test.ts
+          xvfb-run -a npx vitest run src/tests/e2e-godot.test.ts

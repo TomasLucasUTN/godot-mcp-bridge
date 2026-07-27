@@ -1179,6 +1179,17 @@ func get_editor_activity(args: Dictionary) -> Dictionary:
 ## Set wait_for_runtime=true to additionally block until the MCPRuntime
 ## autoload connects back; required for take_screenshot / send_input to work
 ## right away.
+## Pause without freezing the editor. Falls back to a blocking delay only where
+## there is no SceneTree to yield to (headless tests), which is also the only
+## place where freezing costs nothing.
+func _yield_ms(ms: int) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree:
+		await tree.create_timer(ms / 1000.0, false, false, true).timeout
+	else:
+		OS.delay_msec(ms)
+
+
 func run_scene(args: Dictionary) -> Dictionary:
 	if not _editor_plugin:
 		return {&"ok": false, &"error": "Editor plugin not available"}
@@ -1232,17 +1243,25 @@ func run_scene(args: Dictionary) -> Dictionary:
 	var poll_started_ms: int = 0
 	var poll_runtime_ms: int = 0
 
+	# Both loops yield to the SceneTree rather than OS.delay_msec — the same
+	# hazard `wait` documents, and for a second reason that made it worse here:
+	# the conditions below (is_playing_scene, and the runtime-connected flag the
+	# client sets when the server tells it) are BOTH updated by the main loop.
+	# Blocking it meant they could never become true, so every call ran the full
+	# startup_timeout_ms, the WebSocket pump stopped for that whole stretch, and
+	# the server's ping watchdog terminated the editor socket — run_scene
+	# reported "Godot disconnected" for a game that had launched perfectly.
 	if block_until_started and not started:
 		var t0 := Time.get_ticks_msec()
 		while not started and (Time.get_ticks_msec() - t0) < startup_timeout_ms:
-			OS.delay_msec(50)
+			await _yield_ms(50)
 			started = ei.is_playing_scene()
 		poll_started_ms = Time.get_ticks_msec() - t0
 
 	if wait_for_runtime and started and not runtime_connected:
 		var t1 := Time.get_ticks_msec()
 		while not runtime_connected and (Time.get_ticks_msec() - t1) < startup_timeout_ms:
-			OS.delay_msec(100)
+			await _yield_ms(100)
 			runtime_connected = _runtime_is_connected()
 		poll_runtime_ms = Time.get_ticks_msec() - t1
 
