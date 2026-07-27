@@ -68,3 +68,7 @@ mcp-server/src/tests/fixtures/e2e-project/__gdtest_*
 mcp-server/src/tests/fixtures/e2e-project/__probe*
 mcp-server/src/tests/fixtures/e2e-project/default_bus_layout.tres
 mcp-server/src/tests/fixtures/e2e-project/e2e_*
+
+# take_screenshot writes here at runtime (mcp_runtime.gd CACHE_SCREENSHOT_DIR).
+# When the addon is junctioned into a test project, the images land in this repo.
+addons/godot_mcp/cache/

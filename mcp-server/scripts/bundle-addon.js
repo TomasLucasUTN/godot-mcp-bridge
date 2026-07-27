@@ -26,5 +26,11 @@ try {
 }
 
 await rm(resolve(here, '../bundled-addon'), { recursive: true, force: true });
-await cp(source, target, { recursive: true });
+await cp(source, target, {
+  recursive: true,
+  // take_screenshot writes into addons/godot_mcp/cache at runtime. When the
+  // addon is junctioned into a test project those images land in the repo, and
+  // without this filter they would ship inside the published package.
+  filter: (src) => !src.replace(/\\/g, '/').includes('/godot_mcp/cache'),
+});
 console.error(`bundle-addon: staged addon -> ${target}`);
