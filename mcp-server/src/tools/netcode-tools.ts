@@ -56,9 +56,9 @@ export const netcodeTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        mode: { type: 'string', enum: ['authority', 'any_peer'], description: '"authority" (default): only the node\'s authority may call it. "any_peer": clients may call it too — needed for client→server messages.' },
         script_path: { type: 'string', description: 'res:// path of the .gd file to append to' },
         method: { type: 'string', description: 'Method name for the RPC' },
-        mode: { type: 'string', enum: ['authority', 'any_peer'], description: '"authority" (default): only the node\'s authority may call it. "any_peer": clients may call it too — needed for client→server messages.' },
         transfer_mode: { type: 'string', enum: ['reliable', 'unreliable', 'unreliable_ordered'], description: 'Default "reliable". Use "unreliable" for high-frequency state where dropping is fine.' },
         call_local: { type: 'boolean', description: 'Also run on the caller (default false).' },
         params: {
@@ -67,6 +67,21 @@ export const netcodeTools: ToolDefinition[] = [
         }
       },
       required: ['script_path', 'method']
+    }
+  },
+  {
+    name: 'mp_set_authority',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    description: "Write the code that claims multiplayer authority for a node. Authority decides whose writes count: a MultiplayerSynchronizer replicates only FROM the authority and an @rpc(\"authority\") call is refused anywhere else, so getting it wrong gives the classic Godot 4 symptom — the call runs, nothing happens, no error. This generates code rather than editing the scene because `multiplayer_authority` is NOT a property: Node exposes only set_multiplayer_authority(), so authority has no .tscn representation and any tool claiming to write it into a scene file is writing something Godot never reads.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        peer_id: { description: 'Owning peer: 1 for the server/host, 0 for none, or the string "owner" to claim it for the peer that spawned this node (multiplayer.get_unique_id()).' },
+        script_path: { type: 'string', description: 'Script that should claim authority (res://...). The call is added to its _ready(), or a _ready() is written if there is none.' },
+        node: { type: 'string', description: 'Expression for the node to assign, e.g. "self" (default) or "$Gun".' },
+        recursive: { type: 'boolean', description: 'Pass true to Godot so descendants inherit the authority (default false).' }
+      },
+      required: ['peer_id', 'script_path']
     }
   },
   {

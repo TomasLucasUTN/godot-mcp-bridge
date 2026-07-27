@@ -55,7 +55,12 @@ export const sceneTools: ToolDefinition[] = [
         },
         include_properties: {
           type: 'boolean',
-          description: 'Include node properties in the output (default: false)'
+          description: 'Include a fixed set of common properties (position, rotation, scale, size, visible, modulate, z_index, text, collision layers, mass) on every node. Prefer `properties` when you know what you want — this one is all-or-nothing and gets expensive on a big tree.'
+        },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Return exactly these properties on every node, e.g. ["position"] to get the whole layout of a 2D scene in one call. Overrides include_properties. A name the node does not have is reported under missing_properties rather than silently omitted, so a typo is visible.'
         },
         max_depth: {
           type: 'number',
@@ -140,7 +145,7 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'modify_node_property',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    description: 'Modify a single property on a node in a .tscn scene file. For multiple properties at once use set_node_properties. ALWAYS use a tool to modify .tscn files \u2014 NEVER edit them as text. To attach or change a script, use attach_script (NOT modify_node_property with property="script") \u2014 modify_node_property only rewrites the .tscn on disk, leaving the editor\'s in-memory node without the script, which makes connect_signal fail.',
+    description: 'Modify ONE property on ONE node. Use this when you know the node and the single value to change. NOT for several properties on the same node (set_node_properties, one save instead of N) and NOT for the same property across many nodes (batch_set_property). ALWAYS use a tool to modify .tscn files \u2014 NEVER edit them as text. To attach or change a script, use attach_script (NOT modify_node_property with property="script") \u2014 modify_node_property only rewrites the .tscn on disk, leaving the editor\'s in-memory node without the script, which makes connect_signal fail.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -535,7 +540,7 @@ export const sceneTools: ToolDefinition[] = [
           description: 'Axes to snap. Any of: ["x"], ["x","z"], ["x","y","z"] (default: all axes)'
         },
         space: {
-          type: 'string',
+          type: 'string', enum: ['local', 'global'],
           description: 'Coordinate space: "local" or "global" (default: "global")'
         }
       },
@@ -545,7 +550,7 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'set_node_properties',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    description: 'Set MULTIPLE properties on a node in a single tool call. Non-atomic: each property is applied independently; the response separates "applied" from "failed" so partial success surfaces clearly. Saves the scene once at the end. Resource-typed properties must use set_resource_property / set_sprite_texture / etc.',
+    description: 'Set SEVERAL properties on ONE node in a single call and a single save. Use this instead of repeating modify_node_property. NOT for the same property across many nodes — that is batch_set_property. Non-atomic: each property is applied independently; the response separates "applied" from "failed" so partial success surfaces clearly. Saves the scene once at the end. Resource-typed properties must use set_resource_property / set_sprite_texture / etc.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -570,14 +575,14 @@ export const sceneTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
-        node_path: { type: 'string', description: 'Path to the node (. for root)' },
-        groups: { type: 'array', items: { type: 'string' }, description: 'List of group names to apply' },
         mode: {
           type: 'string',
           enum: ['replace', 'add', 'remove'],
           description: 'replace (default): node ends up in EXACTLY the listed groups. add: union with existing. remove: drop the listed groups.'
-        }
+        },
+        scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
+        node_path: { type: 'string', description: 'Path to the node (. for root)' },
+        groups: { type: 'array', items: { type: 'string' }, description: 'List of group names to apply' },
       },
       required: ['scene_path', 'groups']
     }
@@ -733,7 +738,7 @@ export const sceneTools: ToolDefinition[] = [
         sprite: { type: 'string', description: 'Sprite2D (default), AnimatedSprite2D, MeshInstance3D, or "none" to skip.' },
         texture: { type: 'string', description: 'Optional texture res:// path for the sprite.' },
         script_path: { type: 'string', description: 'Where to write/attach the script. Defaults to the scene path with a .gd extension.' },
-        movement: { type: 'string', description: '"platformer", "topdown", or "none" (default). Anything but "none" writes a starter script and attaches it.' },
+        movement: { type: 'string', enum: ['platformer', 'topdown', 'none'], description: '"platformer", "topdown", or "none" (default). Anything but "none" writes a starter script and attaches it.' },
         groups: { type: 'array', items: { type: 'string' }, description: 'Groups to add the root to, e.g. ["enemies"].' }
       },
       required: ['scene_path']

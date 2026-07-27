@@ -435,3 +435,301 @@ func add_gridmap(args: Dictionary) -> Dictionary:
 
 	return {&"ok": true, &"scene_path": scene_path, &"node_name": gridmap.name,
 		&"message": "Added GridMap to '%s'" % parent_path}
+
+# =============================================================================
+# Skeleton / bone tools
+# =============================================================================
+# Requested by a real user on a competitor's tracker, and verified absent from
+# both this repo and the rival's 283-tool catalogue — open territory with
+# demonstrated demand.
+#
+# 2D and 3D skeletons are genuinely different things in Godot, not two spellings
+# of one idea: a Skeleton2D owns a tree of Bone2D NODES, while a Skeleton3D owns
+# bones as internal INDICES with no nodes at all. These tools keep that
+# distinction visible instead of inventing a fake common vocabulary that would
+# break the moment anyone did something non-trivial.
+
+## Every Bone2D under a Skeleton2D, in tree order.
+##
+## Skeleton2D.get_bone_count()/get_bone() only report anything once the skeleton
+## is INSIDE the SceneTree — it builds that list from child notifications. A
+## scene loaded from disk for editing is not in the tree, so those return 0 and
+## the bones look like they do not exist. Walking the children works on both
+## paths.
+func _bones_2d(skel: Node) -> Array:
+	var out: Array = []
+	_collect_bones_2d(skel, out)
+	return out
+
+func _collect_bones_2d(node: Node, out: Array) -> void:
+	for child in node.get_children():
+		if child is Bone2D:
+			out.append(child)
+		_collect_bones_2d(child, out)
+
+## Read a skeleton's bone structure. Works for both kinds; the shape of the
+## answer differs because the engine's model does.
+func get_skeleton_info(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
+
+	var target := _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+
+	var out := {&"ok": true, &"scene_path": scene_path, &"node_path": node_path}
+
+	if target is Skeleton3D:
+		var sk := target as Skeleton3D
+		var bones: Array = []
+		for i in range(sk.get_bone_count()):
+			bones.append({
+				&"index": i,
+				&"name": sk.get_bone_name(i),
+				&"parent": sk.get_bone_parent(i),
+				&"rest": _serialize_value(sk.get_bone_rest(i)),
+				&"pose_position": _serialize_value(sk.get_bone_pose_position(i)),
+			})
+		out[&"kind"] = "3d"
+		out[&"bone_count"] = bones.size()
+		out[&"bones"] = bones
+	elif target is Skeleton2D:
+		var found_bones := _bones_2d(target)
+		var bones2: Array = []
+		for i in range(found_bones.size()):
+			var b: Bone2D = found_bones[i]
+			bones2.append({
+				&"index": i,
+				&"name": str(b.name),
+				# A Bone2D is a real node, so it has a path the other scene tools
+				# can act on — that is the useful handle here, not the index.
+				&"node_path": str(root.get_path_to(b)),
+				&"rest": _serialize_value(b.rest),
+				&"length": b.get_length(),
+			})
+		out[&"kind"] = "2d"
+		out[&"bone_count"] = bones2.size()
+		out[&"bones"] = bones2
+	else:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node '%s' is %s, expected Skeleton2D or Skeleton3D" % [node_path, target.get_class()]}
+
+	_discard_scene(root, is_live)
+	return out
+
+## Add a bone. For 2D this creates a Bone2D node under the parent; for 3D it adds
+## an internal bone to the Skeleton3D.
+func add_bone(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var bone_name: String = str(args.get(&"bone_name", ""))
+	var parent_bone: String = str(args.get(&"parent_bone", ""))
+	var rest = args.get(&"rest")
+	var length = args.get(&"length")
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if bone_name.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'bone_name'"}
+
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
+
+	var target := _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+
+	if target is Skeleton3D:
+		var sk := target as Skeleton3D
+		if sk.find_bone(bone_name) != -1:
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "Bone already exists: " + bone_name}
+		var parent_idx := -1
+		if not parent_bone.is_empty():
+			parent_idx = sk.find_bone(parent_bone)
+			if parent_idx == -1:
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "Parent bone not found: %s. Existing: %s" % [parent_bone, sk.get_concatenated_bone_names()]}
+
+		var ctx := _begin_edit(is_live, "MCP: add bone '%s'" % bone_name, root)
+		sk.add_bone(bone_name)
+		var idx := sk.find_bone(bone_name)
+		if parent_idx != -1:
+			sk.set_bone_parent(idx, parent_idx)
+		if rest != null:
+			var parsed = _parse_value(rest)
+			if parsed is Transform3D:
+				sk.set_bone_rest(idx, parsed)
+		# Skeleton3D bones are internal state, not nodes, so the inverse is
+		# clearing and rebuilding — there is no remove_bone in the public API.
+		# Record the property so at least the scene is marked dirty coherently.
+		_edit_commit(ctx)
+
+		var err := _finish_scene_edit(root, scene_path, is_live)
+		if not err.is_empty():
+			return err
+		return {&"ok": true, &"kind": "3d", &"scene_path": scene_path, &"node_path": node_path,
+			&"bone_name": bone_name, &"bone_index": idx, &"parent_index": parent_idx,
+			&"message": "Added 3D bone '%s' (index %d) to %s" % [bone_name, idx, node_path]}
+
+	if target is Skeleton2D:
+		# A Bone2D must be a descendant of the Skeleton2D, and nesting a bone
+		# under another bone is what makes a chain — so the parent is a NODE.
+		var parent_node: Node = target
+		if not parent_bone.is_empty():
+			var found := _find_node(root, parent_bone)
+			if not found:
+				# Also accept a bare bone name, resolved within the skeleton.
+				for b in _bones_2d(target):
+					if str(b.name) == parent_bone:
+						found = b
+						break
+			if not found:
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "Parent bone not found: %s (give a node path or a Bone2D name inside this skeleton)" % parent_bone}
+			parent_node = found
+
+		var bone := Bone2D.new()
+		bone.name = bone_name
+		if rest != null:
+			var parsed_r = _parse_value(rest)
+			if parsed_r is Transform2D:
+				bone.rest = parsed_r
+			elif parsed_r is Vector2:
+				# The common case: "where is this bone", not a full transform.
+				bone.rest = Transform2D(0.0, parsed_r)
+				bone.position = parsed_r
+		if length != null:
+			bone.set_autocalculate_length_and_angle(false)
+			bone.set_length(float(length))
+
+		var ctx2 := _begin_edit(is_live, "MCP: add bone '%s'" % bone_name, root)
+		_edit_add_child(ctx2, parent_node, bone, root)
+		_edit_commit(ctx2)
+
+		var err2 := _finish_scene_edit(root, scene_path, is_live)
+		if not err2.is_empty():
+			return err2
+		return {&"ok": true, &"kind": "2d", &"scene_path": scene_path, &"node_path": node_path,
+			&"bone_name": bone.name, &"bone_node_path": str(root.get_path_to(bone)),
+			&"parent_node_path": str(root.get_path_to(parent_node)),
+			&"message": "Added Bone2D '%s' under %s" % [bone.name, str(root.get_path_to(parent_node))]}
+
+	_discard_scene(root, is_live)
+	return {&"ok": false, &"error": "Node '%s' is %s, expected Skeleton2D or Skeleton3D" % [node_path, target.get_class()]}
+
+## Set a bone's pose. 3D takes position/rotation/scale components; 2D moves the
+## Bone2D node, which is the same thing expressed as a node transform.
+func set_bone_pose(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var bone_name: String = str(args.get(&"bone_name", ""))
+	var position = args.get(&"position")
+	var rotation = args.get(&"rotation")
+	var scale = args.get(&"scale")
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if bone_name.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'bone_name'"}
+	if position == null and rotation == null and scale == null:
+		return {&"ok": false, &"error": "Nothing to set: pass at least one of 'position', 'rotation', 'scale'"}
+
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
+
+	var target := _find_node(root, node_path)
+	if not target:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Node not found: " + node_path}
+
+	if target is Skeleton3D:
+		var sk := target as Skeleton3D
+		var idx := sk.find_bone(bone_name)
+		if idx == -1:
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "Bone not found: %s. Existing: %s" % [bone_name, sk.get_concatenated_bone_names()]}
+
+		var ctx := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
+		if position != null:
+			var p = _parse_value(position)
+			if not (p is Vector3):
+				_abort_edit(ctx, root, is_live)
+				return {&"ok": false, &"error": "'position' must be a {x,y,z} Vector3 for a 3D skeleton"}
+			sk.set_bone_pose_position(idx, p)
+		if rotation != null:
+			var r = _parse_value(rotation)
+			if r is Quaternion:
+				sk.set_bone_pose_rotation(idx, r)
+			elif r is Vector3:
+				sk.set_bone_pose_rotation(idx, Quaternion.from_euler(r))
+			else:
+				_abort_edit(ctx, root, is_live)
+				return {&"ok": false, &"error": "'rotation' must be a Vector3 (euler radians) or a Quaternion"}
+		if scale != null:
+			var s = _parse_value(scale)
+			if not (s is Vector3):
+				_abort_edit(ctx, root, is_live)
+				return {&"ok": false, &"error": "'scale' must be a {x,y,z} Vector3"}
+			sk.set_bone_pose_scale(idx, s)
+		_edit_commit(ctx)
+
+		var err := _finish_scene_edit(root, scene_path, is_live)
+		if not err.is_empty():
+			return err
+		return {&"ok": true, &"kind": "3d", &"bone_name": bone_name, &"bone_index": idx,
+			&"scene_path": scene_path, &"message": "Posed 3D bone '%s'" % bone_name}
+
+	if target is Skeleton2D:
+		var sk2 := target as Skeleton2D
+		var bone: Bone2D = null
+		for b in _bones_2d(sk2):
+			if str(b.name) == bone_name:
+				bone = b
+				break
+		if bone == null:
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "Bone2D '%s' not found under %s" % [bone_name, node_path]}
+
+		var ctx2 := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
+		if position != null:
+			var p2 = _parse_value(position)
+			if not (p2 is Vector2):
+				_abort_edit(ctx2, root, is_live)
+				return {&"ok": false, &"error": "'position' must be a {x,y} Vector2 for a 2D skeleton"}
+			_edit_set(ctx2, bone, &"position", p2)
+		if rotation != null:
+			_edit_set(ctx2, bone, &"rotation", float(rotation))
+		if scale != null:
+			var s2 = _parse_value(scale)
+			if not (s2 is Vector2):
+				_abort_edit(ctx2, root, is_live)
+				return {&"ok": false, &"error": "'scale' must be a {x,y} Vector2"}
+			_edit_set(ctx2, bone, &"scale", s2)
+		_edit_commit(ctx2)
+
+		var err2 := _finish_scene_edit(root, scene_path, is_live)
+		if not err2.is_empty():
+			return err2
+		return {&"ok": true, &"kind": "2d", &"bone_name": bone_name,
+			&"bone_node_path": str(root.get_path_to(bone)),
+			&"scene_path": scene_path, &"message": "Posed Bone2D '%s'" % bone_name}
+
+	_discard_scene(root, is_live)
+	return {&"ok": false, &"error": "Node '%s' is %s, expected Skeleton2D or Skeleton3D" % [node_path, target.get_class()]}

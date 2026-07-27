@@ -465,6 +465,134 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       await bridge.invokeTool('remove_node', { scene_path: LIVE_SCENE, node_path: 'ReadProbe' }).catch(() => {});
     }, 25000);
 
+    // The build-and-verify loop. A live edit stays in the editor by design, so
+    // without a way to persist it an agent that edits an open scene and then
+    // launches the game tests the PREVIOUS version of the file — which is
+    // exactly what happened with a HUD that reported ok and was not there.
+    it('save_scene writes a live edit to disk', async () => {
+      await bridge.invokeTool('add_node', {
+        scene_path: LIVE_SCENE, node_name: 'SaveProbe', node_type: 'Node2D', parent_path: '.',
+      });
+
+      // Precondition: the edit exists in the editor and NOT on disk.
+      const treeBefore = JSON.stringify(await bridge.invokeTool('scene_tree_dump', { scene_path: LIVE_SCENE }));
+      expect(treeBefore).toContain('SaveProbe');
+      expect(readFileSync(LIVE_FILE, 'utf-8')).not.toContain('SaveProbe');
+
+      const saved = await bridge.invokeTool('save_scene', { scene_path: LIVE_SCENE }) as Record<string, unknown>;
+      expect(saved.error).toBeUndefined();
+      expect(saved.changed).toBe(true);
+
+      expect(readFileSync(LIVE_FILE, 'utf-8'), 'save_scene did not persist the live edit').toContain('SaveProbe');
+
+      // Saving again is a no-op rather than an error, and says so.
+      const again = await bridge.invokeTool('save_scene', { scene_path: LIVE_SCENE }) as Record<string, unknown>;
+      expect(again.error).toBeUndefined();
+      expect(again.changed).toBe(false);
+
+      await bridge.invokeTool('remove_node', { scene_path: LIVE_SCENE, node_path: 'SaveProbe' });
+      await bridge.invokeTool('save_scene', { scene_path: LIVE_SCENE });
+      expect(readFileSync(LIVE_FILE, 'utf-8')).not.toContain('SaveProbe');
+    }, 30000);
+
+    it('save_scene refuses a scene that is not open, and says why', async () => {
+      const res = await bridge.invokeTool('save_scene', {
+        scene_path: 'res://e2e_clobber_child.tscn',
+      }).catch((e: Error) => ({ error: e.message })) as Record<string, unknown>;
+      // A closed scene is already on disk — the error has to say that rather
+      // than looking like a failure the agent should retry.
+      expect(String(res.error ?? '')).toMatch(/not open/i);
+    }, 20000);
+
+    // The open P0: in a real project an instanced child came back with
+    // `script = null` written over its inherited script, and the player silently
+    // stopped moving. The disk path does NOT reproduce it (there is a passing
+    // GDScript test), which leaves the LIVE path as the suspect — that scene was
+    // open, remove_node reported live_editor_scene: true, and a save followed.
+    //
+    // Checked on the live tree first, because the file is only written when the
+    // editor saves; then through a real save, because that is where the override
+    // would be serialised.
+    it('an instanced child keeps its script through live edits and a save', async () => {
+      const CHILD_SCRIPT = 'res://e2e_inst_child.gd';
+      const CHILD = 'res://e2e_inst_child.tscn';
+      const PARENT = 'res://e2e_inst_parent.tscn';
+      const PARENT_FILE = join(FIXTURE_PROJECT, 'e2e_inst_parent.tscn');
+      const LEFTOVERS = ['e2e_inst_child.gd', 'e2e_inst_child.gd.uid',
+                         'e2e_inst_child.tscn', 'e2e_inst_parent.tscn'];
+      // Clean at the START too: a run that fails mid-way never reaches its own
+      // cleanup, and the next run then dies on "File already exists" — an error
+      // about the previous failure, not the current one.
+      const sweep = () => {
+        for (const f of LEFTOVERS) {
+          const p2 = join(FIXTURE_PROJECT, f);
+          if (existsSync(p2)) rmSync(p2);
+        }
+      };
+      sweep();
+
+      await bridge.invokeTool('create_script', {
+        path: CHILD_SCRIPT,
+        content: 'extends Node2D\n\nfunc _physics_process(_d: float) -> void:\n\tpass\n',
+      });
+      await bridge.invokeTool('create_scene', {
+        scene_path: CHILD, root_node_type: 'Node2D', root_node_name: 'Child',
+      });
+      await bridge.invokeTool('attach_script', {
+        scene_path: CHILD, node_path: '.', script_path: CHILD_SCRIPT,
+      });
+      await bridge.invokeTool('create_scene', {
+        scene_path: PARENT, root_node_type: 'Node2D', root_node_name: 'Parent',
+      });
+      // The editor has to know about the child scene before it can be instanced.
+      await bridge.invokeTool('rescan_filesystem', {}).catch(() => null);
+      for (let i = 0; i < 40; i++) {
+        const probe = await bridge.invokeTool('read_scene', { scene_path: CHILD }).catch(() => null);
+        if (probe && !(probe as Record<string, unknown>).error) break;
+        await new Promise(r => setTimeout(r, 250));
+      }
+      await bridge.invokeTool('instance_scene', {
+        scene_path: PARENT, instance_path: CHILD, node_name: 'Kid',
+      });
+
+      // Now open it, so every mutation below takes the LIVE path.
+      await bridge.invokeTool('open_in_godot', { path: PARENT });
+
+      const scriptOf = async () => {
+        const tree = await bridge.invokeTool('read_scene', { scene_path: PARENT }) as Record<string, unknown>;
+        const kids = ((tree.root as Record<string, unknown>)?.children ?? []) as Array<Record<string, unknown>>;
+        return kids.find(k => k.name === 'Kid')?.script ?? null;
+      };
+
+      expect(await scriptOf(), 'setup: the instance should carry its inherited script').toContain('e2e_inst_child.gd');
+
+      // The sequence from the incident: sibling added and removed on the live
+      // tree, then a save.
+      await bridge.invokeTool('add_node', {
+        scene_path: PARENT, node_name: 'Marker', node_type: 'Marker2D', parent_path: '.',
+      });
+      expect(await scriptOf(), 'script lost after a live add_node').toContain('e2e_inst_child.gd');
+
+      await bridge.invokeTool('remove_node', { scene_path: PARENT, node_path: 'Marker' });
+      expect(await scriptOf(), 'script lost after a live remove_node').toContain('e2e_inst_child.gd');
+
+      await bridge.invokeTool('set_node_properties', {
+        scene_path: PARENT, node_path: 'Kid', properties: { position: { x: 10, y: 20 } },
+      });
+      expect(await scriptOf(), 'script lost after setting a property on the instance').toContain('e2e_inst_child.gd');
+
+      await bridge.invokeTool('save_scene', { scene_path: PARENT });
+
+      // The actual symptom: `script = null` serialised as an instance override.
+      const onDisk = readFileSync(PARENT_FILE, 'utf-8');
+      expect(onDisk, 'script = null was written over the inherited script').not.toContain('script = null');
+      expect(onDisk).toContain('instance=ExtResource');
+      expect(await scriptOf(), 'script lost after the save').toContain('e2e_inst_child.gd');
+
+      await bridge.invokeTool('close_scene_tab', { scene_path: PARENT, force: true }).catch(() => null);
+      sweep();
+    }, 45000);
+
     it('reverts a whole batch when one operation fails', async () => {
       const treeBefore = JSON.stringify(await bridge.invokeTool('scene_tree_dump', { scene_path: LIVE_SCENE }));
 
@@ -658,6 +786,129 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       expect(withScene, `runtime events seen: ${seen}`).toBeDefined();
       expect(String(withScene?.detail)).toContain('e2e_run_scene.tscn');
     }, 60000);
+  });
+
+  /**
+   * The deterministic-testing tools, against a real running game.
+   *
+   * These resolve over frames from inside the game's own _physics_process, so
+   * nothing headless can tell whether they actually answer — the failure mode is
+   * a call that never returns, which every other kind of test reports as a pass.
+   */
+  describe('deterministic testing tools', () => {
+    const DET_SCENE = 'res://e2e_det_scene.tscn';
+    const DET_FILE = join(FIXTURE_PROJECT, 'e2e_det_scene.tscn');
+
+    beforeAll(async () => {
+      // run_scene refuses while a scene is already playing, and the previous
+      // suite's game may still be shutting down. Without this every test below
+      // fails with "runtime not connected", which points at the wrong thing.
+      await bridge.invokeTool('stop_scene', {}).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1500));
+
+      await bridge.invokeTool('create_scene', {
+        scene_path: DET_SCENE, root_node_type: 'Node2D', root_node_name: 'DetRoot',
+      });
+      const launched = await bridge.invokeTool('run_scene', {
+        scene: DET_SCENE, wait_for_runtime: true, startup_timeout_ms: 20000,
+      }) as Record<string, unknown>;
+      // Fail here, with the launch result, rather than seven times downstream.
+      if (!launched.runtime_connected) {
+        throw new Error(`the game did not come up: ${JSON.stringify(launched)}`);
+      }
+    }, 60000);
+
+    afterAll(async () => {
+      try { await bridge.invokeTool('time_scale', { scale: 1 }); } catch { /* game already gone */ }
+      try { await bridge.invokeTool('stop_scene', {}); } catch { /* already stopped */ }
+      if (existsSync(DET_FILE)) rmSync(DET_FILE);
+    });
+
+    it('advances an exact number of physics frames', async () => {
+      const r = await bridge.invokeTool('step_frames', { frames: 10 }) as Record<string, unknown>;
+      expect(r.frames).toBe(10);
+      expect(r.mode).toBe('physics');
+    }, 30000);
+
+    it('returns as soon as a condition holds', async () => {
+      const r = await bridge.invokeTool('await_condition', {
+        condition: 'tree.get_frame() > 0', timeout_ms: 5000,
+      }) as Record<string, unknown>;
+      expect(r.met).toBe(true);
+      expect(Number(r.frames_waited)).toBeGreaterThan(0);
+    }, 30000);
+
+    it('reports a condition that never holds as a result, not an error', async () => {
+      // met:false is something a test asserts on. Returning an error here would
+      // make "the thing never happened" indistinguishable from "the tool broke".
+      const r = await bridge.invokeTool('await_condition', {
+        condition: 'false', timeout_ms: 1000,
+      }) as Record<string, unknown>;
+      expect(r.met).toBe(false);
+      expect(r).toHaveProperty('value');
+    }, 30000);
+
+    it('rejects an unparseable condition without taking the game down', async () => {
+      // This is why the condition is an Expression and not a compiled GDScript:
+      // building a GDScript from a bad string inside a running game KILLS it.
+      // The first version of this test did exactly that and took 25s to report
+      // a failure that looked like a timeout.
+      const r = await bridge.invokeTool('await_condition', {
+        condition: '(((', timeout_ms: 1000,
+      }).catch((e: Error) => ({ error: e.message })) as Record<string, unknown>;
+      expect(JSON.stringify(r)).toMatch(/parse/i);
+
+      // The game must still be alive and answering: that is the actual assertion.
+      const playing = await bridge.invokeTool('is_playing', {}) as Record<string, unknown>;
+      expect(playing.playing).toBe(true);
+      const still = await bridge.invokeTool('step_frames', { frames: 1 }) as Record<string, unknown>;
+      expect(still.frames).toBe(1);
+    }, 30000);
+
+    // NOT covered here, deliberately: `game_eval` handed code that does not
+    // compile KILLS the running game. Measured on 2026-07-27 — the call takes
+    // ~24s and then every later runtime tool reports "runtime not connected".
+    // The test is left out because it would burn 24s of CI to assert a bug we
+    // already know about and would take the game down for everything after it.
+    // See notes/LONGTERM.md; the fix needs the root cause of why
+    // GDScript.reload() on bad source is fatal inside a running game, and
+    // await_condition avoids it entirely by using Expression instead.
+
+    it('reports an expression that parses but fails to evaluate, once', async () => {
+      // Expression's grammar is permissive, so plenty of nonsense parses and
+      // only fails on execute. That must be reported and dropped, not retried
+      // every frame until the timeout.
+      const r = await bridge.invokeTool('await_condition', {
+        condition: 'nonexistent_thing.whatever()', timeout_ms: 5000,
+      }).catch((e: Error) => ({ error: e.message })) as Record<string, unknown>;
+      expect(JSON.stringify(r)).toMatch(/failed while evaluating/i);
+
+      const playing = await bridge.invokeTool('is_playing', {}) as Record<string, unknown>;
+      expect(playing.playing).toBe(true);
+    }, 30000);
+
+    it('seeds the RNG and says what it does not cover', async () => {
+      const r = await bridge.invokeTool('seed_rng', { seed: 4242 }) as Record<string, unknown>;
+      expect(r.seed).toBe(4242);
+      expect(String(r.note)).toContain('RandomNumberGenerator');
+    }, 30000);
+
+    it('changes and restores the time scale', async () => {
+      const slow = await bridge.invokeTool('time_scale', { scale: 0.5 }) as Record<string, unknown>;
+      expect(slow.time_scale).toBeCloseTo(0.5);
+      const back = await bridge.invokeTool('time_scale', { scale: 1 }) as Record<string, unknown>;
+      expect(back.time_scale).toBeCloseTo(1);
+    }, 30000);
+
+    it('still advances frames while time is frozen', async () => {
+      // The distinction that makes freezing useful: time_scale 0 stops
+      // simulation without pausing the tree, so stepping still works and the
+      // agent can inspect a frozen game frame by frame.
+      await bridge.invokeTool('time_scale', { scale: 0 });
+      const r = await bridge.invokeTool('step_frames', { frames: 3 }) as Record<string, unknown>;
+      expect(r.frames).toBe(3);
+      await bridge.invokeTool('time_scale', { scale: 1 });
+    }, 30000);
   });
 });
 

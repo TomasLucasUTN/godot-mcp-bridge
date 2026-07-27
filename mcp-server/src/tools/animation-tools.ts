@@ -45,11 +45,49 @@ export const animationTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the AnimationPlayer node' },
         animation_name: { type: 'string', description: 'Animation to add the track to' },
-        track_type: { type: 'string', description: 'One of: "value", "position", "rotation", "method"' },
+        track_type: { type: 'string', enum: ['value', 'position', 'rotation', 'method'], description: 'One of: "value", "position", "rotation", "method"' },
         track_node_path: { type: 'string', description: 'Node path (relative to the AnimationPlayer\'s root node) the track animates' },
         property: { type: 'string', description: 'Property name (required for track_type "value"), e.g. "modulate" or "position:x"' }
       },
       required: ['scene_path', 'node_path', 'animation_name', 'track_type', 'track_node_path']
+    }
+  },
+  {
+    name: 'create_sprite_animation',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Build a complete sprite-sheet animation on an AnimationPlayer in ONE call: sets the sheet, its layout, and a keyframe per frame. Replaces the create_animation + add_animation_track + N x set_animation_keyframe sequence (~10 calls per animation). Builds the tracks in the order Godot needs — hframes/vframes BEFORE frame — which is the mistake that makes Godot log 'Index p_frame is out of bounds' every frame when done by hand. For an AnimatedSprite2D use create_sprite_frames instead.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene containing the AnimationPlayer (res://...).' },
+        node_path: { type: 'string', description: 'Path to the AnimationPlayer node (default ".").' },
+        sprite_path: { type: 'string', description: 'Path to the Sprite2D the animation drives, relative to the scene root.' },
+        animation_name: { type: 'string', description: 'Name of the animation to create. Fails if it already exists — tracks cannot be reordered, so rebuilding is the only way to change frame order.' },
+        texture: { type: 'string', description: 'Sprite sheet to key on the texture track (res://...). Omit to keep whatever texture the sprite already has.' },
+        hframes: { type: 'number', description: 'Columns in the sheet (default 1).' },
+        vframes: { type: 'number', description: 'Rows in the sheet (default 1).' },
+        frames: { description: 'Frame count (uses 0..n-1) or an explicit array of sheet indices, e.g. [4,5,6,7] for a run cycle inside a shared sheet. Defaults to every frame in the sheet.' },
+        fps: { type: 'number', description: 'Frames per second (default 10). Sets the animation length.' },
+        loop: { type: 'boolean', description: 'Loop the animation (default true).' }
+      },
+      required: ['scene_path', 'sprite_path', 'animation_name']
+    }
+  },
+  {
+    name: 'create_sprite_frames',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Create the SpriteFrames resource an AnimatedSprite2D needs, slicing one or more sprite sheets into frames. This is the route most Godot tutorials use and there was previously no way to build one at all. Each animation names its sheet, grid and fps; frames become AtlasTextures sharing the source image rather than copies. Assign the result to an AnimatedSprite2D's sprite_frames property.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Where to save the resource (res://something.tres).' },
+        animations: {
+          type: 'array',
+          description: 'One entry per animation: {name, texture, hframes?, vframes?, frames?, fps?, loop?}. `frames` is a count or an array of sheet indices; omit for the whole sheet.',
+          items: { type: 'object' }
+        }
+      },
+      required: ['path', 'animations']
     }
   },
   {

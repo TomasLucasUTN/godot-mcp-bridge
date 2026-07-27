@@ -112,6 +112,11 @@ export const tilemapTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        mode: {
+          type: 'string',
+          enum: ['connect', 'path'],
+          description: "'connect' (default) picks tiles so terrain connects to matching neighbors in any order; 'path' treats the given cells as an ordered path"
+        },
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the TileMapLayer node' },
         cells: {
@@ -121,11 +126,6 @@ export const tilemapTools: ToolDefinition[] = [
         },
         terrain_set: { type: 'number', description: 'Terrain set index (must already exist on the TileSet)' },
         terrain: { type: 'number', description: 'Terrain index within the terrain set (must already exist)' },
-        mode: {
-          type: 'string',
-          enum: ['connect', 'path'],
-          description: "'connect' (default) picks tiles so terrain connects to matching neighbors in any order; 'path' treats the given cells as an ordered path"
-        },
         ignore_empty_terrains: { type: 'boolean', description: 'Whether empty cells count as a distinct terrain for matching purposes (default: true)' }
       },
       required: ['scene_path', 'node_path', 'cells', 'terrain_set', 'terrain']

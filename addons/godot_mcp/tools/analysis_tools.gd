@@ -481,14 +481,32 @@ func analyze_signal_flow(args: Dictionary) -> Dictionary:
 # running, and a baseline captured in an earlier session can be compared later.
 # =============================================================================
 func compare_screenshots(args: Dictionary) -> Dictionary:
-	var path_a: String = _ensure_res_path(str(args.get(&"baseline", "")))
-	var path_b: String = _ensure_res_path(str(args.get(&"current", "")))
+	var raw_a: String = str(args.get(&"baseline", "")).strip_edges()
+	var raw_b: String = str(args.get(&"current", "")).strip_edges()
 	var tolerance: int = clampi(int(args.get(&"tolerance", 8)), 0, 255)
 	var diff_out: String = str(args.get(&"diff_output", ""))
 	var return_base64: bool = bool(args.get(&"return_base64", false))
 
-	if path_a.strip_edges() == "res://" or path_b.strip_edges() == "res://":
-		return {&"ok": false, &"error": "Both 'baseline' and 'current' are required"}
+	# Check the RAW arguments before sanitizing. _ensure_res_path turns anything
+	# it rejects — including an empty string — into the internal sentinel
+	# "res://__mcp_rejected_path__", so the old `== "res://"` guard could never
+	# fire and a missing argument surfaced as
+	# "Could not load image: res://__mcp_rejected_path__": an internal marker
+	# shown to the caller, pointing at the path guard instead of at the argument
+	# they actually got wrong.
+	if raw_a.is_empty() or raw_b.is_empty():
+		var missing := []
+		if raw_a.is_empty():
+			missing.append("baseline")
+		if raw_b.is_empty():
+			missing.append("current")
+		return {&"ok": false, &"error": "Missing %s. compare_screenshots takes 'baseline' and 'current' (res:// or user:// .png paths)." % " and ".join(missing)}
+
+	var path_a: String = _ensure_res_path(raw_a)
+	var path_b: String = _ensure_res_path(raw_b)
+	for pair in [[path_a, raw_a, "baseline"], [path_b, raw_b, "current"]]:
+		if pair[0] == "res://__mcp_rejected_path__":
+			return {&"ok": false, &"error": "'%s' path was rejected by the project sandbox: '%s'. Paths must stay inside res:// or user://." % [pair[2], pair[1]]}
 
 	var img_a := _load_image(path_a)
 	if img_a == null:
@@ -772,3 +790,216 @@ func _store_snapshot(scene_path: String, nodes: Dictionary) -> String:
 		if not oldest.is_empty():
 			_snapshots.erase(oldest)
 	return id
+
+# =============================================================================
+# validate_references — the names a script uses vs the names the project has
+# =============================================================================
+# validate_scripts answers "does this parse". It says nothing about whether the
+# things a script NAMES actually exist, and those failures are silent: a
+# get_first_node_in_group("player") against a project where nothing is in that
+# group returns null, the enemy just stands still, and there is no error
+# anywhere. Same for an input action that was renamed, an autoload that is not
+# registered, and a signal emitted but never declared.
+#
+# Deliberately regex-based rather than compiling: this has to work on a project
+# that does not currently run, which is exactly when it is most useful, and a
+# project-wide load of every scene is far too slow for a sweep.
+#
+# Only literal names are checked. A group built at runtime ("enemy_" + tier) is
+# skipped rather than guessed at — a false positive here is worse than a miss,
+# because the whole value of the tool is that its output can be trusted.
+
+const _GROUP_CALLS := [
+	"get_first_node_in_group", "get_nodes_in_group", "is_in_group",
+	"add_to_group", "remove_from_group", "call_group", "call_group_flags",
+	"set_group", "notify_group",
+]
+const _ACTION_CALLS := [
+	"is_action_pressed", "is_action_just_pressed", "is_action_just_released",
+	"is_action_released", "action_press", "action_release", "get_action_strength",
+	"get_action_raw_strength",
+]
+
+## Every group name the project actually defines: declared in a .tscn, or added
+## by a script at runtime. A group only ever exists because something put a node
+## in it, so add_to_group is a definition, not just a use.
+func _project_groups() -> Dictionary:
+	var groups: Dictionary = {}
+	var files: Array = []
+	_walk("res://", files, false)
+	var re_scene := RegEx.new()
+	re_scene.compile('groups\\s*=\\s*\\[([^\\]]*)\\]')
+	var re_name := RegEx.new()
+	re_name.compile('"([^"]+)"')
+	var re_add := RegEx.new()
+	re_add.compile('add_to_group\\s*\\(\\s*&?"([^"]+)"')
+	for f: String in files:
+		if f.ends_with(".tscn") or f.ends_with(".scn"):
+			var text := _read_text(f)
+			for m in re_scene.search_all(text):
+				for n in re_name.search_all(m.get_string(1)):
+					groups[n.get_string(1)] = true
+		elif f.ends_with(".gd"):
+			for m in re_add.search_all(_read_text(f)):
+				groups[m.get_string(1)] = true
+	return groups
+
+## Input actions from both sources. The editor's InputMap holds the built-ins and
+## anything added this session; project.godot holds the ones the developer
+## defined, and those are NOT loaded into InputMap automatically.
+func _project_actions() -> Dictionary:
+	var actions: Dictionary = {}
+	for action: StringName in InputMap.get_actions():
+		actions[str(action)] = true
+	for prop: Dictionary in ProjectSettings.get_property_list():
+		var pname: String = prop[&"name"]
+		if pname.begins_with("input/"):
+			actions[pname.substr(6)] = true
+	return actions
+
+func _project_autoloads() -> Dictionary:
+	var autoloads: Dictionary = {}
+	for prop: Dictionary in ProjectSettings.get_property_list():
+		var pname: String = prop[&"name"]
+		if pname.begins_with("autoload/"):
+			autoloads[pname.substr(9)] = true
+	return autoloads
+
+## Cheapest useful suggestion: same first letter and a close length, or one is a
+## substring of the other. Full edit distance is not worth it here — the point is
+## to catch a rename or a typo, and those look like this.
+func _closest(name: String, candidates: Array) -> String:
+	var best := ""
+	var best_score := 0.0
+	for c_v in candidates:
+		var c := str(c_v)
+		var score := 0.0
+		if c.to_lower() == name.to_lower():
+			return c
+		if c.to_lower().contains(name.to_lower()) or name.to_lower().contains(c.to_lower()):
+			score = 0.8
+		elif not c.is_empty() and not name.is_empty() and c[0] == name[0]:
+			score = 0.4 - absf(c.length() - name.length()) * 0.05
+		if score > best_score:
+			best_score = score
+			best = c
+	return best if best_score >= 0.35 else ""
+
+func _line_of(text: String, index: int) -> int:
+	return text.substr(0, index).count("\n") + 1
+
+func validate_references(args: Dictionary) -> Dictionary:
+	var root_path: String = _ensure_res_path(str(args.get(&"root", "res://")))
+	if root_path == "res://__mcp_rejected_path__":
+		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	var include_addons: bool = bool(args.get(&"include_addons", false))
+
+	var groups := _project_groups()
+	var actions := _project_actions()
+	var autoloads := _project_autoloads()
+
+	var files: Array = []
+	_walk(root_path, files, include_addons)
+
+	var re_group := RegEx.new()
+	re_group.compile('(%s)\\s*\\(\\s*&?"([^"]+)"' % "|".join(_GROUP_CALLS))
+	var re_action := RegEx.new()
+	re_action.compile('(%s)\\s*\\(\\s*&?"([^"]+)"' % "|".join(_ACTION_CALLS))
+	var re_axis := RegEx.new()
+	re_axis.compile('get_(?:axis|vector)\\s*\\(([^)]*)\\)')
+	var re_str := RegEx.new()
+	re_str.compile('&?"([^"]+)"')
+	var re_signal_decl := RegEx.new()
+	re_signal_decl.compile('(?m)^\\s*signal\\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+	var re_emit := RegEx.new()
+	re_emit.compile('emit_signal\\s*\\(\\s*&?"([^"]+)"')
+
+	var issues: Array = []
+	var scanned := 0
+
+	for f_v in files:
+		var f := str(f_v)
+		if not f.ends_with(".gd"):
+			continue
+		scanned += 1
+		var text := _read_text(f)
+
+		for m in re_group.search_all(text):
+			var g := m.get_string(2)
+			if groups.has(g):
+				continue
+			issues.append({
+				&"kind": "group", &"name": g, &"file": f, &"line": _line_of(text, m.get_start()),
+				&"call": m.get_string(1),
+				&"suggestion": _closest(g, groups.keys()),
+				&"detail": "No node in this project is in group '%s'. The call returns null / an empty array at runtime, with no error." % g,
+			})
+
+		for m in re_action.search_all(text):
+			var a := m.get_string(2)
+			if actions.has(a):
+				continue
+			issues.append({
+				&"kind": "input_action", &"name": a, &"file": f, &"line": _line_of(text, m.get_start()),
+				&"call": m.get_string(1),
+				&"suggestion": _closest(a, actions.keys()),
+				&"detail": "Input action '%s' is not in the InputMap. The check is always false — the input silently never fires." % a,
+			})
+
+		# get_axis("a","b") / get_vector("a","b","c","d") take action names as
+		# plain strings, so they need their own pass.
+		for m in re_axis.search_all(text):
+			for sm in re_str.search_all(m.get_string(1)):
+				var a2 := sm.get_string(1)
+				if actions.has(a2):
+					continue
+				issues.append({
+					&"kind": "input_action", &"name": a2, &"file": f, &"line": _line_of(text, m.get_start()),
+					&"call": "get_axis/get_vector",
+					&"suggestion": _closest(a2, actions.keys()),
+					&"detail": "Input action '%s' is not in the InputMap; this axis contributes nothing." % a2,
+				})
+
+		# A signal emitted by name but never declared in the same script. Only
+		# same-file declarations are checked: emitting another object's signal is
+		# legal and resolving the target's class reliably would need real type
+		# inference.
+		var declared: Dictionary = {}
+		for m in re_signal_decl.search_all(text):
+			declared[m.get_string(1)] = true
+		for m in re_emit.search_all(text):
+			var sig := m.get_string(1)
+			if declared.has(sig):
+				continue
+			issues.append({
+				&"kind": "signal", &"name": sig, &"file": f, &"line": _line_of(text, m.get_start()),
+				&"call": "emit_signal",
+				&"suggestion": _closest(sig, declared.keys()),
+				&"detail": "This script emits '%s' but does not declare it. emit_signal on an undeclared signal fails at runtime." % sig,
+			})
+
+	# Autoload usage: a bare identifier matching no autoload is just a variable,
+	# so the useful direction is the reverse — a script that references a name
+	# which LOOKS like an autoload (capitalised, used with a dot) but is not
+	# registered. Checked only against names the project once had, to stay quiet.
+	var autoload_names: Array = autoloads.keys()
+
+	var by_kind: Dictionary = {"group": 0, "input_action": 0, "signal": 0}
+	for i_v in issues:
+		var k: String = i_v[&"kind"]
+		by_kind[k] = int(by_kind.get(k, 0)) + 1
+
+	return {
+		&"ok": true,
+		&"root": root_path,
+		&"scripts_scanned": scanned,
+		&"issue_count": issues.size(),
+		&"issues_by_kind": by_kind,
+		&"issues": issues,
+		&"known": {
+			&"groups": groups.keys(),
+			&"input_actions": actions.size(),
+			&"autoloads": autoload_names,
+		},
+		&"message": "Scanned %d script(s): %d reference issue(s)." % [scanned, issues.size()],
+	}

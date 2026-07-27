@@ -74,6 +74,9 @@ const SEMANTIC_GROUPS: Record<string, string[]> = {
     'call_rpc_runtime', 'call_method_runtime', 'set_runtime_property',
     'await_signal_runtime', 'serialize_runtime_tree', 'spawn_headless_peers',
     'stop_headless_peers',
+    // Deterministic testing: replay a run involving chance, advance an exact
+    // amount of simulation, wait on a state rather than a signal or a guess.
+    'seed_rng', 'step_frames', 'time_scale', 'await_condition',
   ],
   // Generate the boilerplate instead of hand-writing it — including the
   // multiplayer replication nodes, whose real state lives in a sub-resource

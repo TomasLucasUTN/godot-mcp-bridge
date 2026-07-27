@@ -167,6 +167,7 @@ func _init_tools() -> void:
 		&"detect_circular_dependencies": [_analysis_tools, &"detect_circular_dependencies"],
 		&"analyze_scene_complexity": [_analysis_tools, &"analyze_scene_complexity"],
 		&"analyze_signal_flow": [_analysis_tools, &"analyze_signal_flow"],
+		&"validate_references": [_analysis_tools, &"validate_references"],
 		&"compare_screenshots": [_analysis_tools, &"compare_screenshots"],
 		&"scene_diff": [_analysis_tools, &"scene_diff"],
 		&"disconnect_signal": [_scene_tools, &"disconnect_signal"],
@@ -232,6 +233,8 @@ func _init_tools() -> void:
 		&"list_animations": [_animation_tools, &"list_animations"],
 		&"create_animation": [_animation_tools, &"create_animation"],
 		&"add_animation_track": [_animation_tools, &"add_animation_track"],
+		&"create_sprite_animation": [_animation_tools, &"create_sprite_animation"],
+		&"create_sprite_frames": [_animation_tools, &"create_sprite_frames"],
 		&"set_animation_keyframe": [_animation_tools, &"set_animation_keyframe"],
 		&"get_animation_info": [_animation_tools, &"get_animation_info"],
 		&"remove_animation": [_animation_tools, &"remove_animation"],
@@ -267,6 +270,9 @@ func _init_tools() -> void:
 		&"setup_environment": [_scene3d_tools, &"setup_environment"],
 		&"setup_camera_3d": [_scene3d_tools, &"setup_camera_3d"],
 		&"add_gridmap": [_scene3d_tools, &"add_gridmap"],
+		&"get_skeleton_info": [_scene3d_tools, &"get_skeleton_info"],
+		&"add_bone": [_scene3d_tools, &"add_bone"],
+		&"set_bone_pose": [_scene3d_tools, &"set_bone_pose"],
 
 		&"find_nodes_by_type": [_batch_tools, &"find_nodes_by_type"],
 		&"batch_set_property": [_batch_tools, &"batch_set_property"],
@@ -281,6 +287,7 @@ func _init_tools() -> void:
 		&"mp_add_spawner": [_netcode_tools, &"mp_add_spawner"],
 		&"mp_add_synchronizer": [_netcode_tools, &"mp_add_synchronizer"],
 		&"mp_wire_rpc": [_netcode_tools, &"mp_wire_rpc"],
+		&"mp_set_authority": [_netcode_tools, &"mp_set_authority"],
 		&"mp_scaffold_lobby": [_netcode_tools, &"mp_scaffold_lobby"],
 		&"mp_diagnose": [_netcode_tools, &"mp_diagnose"],
 
@@ -302,6 +309,7 @@ func _init_tools() -> void:
 		&"select_nodes": [_project_tools, &"select_nodes"],
 		&"clear_editor_selection": [_project_tools, &"clear_editor_selection"],
 		&"close_scene_tab": [_project_tools, &"close_scene_tab"],
+		&"save_scene": [_project_tools, &"save_scene"],
 		&"get_performance_monitors": [_project_tools, &"get_performance_monitors"],
 		&"get_editor_performance": [_project_tools, &"get_editor_performance"],
 		&"create_resource": [_project_tools, &"create_resource"],
@@ -412,6 +420,49 @@ const _DESTRUCTIVE_TOOLS := {
 func _is_read_only() -> bool:
 	return OS.get_environment("GODOT_MCP_READ_ONLY").to_lower() == "true"
 
+## Tools that live in the GAME, not the editor. Named here only so the
+## unknown-tool error can say WHY they are missing: batch_execute dispatches
+## through this executor, which has no route to the running game, so asking for
+## one of these inside a batch used to look like a typo.
+const _RUNTIME_ONLY_HINT := [
+	"take_screenshot", "send_input", "query_runtime_node", "get_runtime_log",
+	"game_eval", "serialize_runtime_tree", "call_method_runtime",
+	"set_runtime_property", "await_signal_runtime", "await_condition",
+	"step_frames", "seed_rng", "time_scale", "monitor_properties",
+	"click_control_runtime", "dump_control_tree", "assert_screen_text",
+]
+
+
+## A few likely names, not all ~180.
+##
+## The old message appended every registered tool name: ~4,000 characters, and
+## batch_execute repeats the error once per failed operation, so a single
+## mistyped name in a two-operation batch cost about 2,000 tokens — more than a
+## quarter of this server's entire default tool surface, in a server whose whole
+## argument is that context is expensive. Measured, then fixed.
+func _suggest_tools(name: String) -> String:
+	if _RUNTIME_ONLY_HINT.has(name):
+		return " That tool runs inside the GAME, not the editor, so batch_execute cannot dispatch it — call it directly while a scene is running."
+
+	var hits: Array = []
+	for key in _tool_map.keys():
+		var candidate := str(key)
+		if candidate.contains(name) or name.contains(candidate):
+			hits.append(candidate)
+	if hits.is_empty():
+		# Nothing contains it; fall back to sharing a leading word, which catches
+		# the common "right area, wrong verb" mistake (set_node_group).
+		var head: String = name.split("_")[0]
+		if head.length() >= 3:
+			for key in _tool_map.keys():
+				if str(key).begins_with(head):
+					hits.append(str(key))
+	if hits.is_empty():
+		return " Call list_toolsets to find the tool you want and which toolset holds it."
+	hits.sort()
+	return " Did you mean: %s?" % ", ".join(hits.slice(0, mini(hits.size(), 8)))
+
+
 func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 	"""Execute a tool by name with the given arguments.
 
@@ -433,10 +484,7 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 		return await _batch_execute(args)
 
 	if not _tool_map.has(tool_name):
-		return {
-			&"ok": false,
-			&"error": "Unknown tool: %s. Available: %s" % [tool_name, ", ".join(_tool_map.keys())]
-		}
+		return {&"ok": false, &"error": "Unknown tool: %s.%s" % [tool_name, _suggest_tools(tool_name)]}
 
 	if _DESTRUCTIVE_TOOLS.has(tool_name) and _is_read_only():
 		return {&"ok": false, &"error": "Blocked: read-only mode is active (GODOT_MCP_READ_ONLY=true). This tool modifies the project."}

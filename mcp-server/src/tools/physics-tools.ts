@@ -33,6 +33,7 @@ export const physicsTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        offset: { type: 'object', description: "Where the shape sits relative to the body origin, e.g. {x:0,y:-23}. Default for a 2D body: the shape sits ON the origin (origin = the feet), so position places the character on the ground. Pass {x:0,y:0} to centre it on the origin instead." },
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the physics body/area node' },
         shape_type: { type: 'string', enum: ['rectangle', 'circle', 'box', 'sphere'], description: '"rectangle" or "circle" for 2D nodes; "box" or "sphere" for 3D nodes.' },

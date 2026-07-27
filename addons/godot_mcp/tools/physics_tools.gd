@@ -147,12 +147,53 @@ func setup_collision(args: Dictionary) -> Dictionary:
 				return {&"ok": false, &"error": "Invalid 'shape_type' for a 2D node: %s. Use 'rectangle' or 'circle'." % shape_type}
 
 	var collision_node_type: String = "CollisionShape3D" if is_3d else "CollisionShape2D"
-	var collision_node: Node = ClassDB.instantiate(collision_node_type)
-	collision_node.name = node_name
+
+	# Fill an existing EMPTY collision shape rather than adding a second one.
+	#
+	# create_scene happily accepts a CollisionShape2D with no shape resource, and
+	# Godot only complains at runtime. Adding a sibling then left the useless
+	# empty node in place, still warning, next to a working one — two nodes where
+	# the developer asked for one working shape.
+	var collision_node: Node = null
+	var reused := false
+	for child in target.get_children():
+		if child.get_class() == collision_node_type and child.get(&"shape") == null:
+			collision_node = child
+			reused = true
+			break
+
+	if collision_node == null:
+		collision_node = ClassDB.instantiate(collision_node_type)
+		collision_node.name = node_name
 	collision_node.set(&"shape", shape3d if is_3d else shape)
 
+	# Where the shape sits relative to the body's origin.
+	#
+	# Default: sit the shape ON the origin instead of centring it there. For a
+	# 2D character that is what you almost always want — the origin becomes the
+	# feet, so `position` places the character on the ground and a sprite offset
+	# is measured from the same point. Centring it (the old behaviour) buries a
+	# body half-way into the floor, which is exactly how an orc ended up
+	# hovering above the ground in the test project while the hand-made player
+	# collision next to it was offset by hand.
+	#
+	# Pass an explicit `offset` to override, or `offset: {x: 0, y: 0}` for the
+	# old centred behaviour.
+	var offset = args.get(&"offset")
+	if offset != null:
+		collision_node.set(&"position", _parse_value(offset))
+	elif not is_3d and target.is_class("CollisionObject2D"):
+		var half: float = 0.0
+		if shape is RectangleShape2D:
+			half = (shape as RectangleShape2D).size.y * 0.5
+		elif shape is CircleShape2D:
+			half = (shape as CircleShape2D).radius
+		if half > 0.0:
+			collision_node.set(&"position", Vector2(0.0, -half))
+
 	var ctx := _begin_edit(is_live, "MCP: set up collision on %s" % target.name, root)
-	_edit_add_child(ctx, target, collision_node, root)
+	if not reused:
+		_edit_add_child(ctx, target, collision_node, root)
 	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
@@ -162,7 +203,8 @@ func setup_collision(args: Dictionary) -> Dictionary:
 	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"collision_node_name": collision_node.name, &"collision_node_type": collision_node_type,
 		&"shape_type": shape_type,
-		&"message": "Added %s (%s shape) to '%s'" % [collision_node.name, shape_type, node_path]}
+		&"reused_existing_node": reused,
+		&"message": "%s %s (%s shape) on '%s'" % ["Filled in existing" if reused else "Added", collision_node.name, shape_type, node_path]}
 
 # =============================================================================
 # set_physics_layers

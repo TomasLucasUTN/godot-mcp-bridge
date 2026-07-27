@@ -19,7 +19,7 @@ export const testingTools: ToolDefinition[] = [
         node_path: { type: 'string', description: 'Path to the node relative to the scene root (e.g. "Player/Sprite2D"), or "." for the root' },
         property: { type: 'string', description: 'Property name to check (e.g. "visible", "position", "health")' },
         expected: { description: 'Expected value. Compared against the actual property after coercing to the property\'s real type.' },
-        operator: { type: 'string', description: 'Comparison operator: "eq" (default), "neq", "gt", "gte", "lt", "lte" (numeric only for the last four)' },
+        operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'], description: 'Comparison operator: "eq" (default), "neq", "gt", "gte", "lt", "lte" (numeric only for the last four)' },
       },
       required: ['scene_path', 'node_path', 'property', 'expected'],
     },

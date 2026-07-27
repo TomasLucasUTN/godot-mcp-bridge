@@ -23,6 +23,26 @@ static func parse_typed_value(value: Variant, type_hint: int) -> Variant:
 	if type_hint == -1:
 		return parse_value(value)
 
+	# A res:// path for an Object-typed property means "load this and assign it".
+	# Every tool here that takes a resource takes a path (attach_script,
+	# set_sprite_texture, assign_shader_material), so an agent naturally writes
+	# one for `texture` too — and set() silently rejects a String for an Object
+	# property, so the call reports success and nothing happens.
+	#
+	# This lives in the codec rather than in one tool because that is exactly how
+	# it went wrong: the fix was applied inside set_node_properties only, and
+	# add_node, create_scene, instance_scene, batch_scene_edit and duplicate_node
+	# kept the bug. Found by building a real scene and watching the texture not
+	# appear.
+	if type_hint == TYPE_OBJECT and value is String:
+		var res_path := str(value)
+		if res_path.begins_with("res://") and ResourceLoader.exists(res_path):
+			var loaded := ResourceLoader.load(res_path)
+			if loaded != null:
+				return loaded
+		# Not loadable: fall through and return the String unchanged, so callers
+		# that report per-property failures can still say what went wrong.
+
 	if value is Dictionary:
 		var dict: Dictionary = value
 		if not str(dict.get(&"type", "")).is_empty():

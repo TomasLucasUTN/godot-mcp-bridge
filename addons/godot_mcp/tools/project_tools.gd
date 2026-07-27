@@ -918,6 +918,25 @@ func _extract_file_line(text: String) -> Dictionary:
 		return {&"file": file_path, &"line": int(line_str)}
 	return {&"file": file_path}
 
+## Error vs warning for one row of the Debugger > Errors tree.
+##
+## Read from the meta Godot stamps on the row, never from its text: that panel is
+## TRANSLATED, so matching on the word "warning" only ever worked in an English
+## editor. Everywhere else every warning was reported as an error and
+## include_warnings=false filtered nothing. `_is_warning` / `_is_error` are set in
+## script_editor_debugger.cpp and read back by Godot the same way, identically on
+## 4.5 and 4.7.
+func _severity_for_error_item(item: TreeItem, message: String) -> String:
+	if item.has_meta(&"_is_warning"):
+		return "warning"
+	if item.has_meta(&"_is_error"):
+		return "error"
+	# No meta: not a row Godot built as an error entry. Fall back to the text so
+	# an unfamiliar build degrades to the old behaviour instead of calling
+	# everything an error.
+	return "warning" if "warning" in message.to_lower() else "error"
+
+
 func _read_debugger_errors(include_warnings: bool) -> Array:
 	var tree := _get_debugger_error_tree()
 	if not tree:
@@ -941,9 +960,7 @@ func _read_debugger_errors(include_warnings: bool) -> Array:
 			item = item.get_next()
 			continue
 
-		var severity := "error"
-		if "warning" in message.to_lower():
-			severity = "warning"
+		var severity := _severity_for_error_item(item, message)
 
 		if severity == "warning" and not include_warnings:
 			item = item.get_next()
@@ -2013,4 +2030,71 @@ func _step_history(steps: int, undo: bool) -> Dictionary:
 		&"steps_applied": done.size(),
 		&"actions": done,
 		&"message": "Stepped %d %s action(s): %s" % [done.size(), verb, ", ".join(done)],
+	}
+
+# =============================================================================
+# save_scene
+# =============================================================================
+## Persist a scene that is open in the editor.
+##
+## Every mutating tool edits the LIVE tree when its target scene is open, so the
+## developer's unsaved work is never clobbered — but nothing wrote those edits
+## out. An agent that edited an open scene and then ran the game tested the
+## file as it was BEFORE the edit, and the only way through was to close the tab
+## (discarding the edit) and redo it with the scene closed.
+##
+## That is the build-and-verify loop this project exists for, and it needed a
+## human to press Ctrl+S in the middle of it.
+func save_scene(args: Dictionary) -> Dictionary:
+	if not _editor_plugin:
+		return {&"ok": false, &"error": "save_scene requires a live editor session"}
+
+	var scene_path: String = str(args.get(&"scene_path", ""))
+	var ei := _editor_plugin.get_editor_interface()
+	var open_scenes := ei.get_open_scenes()
+
+	# No argument means "the scene the developer is looking at".
+	if scene_path.strip_edges().is_empty():
+		var current := ei.get_edited_scene_root()
+		if not current or current.scene_file_path.is_empty():
+			return {&"ok": false, &"error": "No scene is currently open in the editor. Pass 'scene_path', or edit a scene first."}
+		scene_path = current.scene_file_path
+	else:
+		var guarded := PathGuard.sanitize(scene_path)
+		if not guarded[&"ok"]:
+			return {&"ok": false, &"error": guarded[&"error"]}
+		scene_path = guarded[&"path"]
+		if scene_path not in open_scenes:
+			return {
+				&"ok": false,
+				&"error": "Scene is not open in the editor: %s. Only an OPEN scene has unsaved state to write — a closed scene is already on disk, since tools edit it there directly." % scene_path,
+				&"open_scenes": open_scenes,
+			}
+
+	# save_scene() writes whichever scene is currently being edited, so the tab
+	# has to be the right one first. Switching is cheap and does not discard
+	# anything: the other tabs keep their own unsaved state.
+	var previous := ei.get_edited_scene_root()
+	var previous_path := previous.scene_file_path if previous else ""
+	var switched := previous_path != scene_path
+	if switched:
+		ei.open_scene_from_path(scene_path)
+
+	var before_md5 := FileAccess.get_md5(scene_path)
+
+	var err = ei.save_scene()
+	if err != null and int(err) != OK:
+		return {&"ok": false, &"error": "Failed to save scene: %s (error %s)" % [scene_path, str(err)]}
+
+	# Restore whichever tab the developer had focused, so saving on their behalf
+	# does not move them somewhere else.
+	if switched and not previous_path.is_empty():
+		ei.open_scene_from_path(previous_path)
+
+	var after_md5 := FileAccess.get_md5(scene_path)
+	return {
+		&"ok": true,
+		&"scene_path": scene_path,
+		&"changed": before_md5 != after_md5,
+		&"message": "Saved %s%s" % [scene_path, "" if before_md5 != after_md5 else " (already up to date)"],
 	}

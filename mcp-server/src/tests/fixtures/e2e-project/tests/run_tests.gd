@@ -70,6 +70,20 @@ func _initialize() -> void:
 	_test_every_tool_node_gets_the_plugin()
 	_test_debugger_watch_is_passive()
 	_test_coroutine_tools_are_registered()
+	_test_debugger_error_severity_is_language_independent()
+	_test_deterministic_runtime_tools()
+	_test_unknown_tool_error_is_cheap()
+	_test_instanced_child_keeps_its_script()
+	_test_resource_paths_load_on_every_entry_point()
+	_test_collision_sits_on_the_origin()
+	_test_numeric_value_match()
+	_test_shape_type_error()
+	_test_read_scene_properties()
+	_test_validate_references()
+	_test_collision_reuse_and_track_order()
+	_test_sprite_animation()
+	_test_skeleton_tools()
+	_test_mp_authority()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -156,6 +170,7 @@ func _test_validate_scripts() -> void:
 
 	_rm(good)
 	_rm(bad)
+
 	scr.free()
 
 # batch_scene_edit applies N ops with one load + one save, and stop_on_error
@@ -724,6 +739,26 @@ func _test_activity_digest() -> void:
 	var d2: Dictionary = log.human_digest()
 	_check(int(d2.get("human_events_since_last_call", 0)) == 20, "counts every human event")
 	_check(Array(d2.get("recent", [])).size() == 5, "but only ships the last few (token cap)")
+
+	# One event's DETAIL must be bounded too, not just the number of events.
+	# Godot hands resources_reimported an array of every path it imported, and
+	# this digest rides on every tool response: dropping an asset pack into the
+	# project made an unrelated tool call return 1.5 MB (~390,000 tokens).
+	var many: Array = []
+	for i in range(3000):
+		many.append("res://Sprites/some_quite_long_asset_name_%04d.png" % i)
+	log._agent_depth = 0
+	log._agent_deadline_ms = 0
+	log.record("resources_reimported", many)
+	var recorded: Array = log.query(0, 1).get("events", [])
+	var stored: Array = recorded[0]["detail"]
+	_check(stored.size() <= McpActivityLog.DETAIL_MAX_ITEMS + 1, "a huge detail array is clamped (%d entries)" % stored.size())
+	_check(str(stored[stored.size() - 1]).contains("3000"), "and says how many there really were, instead of lying by omission")
+	_check(JSON.stringify(recorded[0]).length() < 1000, "so one event cannot blow up a tool response")
+
+	log.record("script_focus", "x".repeat(5000))
+	var long_one: Array = log.query(0, 1).get("events", [])
+	_check(str(long_one[0]["detail"]).length() < 400, "an absurdly long string detail is clamped too")
 
 	# The ring must not grow without bound.
 	for i in range(300):
@@ -2065,8 +2100,13 @@ func _test_coroutine_tools_are_registered() -> void:
 			declared.append(m.get_string(1))
 	_check(declared.size() >= 2, "found the coroutine tool list (%s)" % str(declared))
 
+	# Match against a newline-normalised copy. This assertion hard-codes "\n", so
+	# it broke the moment the file was written with CRLF — which is what any
+	# Windows checkout with core.autocrlf=true produces. It would have failed for
+	# a contributor's line endings rather than for a real defect.
+	var exec_lf := exec_src.replace("\r\n", "\n")
 	for name in declared:
-		_check(exec_src.contains('"%s":\n\t\t\t\tresult = await node.%s(args)' % [name, name]),
+		_check(exec_lf.contains('"%s":\n\t\t\t\tresult = await node.%s(args)' % [name, name]),
 			"%s has a direct await dispatch case" % name)
 
 	# The other direction, which is the one that actually rots: a handler that
@@ -2103,3 +2143,758 @@ func _test_coroutine_tools_are_registered() -> void:
 				missing.append("%s.%s" % [file, current])
 				current = ""  # one report per handler is enough
 	_check(missing.is_empty(), "every awaiting tool handler is registered as a coroutine (missing: %s)" % str(missing))
+
+# get_errors classified severity by looking for the word "warning" in the row's
+# text — but that text comes from the editor's Debugger panel, which is
+# translated. On a Spanish or Chinese editor ("Advertencia", "警告") every warning
+# was reported as an error and include_warnings=false filtered nothing.
+#
+# Found by reading a competitor's bug report (Godot-MCP-Native #32) and checking
+# whether we had the same defect. We did.
+func _test_debugger_error_severity_is_language_independent() -> void:
+	print("\n[debugger error severity]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+	var tree := Tree.new()
+	var root := tree.create_item()
+
+	# Godot stamps these in script_editor_debugger.cpp; it reads them back the
+	# same way, on 4.5 and 4.7 alike.
+	var warn := tree.create_item(root)
+	warn.set_meta(&"_is_warning", true)
+	var err := tree.create_item(root)
+	err.set_meta(&"_is_error", true)
+
+	# The message text is deliberately in another language: if the classifier
+	# still reads the text, these two come back wrong.
+	_check(pt._severity_for_error_item(warn, "Advertencia: nodo sin forma") == "warning",
+		"a warning row is a warning even when the panel is not in English")
+	_check(pt._severity_for_error_item(err, "错误:找不到节点") == "error",
+		"an error row is an error even when the panel is not in English")
+
+	# The English text must not be able to override the meta either.
+	_check(pt._severity_for_error_item(err, "warning: this text lies") == "error",
+		"the meta wins over the text, not the other way round")
+
+	# No meta at all (an unfamiliar build): degrade to the old text match rather
+	# than calling everything an error.
+	var bare := tree.create_item(root)
+	_check(pt._severity_for_error_item(bare, "WARNING: something") == "warning",
+		"without meta it falls back to the text instead of guessing error")
+	_check(pt._severity_for_error_item(bare, "ERROR: something") == "error",
+		"and still reports a plain error as an error")
+
+	tree.free()
+	pt.free()
+
+# seed_rng / time_scale / step_frames / await_condition exist so a test of a
+# running game can be repeated: `wait` counts wall-clock time, so how much
+# simulation happens depends on the machine.
+#
+# The frame-counting halves need a real running game and a socket, so what is
+# checked here is everything that does not: argument contracts, clamping, and
+# the truthiness rule await_condition uses to decide it is done.
+func _test_deterministic_runtime_tools() -> void:
+	print("\n[deterministic runtime tools]")
+	# Not added to the tree, so _ready (and the WebSocket connect) never runs.
+	var rt = preload("res://addons/godot_mcp/runtime/mcp_runtime.gd").new()
+
+	var no_seed: Dictionary = rt._seed_rng({})
+	_check(not no_seed.get("ok", true), "seed_rng without a seed is rejected")
+	var seeded: Dictionary = rt._seed_rng({"seed": 42})
+	_check(seeded.get("ok", false) and int(seeded.get("seed", 0)) == 42, "seed_rng echoes the seed it applied")
+	_check(str(seeded.get("note", "")).contains("RandomNumberGenerator"),
+		"and says which RNG it does NOT cover, rather than implying full determinism")
+
+	# Same seed, same sequence — the property the tool exists for.
+	rt._seed_rng({"seed": 12345})
+	var first: Array = [randi(), randi(), randi()]
+	rt._seed_rng({"seed": 12345})
+	var second: Array = [randi(), randi(), randi()]
+	_check(first == second, "reseeding replays the same sequence")
+
+	var restore := Engine.time_scale
+	_check(not rt._time_scale({}).get("ok", true), "time_scale without a scale is rejected")
+	var half: Dictionary = rt._time_scale({"scale": 0.5})
+	_check(half.get("ok", false) and is_equal_approx(float(half.get("time_scale", 0.0)), 0.5), "time_scale applies a valid scale")
+	var huge: Dictionary = rt._time_scale({"scale": 5000.0})
+	_check(huge.get("clamped", false), "an absurd scale is clamped, not applied")
+	_check(float(huge.get("time_scale", 0.0)) <= 10.0, "and clamped to the documented ceiling")
+	var negative: Dictionary = rt._time_scale({"scale": -3.0})
+	_check(float(negative.get("time_scale", -1.0)) >= 0.0, "negative time is clamped to zero")
+	Engine.time_scale = restore
+
+	# step_frames' clamp is checked by inspecting the queued job rather than by
+	# running it: the cap is 3600 physics frames, which is a real minute of
+	# waiting, and a test that takes a minute to prove a bounds check is a test
+	# nobody runs. (Learned the hard way — the first version of the live test did
+	# exactly that and took the game down with it.)
+	rt._step_jobs.clear()
+	rt._start_step_frames("probe-clamp", {"frames": 999999})
+	_check(rt._step_jobs.size() == 1, "step_frames queues a job")
+	_check(int(rt._step_jobs[0]["frames"]) == 3600, "an absurd frame count is capped at 3600")
+	_check(int(rt._step_jobs[0]["requested"]) == 999999, "and the job remembers what was asked, so the reply can say it clamped")
+	_check(str(rt._step_jobs[0]["mode"]) == "physics", "physics frames are the default, not render frames")
+
+	rt._step_jobs.clear()
+	rt._start_step_frames("probe-zero", {"frames": 0})
+	_check(rt._step_jobs.is_empty(), "a frame count below 1 is rejected instead of queued")
+	rt._start_step_frames("probe-mode", {"frames": 2, "mode": "nonsense"})
+	_check(rt._step_jobs.is_empty(), "an unknown mode is rejected instead of silently defaulting")
+	rt._step_jobs.clear()
+
+	# await_condition's truthiness: an empty array has to read as "not yet", or
+	# `return tree.get_nodes_in_group("enemies")` would resolve immediately.
+	_check(not rt._is_truthy(null), "null is not truthy")
+	_check(not rt._is_truthy(false) and rt._is_truthy(true), "bools pass through")
+	_check(not rt._is_truthy(0) and rt._is_truthy(3), "zero is false, non-zero is true")
+	_check(not rt._is_truthy([]) and rt._is_truthy([1]), "an empty array is not yet, a full one is")
+	_check(not rt._is_truthy({}) and rt._is_truthy({"a": 1}), "same for dictionaries")
+	_check(not rt._is_truthy("") and rt._is_truthy("x"), "and for strings")
+
+	rt.free()
+
+# The unknown-tool error used to append every registered tool name — ~4,000
+# characters — and batch_execute repeats the error once per failed operation. A
+# single mistyped name in a two-op batch therefore cost about 2,000 tokens, more
+# than a quarter of the whole default tool surface, in a server whose central
+# claim is that context is expensive. Found by using the thing, not by reading it.
+func _test_unknown_tool_error_is_cheap() -> void:
+	print("\n[unknown-tool error]")
+	var ex = preload("res://addons/godot_mcp/tool_executor.gd").new()
+	ex._init_tools()
+
+	var full_list_len: int = ", ".join(ex._tool_map.keys()).length()
+	_check(full_list_len > 2000, "the full tool list really is large (%d chars)" % full_list_len)
+
+	var typo: String = ex._suggest_tools("set_node_group")
+	_check(typo.length() < 400, "a near-miss suggests a few names, not all of them (%d chars)" % typo.length())
+	_check(typo.contains("set_node_groups"), "and the name actually wanted is among them")
+
+	var nonsense: String = ex._suggest_tools("zzzzz_not_a_tool")
+	_check(nonsense.length() < 200, "an unrecognisable name gets a short pointer, not a dump")
+	_check(nonsense.contains("list_toolsets"), "and is told where to look instead")
+
+	# Runtime tools are the confusing case: they exist, but not in this executor.
+	var runtime_hint: String = ex._suggest_tools("query_runtime_node")
+	_check(runtime_hint.contains("inside the GAME"), "a runtime tool explains WHY it is not here")
+	_check(not runtime_hint.contains("Did you mean"), "rather than being reported as a typo")
+
+	ex.free()
+
+# An instanced child must keep the script it inherits from its own scene.
+#
+# Found in a real project: after editing a level with instance_scene/remove_node,
+# the Player — an instance of player.tscn, which has player.gd on its root — came
+# back with `script = null` written into the level as an instance OVERRIDE. The
+# player silently stopped moving: no script, no _physics_process, no error. Only
+# the scene that had been edited through these tools was affected.
+#
+# This is the clobbering class the whole live-tree design exists to prevent, so
+# it gets a test on the disk path where it can be checked cheaply.
+func _test_instanced_child_keeps_its_script() -> void:
+	print("\n[instanced child keeps its script]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var script_path := "res://__gdtest_inst_child.gd"
+	var child_path := "res://__gdtest_inst_child.tscn"
+	var parent_path := "res://__gdtest_inst_parent.tscn"
+
+	var f := FileAccess.open(script_path, FileAccess.WRITE)
+	f.store_string("extends Node2D\n\nfunc _ready() -> void:\n\tpass\n")
+	f.close()
+
+	st.create_scene({"scene_path": child_path, "root_node_type": "Node2D", "root_node_name": "Child"})
+	st.attach_script({"scene_path": child_path, "node_path": ".", "script_path": script_path})
+	st.create_scene({"scene_path": parent_path, "root_node_type": "Node2D", "root_node_name": "Parent"})
+
+	var inst: Dictionary = st.instance_scene({"scene_path": parent_path, "instance_path": child_path, "node_name": "Kid"})
+	_check(inst.get("ok", false), "instance_scene ok")
+
+	var text := FileAccess.get_file_as_string(parent_path)
+	_check(text.contains("instance=ExtResource"), "the child is stored as an instance, not a copy")
+	_check(not text.contains("script = null"),
+		"the instance does NOT get script=null written over its inherited script")
+
+	# And the same after a second edit, which is when it showed up in the wild.
+	st.add_node({"scene_path": parent_path, "node_name": "Marker", "node_type": "Marker2D", "parent_path": "."})
+	st.remove_node({"scene_path": parent_path, "node_path": "Marker"})
+	var after := FileAccess.get_file_as_string(parent_path)
+	_check(not after.contains("script = null"), "and still not after the parent is edited and re-saved")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(script_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(child_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(parent_path))
+	st.free()
+
+# A res:// path assigned to an Object-typed property must LOAD, on every tool
+# that takes properties — not just on set_node_properties.
+#
+# 1.1.3 fixed this inside set_node_properties only. add_node, create_scene,
+# instance_scene, batch_scene_edit and duplicate_node all share
+# _set_node_properties and kept the bug: `texture: "res://...png"` reported ok
+# and silently did nothing. Found by building a real scene and watching the
+# sprite never appear. The fix moved into VariantCodec, the one place they all
+# pass through.
+func _test_resource_paths_load_on_every_entry_point() -> void:
+	print("\n[res:// property loads everywhere]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var codec = preload("res://addons/godot_mcp/utils/variant_codec.gd")
+	var tex_path := "res://__gdtest_res_prop.tres"
+	var scene_path := "res://__gdtest_res_prop.tscn"
+
+	var img := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	img.fill(Color.RED)
+	ResourceSaver.save(ImageTexture.create_from_image(img), tex_path)
+
+	# The codec is the shared choke point — check it directly first.
+	_check(codec.parse_typed_value(tex_path, TYPE_OBJECT) is Resource,
+		"the codec loads a res:// path for an Object-typed property")
+	_check(not (codec.parse_typed_value("res://does_not_exist.tres", TYPE_OBJECT) is Resource),
+		"a path that does not resolve is left alone, not turned into garbage")
+	_check(codec.parse_typed_value("just a string", TYPE_STRING) == "just a string",
+		"and a normal string property is untouched")
+
+	# Then through add_node, the entry point that was actually broken.
+	st.create_scene({"scene_path": scene_path, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({
+		"scene_path": scene_path, "node_name": "Pic", "node_type": "Sprite2D", "parent_path": ".",
+		"properties": {"texture": tex_path, "hframes": 4},
+	})
+	var text := FileAccess.get_file_as_string(scene_path)
+	_check(text.contains("hframes = 4"), "add_node applied the plain property")
+	_check(text.contains("texture = ExtResource") or text.contains("texture = SubResource"),
+		"AND the resource property, which used to be dropped silently")
+
+	# Same conversion, third entry point: an animation keyframe on a texture
+	# track stored the path as a String, so the assignment failed at runtime and
+	# the sprite went blank.
+	var at = preload("res://addons/godot_mcp/tools/animation_tools.gd").new()
+	st.add_node({"scene_path": scene_path, "node_name": "Anim", "node_type": "AnimationPlayer", "parent_path": "."})
+	at.create_animation({"scene_path": scene_path, "node_path": "Anim", "animation_name": "blink", "length": 1.0})
+	at.add_animation_track({"scene_path": scene_path, "node_path": "Anim", "animation_name": "blink",
+		"track_type": "value", "track_node_path": "Pic", "property": "texture"})
+	at.set_animation_keyframe({"scene_path": scene_path, "node_path": "Anim", "animation_name": "blink",
+		"track_index": 0, "time": 0.0, "value": tex_path})
+
+	var anim_text := FileAccess.get_file_as_string(scene_path)
+	_check(not anim_text.contains('"values": ["res://__gdtest_res_prop.tres"]'),
+		"a texture keyframe does not store the raw path string")
+	_check(anim_text.contains("ExtResource") or anim_text.contains("SubResource"),
+		"it stores the loaded resource, so the track actually assigns something at runtime")
+	at.free()
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(scene_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tex_path))
+	st.free()
+
+# setup_collision used to drop the shape centred on the node origin, which for a
+# 2D character buries the body half-way into the floor. Found by building an orc
+# that hovered above the ground while the project's hand-made player collision,
+# right next to it, was offset by hand for exactly this reason.
+func _test_collision_sits_on_the_origin() -> void:
+	print("\n[collision offset]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var ph = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var scene_path := "res://__gdtest_coll_offset.tscn"
+
+	st.create_scene({"scene_path": scene_path, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+	ph.setup_collision({"scene_path": scene_path, "node_path": ".", "shape_type": "rectangle", "size": {"x": 30, "y": 40}})
+	var text := FileAccess.get_file_as_string(scene_path)
+	_check(text.contains("position = Vector2(0, -20)"),
+		"a rectangle shape sits ON the origin (half its height up), so the origin is the feet")
+
+	# Separate files per case: create_scene does not overwrite, so reusing one
+	# path leaves the previous shape in the file and the assertion reads it.
+	var explicit_path := "res://__gdtest_coll_explicit.tscn"
+	st.create_scene({"scene_path": explicit_path, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+	ph.setup_collision({"scene_path": explicit_path, "node_path": ".", "shape_type": "rectangle",
+		"size": {"x": 30, "y": 40}, "offset": {"x": 7, "y": 3}})
+	_check(FileAccess.get_file_as_string(explicit_path).contains("position = Vector2(7, 3)"),
+		"an explicit offset overrides the default")
+
+	# A circle uses its radius, not a height.
+	var circle_path := "res://__gdtest_coll_circle.tscn"
+	st.create_scene({"scene_path": circle_path, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+	ph.setup_collision({"scene_path": circle_path, "node_path": ".", "shape_type": "circle", "size": 12})
+	_check(FileAccess.get_file_as_string(circle_path).contains("position = Vector2(0, -12)"),
+		"a circle sits on the origin by its radius")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(scene_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(explicit_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(circle_path))
+	ph.free()
+	st.free()
+
+
+# A JSON client has one number type, so every integer arrives as a float. Setting
+# an int property with it works, but the read-back returns an int — and comparing
+# the two as strings ("1" vs "1.0") reported a correct write as a failure. That is
+# why setting collision_layer/collision_mask came back "set had no effect (type
+# mismatch?)" and, for a single-property call, saved nothing at all.
+func _test_numeric_value_match() -> void:
+	print("
+[numeric value comparison]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	_check(st._values_match(1, 1.0), "int 1 matches float 1.0")
+	_check(st._values_match(2.0, 2), "float 2.0 matches int 2")
+	_check(not st._values_match(1, 2), "different numbers still differ")
+	_check(st._values_match(1.5, 1.5), "floats still compare")
+	# A stringified number DOES match, deliberately: MCP clients send scalars as
+	# strings, the property reads back as a number, and calling that a failed
+	# write is the same bug in a different costume.
+	_check(st._values_match("1", 1), "a stringified number still matches")
+
+	# End to end: the value a JSON client actually sends, on an int property.
+	var scene := "res://__gdtest_numeric.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Body", "node_type": "CharacterBody2D", "parent_path": "."})
+
+	var r = st.set_node_properties({"scene_path": scene, "node_path": "Body",
+		"properties": {"collision_layer": 2.0}})
+	_check(r.get("ok", false), "set_node_properties accepts a float for an int property")
+	_check((r.get("failed", []) as Array).is_empty(), "no spurious 'set had no effect'")
+	_check(FileAccess.get_file_as_string(scene).contains("collision_layer = 2"), "value persisted to disk")
+
+	# Re-setting the same value is not a failure either.
+	var again = st.set_node_properties({"scene_path": scene, "node_path": "Body",
+		"properties": {"collision_layer": 2}})
+	_check(again.get("ok", false), "re-setting an unchanged value is not an error")
+
+	st.free()
+	_rm(scene)
+
+
+# Two tools take a `shape_type` and accept different vocabularies. Passing the
+# sibling's spelling used to give a bare "Invalid shape type: rectangle" with no
+# indication that a different word was wanted, or which.
+func _test_shape_type_error() -> void:
+	print("
+[shape_type error quality]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_shape.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Col", "node_type": "CollisionShape2D", "parent_path": "."})
+
+	var r = st.set_collision_shape({"scene_path": scene, "node_path": "Col", "shape_type": "rectangle"})
+	_check(not r.get("ok", true), "the other tool's spelling is still rejected")
+	var err := str(r.get("error", ""))
+	_check(err.contains("RectangleShape2D"), "the error names the value that WOULD work")
+	_check(err.contains("setup_collision"), "the error says where that spelling comes from")
+	_check(err.contains("BoxShape3D"), "the error enumerates valid options")
+
+	# An unrecognisable value still gets the list, just no suggestion.
+	var r2 = st.set_collision_shape({"scene_path": scene, "node_path": "Col", "shape_type": "zzz"})
+	_check(not r2.get("ok", true), "nonsense is rejected")
+	_check(str(r2.get("error", "")).contains("CircleShape2D"), "and still lists the options")
+
+	# The valid class name keeps working.
+	var ok_r = st.set_collision_shape({"scene_path": scene, "node_path": "Col", "shape_type": "RectangleShape2D"})
+	_check(ok_r.get("ok", false), "the class name is accepted")
+
+	st.free()
+	_rm(scene)
+
+
+# "Where is everything" is the first question about a 2D scene, and answering it
+# used to mean either one call per node or include_properties, which returns a
+# fixed twelve on every node whether you wanted them or not.
+func _test_read_scene_properties() -> void:
+	print("
+[read_scene property filter]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_readprops.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "A", "node_type": "Sprite2D", "parent_path": "."})
+	st.set_node_properties({"scene_path": scene, "node_path": "A", "properties": {"position": {"x": 30, "y": 40}}})
+
+	# Default stays lean: no properties at all.
+	var plain = st.read_scene({"scene_path": scene})
+	_check(plain.get("ok", false), "read_scene ok")
+	_check(not (plain.get("root", {}) as Dictionary).has("properties"), "no properties by default")
+
+	var only_pos = st.read_scene({"scene_path": scene, "properties": ["position"]})
+	var kid: Dictionary = (only_pos.get("root", {}).get("children", [])[0])
+	_check(kid.has("properties"), "requested property returned")
+	var props: Dictionary = kid.get("properties", {})
+	_check(props.size() == 1 and props.has("position"), "ONLY the requested property (got %d)" % props.size())
+	_check(int(props["position"]["x"]) == 30, "and it carries the real value")
+
+	# A typo must be visible, not silently absent.
+	var typo = st.read_scene({"scene_path": scene, "properties": ["positon"]})
+	var kid2: Dictionary = (typo.get("root", {}).get("children", [])[0])
+	_check((kid2.get("missing_properties", []) as Array).has("positon"), "a misspelled property is reported, not dropped")
+
+	# include_properties still works and returns more than one.
+	var full = st.read_scene({"scene_path": scene, "include_properties": true})
+	var kid3: Dictionary = (full.get("root", {}).get("children", [])[0])
+	_check((kid3.get("properties", {}) as Dictionary).size() > 1, "include_properties still returns the fixed set")
+
+	var bad = st.read_scene({"scene_path": scene, "properties": "position"})
+	_check(not bad.get("ok", true), "a non-array 'properties' is rejected")
+
+	st.free()
+	_rm(scene)
+
+
+# validate_scripts answers "does this parse". These failures are silent instead:
+# a group nobody is in returns null, a renamed input action is simply never
+# pressed, and neither produces an error anywhere.
+func _test_validate_references() -> void:
+	print("
+[validate_references]")
+	var at = preload("res://addons/godot_mcp/tools/analysis_tools.gd").new()
+
+	# A clean baseline first: the tool is only useful if it stays quiet on code
+	# that is fine. A false positive costs more than a miss here.
+	var clean = at.validate_references({})
+	_check(clean.get("ok", false), "validate_references ok")
+	var baseline := int(clean.get("issue_count", -1))
+	_check(baseline >= 0, "reports an issue count")
+
+	# Define a group so there is something real to be close to.
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_refs.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "P", "node_type": "Node2D", "parent_path": "."})
+	st.set_node_groups({"scene_path": scene, "node_path": "P", "groups": ["gdtest_player"]})
+	st.free()
+
+	var bad := "res://__gdtest_refs_bad.gd"
+	_rm(bad)
+	var f := FileAccess.open(bad, FileAccess.WRITE)
+	f.store_string("extends Node
+signal declared_here
+
+func _ready() -> void:
+" +
+		"	get_tree().get_first_node_in_group(\"gdtest_playr\")
+" +
+		"	Input.is_action_pressed(\"gdtest_no_such_action\")
+" +
+		"	emit_signal(\"never_declared_anywhere\")
+" +
+		"	get_tree().get_first_node_in_group(\"gdtest_player\")
+" +
+		"	emit_signal(\"declared_here\")
+")
+	f.close()
+
+	var r = at.validate_references({})
+	var kinds: Dictionary = r.get("issues_by_kind", {})
+	_check(int(r.get("issue_count", 0)) >= baseline + 3, "the three injected problems are reported")
+	_check(int(kinds.get("group", 0)) >= 1, "a group nobody is in is caught")
+	_check(int(kinds.get("input_action", 0)) >= 1, "an unmapped input action is caught")
+	_check(int(kinds.get("signal", 0)) >= 1, "a signal emitted but not declared is caught")
+
+	# The valid references in the same file must NOT be reported.
+	var names: Array = []
+	var suggestion_for_typo := ""
+	for i in r.get("issues", []):
+		names.append(str(i.get("name", "")))
+		if str(i.get("name", "")) == "gdtest_playr":
+			suggestion_for_typo = str(i.get("suggestion", ""))
+	_check(not names.has("gdtest_player"), "a group that DOES exist is not flagged")
+	_check(not names.has("declared_here"), "a declared signal is not flagged")
+	_check(suggestion_for_typo == "gdtest_player", "the typo gets the right suggestion (got '%s')" % suggestion_for_typo)
+
+	_rm(bad)
+	_rm(scene)
+	at.free()
+
+
+# Two findings from building a real character, both silent until something else
+# breaks: a second collision node left next to an empty one, and a sprite `frame`
+# track that sorts before the sheet-layout track it depends on.
+func _test_collision_reuse_and_track_order() -> void:
+	print("
+[collision reuse + sprite track order]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var ph = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var an = preload("res://addons/godot_mcp/tools/animation_tools.gd").new()
+	var scene := "res://__gdtest_reuse.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "CharacterBody2D", "root_node_name": "Body"})
+	# The shapeless node create_scene happily accepts, and Godot only complains
+	# about at runtime.
+	st.add_node({"scene_path": scene, "node_name": "CollisionShape2D", "node_type": "CollisionShape2D", "parent_path": "."})
+
+	var r = ph.setup_collision({"scene_path": scene, "node_path": ".", "shape_type": "rectangle", "size": {"x": 16, "y": 32}})
+	_check(r.get("ok", false), "setup_collision ok")
+	_check(r.get("reused_existing_node", false), "filled the empty shape node instead of adding a sibling")
+
+	var tree = st.read_scene({"scene_path": scene})
+	var kids: Array = tree.get("root", {}).get("children", [])
+	var shape_count := 0
+	for k in kids:
+		if str(k.get("type", "")) == "CollisionShape2D":
+			shape_count += 1
+	_check(shape_count == 1, "still exactly one CollisionShape2D (got %d)" % shape_count)
+
+	# Calling it again with nothing empty left must add a new one rather than
+	# overwrite the working shape.
+	var r2 = ph.setup_collision({"scene_path": scene, "node_path": ".", "shape_type": "circle", "node_name": "Extra"})
+	_check(r2.get("ok", false) and not r2.get("reused_existing_node", true), "a second call adds a node when none is empty")
+
+	# --- sprite track order ---
+	var scene2 := "res://__gdtest_trackorder.tscn"
+	_rm(scene2)
+	st.create_scene({"scene_path": scene2, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene2, "node_name": "Anim", "node_type": "AnimationPlayer", "parent_path": "."})
+	st.add_node({"scene_path": scene2, "node_name": "Spr", "node_type": "Sprite2D", "parent_path": "."})
+	an.create_animation({"scene_path": scene2, "node_path": "Anim", "animation_name": "walk", "length": 1.0})
+
+	# frame FIRST — the order that breaks.
+	an.add_animation_track({"scene_path": scene2, "node_path": "Anim", "animation_name": "walk",
+		"track_type": "value", "track_node_path": "Spr", "property": "frame"})
+	var warned = an.add_animation_track({"scene_path": scene2, "node_path": "Anim", "animation_name": "walk",
+		"track_type": "value", "track_node_path": "Spr", "property": "hframes"})
+	_check(warned.get("warning") != null, "the dangerous track order is reported")
+	_check(str(warned.get("warning", "")).contains("out of bounds"), "and says what Godot will do about it")
+
+	# The safe order stays quiet.
+	an.create_animation({"scene_path": scene2, "node_path": "Anim", "animation_name": "run", "length": 1.0})
+	an.add_animation_track({"scene_path": scene2, "node_path": "Anim", "animation_name": "run",
+		"track_type": "value", "track_node_path": "Spr", "property": "hframes"})
+	var quiet = an.add_animation_track({"scene_path": scene2, "node_path": "Anim", "animation_name": "run",
+		"track_type": "value", "track_node_path": "Spr", "property": "frame"})
+	_check(quiet.get("warning") == null, "the correct order produces no warning")
+
+	an.free(); ph.free(); st.free()
+	_rm(scene)
+	_rm(scene2)
+
+
+# Building one animated character used to take ~40 calls, and the track ORDER
+# had to be right or Godot logged "Index p_frame is out of bounds" every frame.
+func _test_sprite_animation() -> void:
+	print("
+[sprite animation]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var an = preload("res://addons/godot_mcp/tools/animation_tools.gd").new()
+
+	# A real 4x2 sheet, saved as a .tres ImageTexture rather than a .png: load()
+	# resolves the IMPORTED resource, and this suite runs headless with no import
+	# pipeline, so a freshly written image would never load. The tool's slicing
+	# and track ordering are what is under test; importing is Godot's job.
+	var sheet := "res://__gdtest_sheet.tres"
+	_rm(sheet)
+	var img := Image.create(64, 32, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0, 1, 1))
+	ResourceSaver.save(ImageTexture.create_from_image(img), sheet)
+
+	var scene := "res://__gdtest_spriteanim.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Anim", "node_type": "AnimationPlayer", "parent_path": "."})
+	st.add_node({"scene_path": scene, "node_name": "Spr", "node_type": "Sprite2D", "parent_path": "."})
+
+	var r = an.create_sprite_animation({
+		"scene_path": scene, "node_path": "Anim", "sprite_path": "Spr",
+		"animation_name": "run", "texture": sheet,
+		"hframes": 4, "vframes": 2, "frames": 8, "fps": 8.0, "loop": true})
+	_check(r.get("ok", false), "create_sprite_animation ok (%s)" % str(r.get("error", "")))
+	_check(int(r.get("frame_count", 0)) == 8, "keys one frame each")
+	_check(abs(float(r.get("length", 0.0)) - 1.0) < 0.001, "length = frames/fps")
+
+	# The whole point: layout tracks must precede the frame track.
+	var info = an.get_animation_info({"scene_path": scene, "node_path": "Anim", "animation_name": "run"})
+	var frame_idx := -1
+	var hframes_idx := -1
+	for t in info.get("tracks", []):
+		var path := str(t.get("path", ""))
+		if path.ends_with(":frame"):
+			frame_idx = int(t.get("index", -1)) if t.has("index") else frame_idx
+		elif path.ends_with(":hframes"):
+			hframes_idx = int(t.get("index", -1)) if t.has("index") else hframes_idx
+	var paths: Array = []
+	for t in info.get("tracks", []):
+		paths.append(str(t.get("path", "")))
+	var i_h := paths.find("Spr:hframes")
+	var i_f := paths.find("Spr:frame")
+	_check(i_h >= 0 and i_f >= 0, "both layout and frame tracks exist")
+	_check(i_h < i_f, "hframes track comes BEFORE the frame track (%d < %d)" % [i_h, i_f])
+
+	# A frame outside the sheet is refused rather than silently written.
+	var bad = an.create_sprite_animation({
+		"scene_path": scene, "node_path": "Anim", "sprite_path": "Spr",
+		"animation_name": "bad", "hframes": 2, "vframes": 1, "frames": [0, 1, 9]})
+	_check(not bad.get("ok", true), "a frame outside the sheet is rejected")
+	_check(str(bad.get("error", "")).contains("0..1"), "and the error names the valid range")
+
+	# Wrong node type points at the other tool.
+	var wrong = an.create_sprite_animation({
+		"scene_path": scene, "node_path": "Anim", "sprite_path": ".",
+		"animation_name": "x", "hframes": 1})
+	_check(str(wrong.get("error", "")).contains("create_sprite_frames"), "a non-Sprite2D is redirected to the right tool")
+
+	# --- SpriteFrames ---
+	var frames_path := "res://__gdtest_frames.tres"
+	_rm(frames_path)
+	var fr = an.create_sprite_frames({"path": frames_path, "animations": [
+		{"name": "idle", "texture": sheet, "hframes": 4, "vframes": 2, "frames": 4, "fps": 6.0},
+		{"name": "run", "texture": sheet, "hframes": 4, "vframes": 2, "frames": [4, 5, 6, 7], "fps": 12.0},
+	]})
+	_check(fr.get("ok", false), "create_sprite_frames ok (%s)" % str(fr.get("error", "")))
+	_check(FileAccess.file_exists(frames_path), "resource written to disk")
+
+	var loaded := load(frames_path) as SpriteFrames
+	_check(loaded != null, "it loads back as a SpriteFrames")
+	_check(loaded.has_animation("idle") and loaded.has_animation("run"), "both animations present")
+	_check(not loaded.has_animation("default"), "the stock empty 'default' animation is removed")
+	_check(loaded.get_frame_count("run") == 4, "run has 4 frames")
+	_check(abs(loaded.get_animation_speed("run") - 12.0) < 0.001, "per-animation fps kept")
+
+	# Frame 4 of a 4x2 sheet is row 1, column 0 — proves the slicing maths.
+	var f0 := loaded.get_frame_texture("run", 0) as AtlasTexture
+	_check(f0 != null, "frames are AtlasTextures over the shared sheet")
+	_check(f0.region.position.x == 0.0 and f0.region.position.y == 16.0,
+		"frame 4 maps to row 1 col 0 (got %s)" % str(f0.region.position))
+
+	var bad_tex = an.create_sprite_frames({"path": frames_path, "animations": [
+		{"name": "x", "texture": "res://__does_not_exist.png"}]})
+	_check(not bad_tex.get("ok", true), "a missing texture is rejected")
+
+	an.free(); st.free()
+	_rm(frames_path)
+	_rm(scene)
+	_rm(sheet)
+
+
+# 2D and 3D skeletons are different models, not two spellings of one: Skeleton3D
+# owns bones as internal indices, Skeleton2D owns Bone2D NODES. Both paths are
+# exercised so the difference stays visible rather than being papered over.
+func _test_skeleton_tools() -> void:
+	print("
+[skeleton / bones]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var s3 = preload("res://addons/godot_mcp/tools/scene3d_tools.gd").new()
+
+	# --- 3D ---
+	var scene := "res://__gdtest_skel3d.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Skel", "node_type": "Skeleton3D", "parent_path": "."})
+
+	var a = s3.add_bone({"scene_path": scene, "node_path": "Skel", "bone_name": "hip"})
+	_check(a.get("ok", false), "add_bone (3D) ok (%s)" % str(a.get("error", "")))
+	_check(str(a.get("kind", "")) == "3d", "reports the 3D model")
+	var b = s3.add_bone({"scene_path": scene, "node_path": "Skel", "bone_name": "spine", "parent_bone": "hip"})
+	_check(b.get("ok", false), "a child bone is added")
+	_check(int(b.get("parent_index", -99)) == int(a.get("bone_index", -1)), "parented to the right bone")
+
+	var dup = s3.add_bone({"scene_path": scene, "node_path": "Skel", "bone_name": "hip"})
+	_check(not dup.get("ok", true), "a duplicate bone name is rejected")
+	var orphan = s3.add_bone({"scene_path": scene, "node_path": "Skel", "bone_name": "x", "parent_bone": "nope"})
+	_check(not orphan.get("ok", true), "an unknown parent bone is rejected")
+	_check(str(orphan.get("error", "")).contains("hip"), "and the error lists the bones that exist")
+
+	var info = s3.get_skeleton_info({"scene_path": scene, "node_path": "Skel"})
+	_check(info.get("ok", false), "get_skeleton_info ok")
+	_check(int(info.get("bone_count", 0)) == 2, "both bones reported")
+
+	var posed = s3.set_bone_pose({"scene_path": scene, "node_path": "Skel", "bone_name": "spine",
+		"position": {"x": 0, "y": 1, "z": 0}})
+	_check(posed.get("ok", false), "set_bone_pose (3D) ok (%s)" % str(posed.get("error", "")))
+	var bad_pose = s3.set_bone_pose({"scene_path": scene, "node_path": "Skel", "bone_name": "spine",
+		"position": {"x": 1, "y": 2}})
+	_check(not bad_pose.get("ok", true), "a Vector2 is refused for a 3D bone")
+	var nothing = s3.set_bone_pose({"scene_path": scene, "node_path": "Skel", "bone_name": "spine"})
+	_check(not nothing.get("ok", true), "posing nothing is an error, not a silent no-op")
+
+	# --- 2D ---
+	var scene2 := "res://__gdtest_skel2d.tscn"
+	_rm(scene2)
+	st.create_scene({"scene_path": scene2, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene2, "node_name": "Skel", "node_type": "Skeleton2D", "parent_path": "."})
+
+	var a2 = s3.add_bone({"scene_path": scene2, "node_path": "Skel", "bone_name": "hip",
+		"rest": {"x": 0, "y": 10}, "length": 12.0})
+	_check(a2.get("ok", false), "add_bone (2D) ok (%s)" % str(a2.get("error", "")))
+	_check(str(a2.get("kind", "")) == "2d", "reports the 2D model")
+	var a3 = s3.add_bone({"scene_path": scene2, "node_path": "Skel", "bone_name": "spine", "parent_bone": "hip"})
+	_check(a3.get("ok", false), "a chained Bone2D is added under its parent")
+	_check(str(a3.get("parent_node_path", "")).contains("hip"), "nested under the parent bone node")
+
+	var info2 = s3.get_skeleton_info({"scene_path": scene2, "node_path": "Skel"})
+	_check(str(info2.get("kind", "")) == "2d", "2D skeleton reports kind=2d")
+	_check(int(info2.get("bone_count", 0)) == 2, "both Bone2D nodes counted")
+	var first: Dictionary = (info2.get("bones", [])[0])
+	_check(not str(first.get("node_path", "")).is_empty(), "2D bones expose a node_path")
+
+	var posed2 = s3.set_bone_pose({"scene_path": scene2, "node_path": "Skel", "bone_name": "hip",
+		"position": {"x": 5, "y": 6}, "rotation": 0.5})
+	_check(posed2.get("ok", false), "set_bone_pose (2D) ok (%s)" % str(posed2.get("error", "")))
+	_check(FileAccess.get_file_as_string(scene2).contains("position = Vector2(5, 6)"), "the 2D pose persisted")
+
+	var wrong = s3.get_skeleton_info({"scene_path": scene2, "node_path": "."})
+	_check(not wrong.get("ok", true), "a non-skeleton node is rejected")
+
+	s3.free(); st.free()
+	_rm(scene)
+	_rm(scene2)
+
+
+# Authority is runtime state: `multiplayer_authority` is NOT a property, only
+# set_multiplayer_authority() exists. Verified against the engine — a tool that
+# wrote it into a .tscn would be writing something Godot never reads back.
+func _test_mp_authority() -> void:
+	print("
+[mp_set_authority]")
+	var nc = preload("res://addons/godot_mcp/tools/netcode_tools.gd").new()
+
+	# The premise, asserted rather than assumed.
+	var probe := Node2D.new()
+	var has_prop := false
+	for pr in probe.get_property_list():
+		if str(pr.name) == "multiplayer_authority":
+			has_prop = true
+	_check(not has_prop, "multiplayer_authority is not a storable property")
+	_check(probe.has_method("set_multiplayer_authority"), "only the setter exists")
+	probe.free()
+
+	var script := "res://__gdtest_auth.gd"
+	_rm(script)
+	var f := FileAccess.open(script, FileAccess.WRITE)
+	f.store_string("extends Node2D
+
+func _ready() -> void:
+	pass
+")
+	f.close()
+
+	var r = nc.mp_set_authority({"script_path": script, "peer_id": 1})
+	_check(r.get("ok", false), "mp_set_authority ok (%s)" % str(r.get("error", "")))
+	_check(r.get("called_from_existing_ready", false), "hooks into the existing _ready()")
+	var body := FileAccess.get_file_as_string(script)
+	_check(body.contains("set_multiplayer_authority(1)"), "writes the real call")
+	_check(body.contains("_mcp_claim_authority()"), "and calls it from _ready")
+
+	var again = nc.mp_set_authority({"script_path": script, "peer_id": 2})
+	_check(not again.get("ok", true), "a second assignment is refused rather than fighting the first")
+
+	# "owner" resolves to the spawning peer, which is the per-player case.
+	var script2 := "res://__gdtest_auth2.gd"
+	_rm(script2)
+	var f2 := FileAccess.open(script2, FileAccess.WRITE)
+	f2.store_string("extends Node2D
+")
+	f2.close()
+	var r2 = nc.mp_set_authority({"script_path": script2, "peer_id": "owner", "recursive": true})
+	_check(r2.get("ok", false), "peer_id 'owner' accepted")
+	var body2 := FileAccess.get_file_as_string(script2)
+	_check(body2.contains("multiplayer.get_unique_id()"), "resolves to the spawning peer")
+	_check(body2.contains(", true)"), "recursive is passed through")
+	_check(body2.contains("func _ready()"), "writes a _ready() when the script has none")
+
+	var missing = nc.mp_set_authority({"script_path": script2})
+	_check(not missing.get("ok", true), "a missing peer_id is an error")
+	_check(str(missing.get("error", "")).contains("owner"), "and the error explains the options")
+	var nofile = nc.mp_set_authority({"script_path": "res://__does_not_exist.gd", "peer_id": 1})
+	_check(not nofile.get("ok", true), "a missing script is rejected")
+
+	_rm(script)
+	_rm(script2)
+	nc.free()

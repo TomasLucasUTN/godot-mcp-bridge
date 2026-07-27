@@ -93,6 +93,53 @@ export const scene3dTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'get_skeleton_info',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: "List a skeleton's bones. Works on Skeleton2D and Skeleton3D, and the answer differs because the engine's model does: a Skeleton3D owns bones as internal INDICES (reported with index, parent, rest, pose), while a Skeleton2D owns Bone2D NODES (reported with a node_path the other scene tools can act on). Check `kind` in the response before assuming either shape.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene containing the skeleton (res://...).' },
+        node_path: { type: 'string', description: 'Path to the Skeleton2D or Skeleton3D node.' }
+      },
+      required: ['scene_path', 'node_path']
+    }
+  },
+  {
+    name: 'add_bone',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Add a bone to a skeleton. For a Skeleton3D this adds an internal bone (parent_bone is another bone's NAME). For a Skeleton2D it creates a Bone2D node — parent_bone may be a node path or a Bone2D name, and nesting is what forms the chain. Note Godot exposes no way to REMOVE a 3D bone, so a mistake there means rebuilding the skeleton.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene containing the skeleton (res://...).' },
+        node_path: { type: 'string', description: 'Path to the Skeleton2D or Skeleton3D node.' },
+        bone_name: { type: 'string', description: 'Name for the new bone.' },
+        parent_bone: { type: 'string', description: '3D: the parent bone NAME. 2D: a node path or Bone2D name; omit to attach directly under the skeleton.' },
+        rest: { description: '3D: a Transform3D. 2D: a Transform2D, or a {x,y} position for the common case.' },
+        length: { type: 'number', description: '2D only: bone length in pixels. Setting it disables autocalculation.' }
+      },
+      required: ['scene_path', 'node_path', 'bone_name']
+    }
+  },
+  {
+    name: 'set_bone_pose',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Pose a bone by name. 3D sets the bone's pose position/rotation/scale on the Skeleton3D (rotation takes a Vector3 of euler radians or a Quaternion). 2D moves the Bone2D node itself, which is the same thing expressed as a node transform (rotation is a single float). Pass at least one component.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene containing the skeleton (res://...).' },
+        node_path: { type: 'string', description: 'Path to the Skeleton2D or Skeleton3D node.' },
+        bone_name: { type: 'string', description: 'Bone to pose.' },
+        position: { description: '3D: {x,y,z}. 2D: {x,y}.' },
+        rotation: { description: '3D: {x,y,z} euler radians or a quaternion. 2D: a number (radians).' },
+        scale: { description: '3D: {x,y,z}. 2D: {x,y}.' }
+      },
+      required: ['scene_path', 'node_path', 'bone_name']
+    }
+  },
+  {
     name: 'add_gridmap',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     description: 'Add a GridMap node as a child of a node, optionally assigning a MeshLibrary and cell size.',

@@ -235,13 +235,13 @@ export const projectTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        operation: {
+          type: 'string', enum: ['add', 'remove', 'set'],
+          description: '"add" to create action and/or append events, "remove" to delete the action entirely, "set" to replace all events on an action (creates it if needed)'
+        },
         action: {
           type: 'string',
           description: 'Input action name (e.g., "move_left", "jump", "attack")'
-        },
-        operation: {
-          type: 'string',
-          description: '"add" to create action and/or append events, "remove" to delete the action entirely, "set" to replace all events on an action (creates it if needed)'
         },
         deadzone: {
           type: 'number',
@@ -369,7 +369,7 @@ export const projectTools: ToolDefinition[] = [
       properties: {
         limit: { type: 'number', description: 'Maximum entries to return (default: 200, max 500)' },
         since_ms: { type: 'number', description: 'Only return entries with ts_ms >= since_ms. Use 0 (default) for all.' },
-        level: { type: 'string', description: 'Only return entries of this level (e.g. "error", "warning", "info"). Omit for all.' }
+        level: { type: 'string', enum: ['error', 'warning', 'info'], description: 'Only return entries of this level (e.g. "error", "warning", "info"). Omit for all.' }
       }
     }
   },
@@ -610,6 +610,56 @@ export const projectTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'step_frames',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: "Advance the RUNNING game an exact number of frames, then return. Use this instead of `wait` whenever the result is asserted on: `wait` counts wall-clock milliseconds, so how much simulation happens depends on the machine's frame rate and the same test drifts between runs and machines. Defaults to physics frames, which are what move bodies and tick at a fixed rate. Returns {frames, mode, elapsed_ms}. REQUIRES the game running with MCPRuntime.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['physics', 'process'], description: '"physics" (default, fixed rate — use this for game state) or "process" (render frames).' },
+        frames: { type: 'number', description: 'How many frames to advance (1..3600, default 1).' },
+      }
+    }
+  },
+  {
+    name: 'await_condition',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: "Wait until an expression becomes true in the RUNNING game, or until timeout_ms elapses. Use when what you are waiting for is a STATE rather than a signal (\"until the player is on the floor\", \"until no enemies are left\") — await_signal_runtime needs a signal to exist, and a fixed `wait` guesses. It is an EXPRESSION, not a function body: write `node.is_on_floor()`, not `return node.is_on_floor()`. `tree` and `node` are in scope, and it is evaluated once per physics frame. Empty arrays and dictionaries count as false. Returns {met, value, frames_waited, elapsed_ms} — met:false on timeout is a normal result, not an error, and `value` shows what it last evaluated to. REQUIRES the game running with MCPRuntime.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        condition: { type: 'string', description: 'Expression to evaluate, e.g. "node.is_on_floor()" or "tree.get_nodes_in_group(\\"enemies\\").is_empty()". No `return`.' },
+        node_path: { type: 'string', description: 'Optional node bound to `node` in the expression (absolute /root/... or relative to current_scene).' },
+        timeout_ms: { type: 'number', description: 'Give up after this many ms (1..60000, default 5000).' }
+      },
+      required: ['condition']
+    }
+  },
+  {
+    name: 'seed_rng',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Seed the RUNNING game's global random number generator so a run involving chance can be replayed. Call it before driving the game to make a flaky-looking test reproducible. Seeds the global functions only (randi, randf, randi_range, ...) — a RandomNumberGenerator the game created itself keeps its own state, and the result says so. REQUIRES the game running with MCPRuntime.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        seed: { type: 'number', description: 'Integer seed. Reuse the same value to replay a run.' }
+      },
+      required: ['seed']
+    }
+  },
+  {
+    name: 'time_scale',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Speed up or slow down the RUNNING game (Engine.time_scale). Useful to fast-forward a long animation or timer instead of waiting for it, or to slow one down to inspect it. 0 freezes simulation without pausing the tree, so step_frames still advances. Clamped to 0..10 — above that physics tunnels through colliders instead of fast-forwarding. Remember to set it back to 1. REQUIRES the game running with MCPRuntime.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scale: { type: 'number', description: '1.0 = normal, 0.5 = half speed, 2.0 = double, 0 = frozen. Clamped to 0..10.' }
+      },
+      required: ['scale']
+    }
+  },
+  {
     name: 'serialize_runtime_tree',
     annotations: { readOnlyHint: true, openWorldHint: false },
     description: 'Snapshot the RUNNING scene tree to JSON: name and class per node, recursively, optionally with a chosen set of properties on each node. Full-state introspection without screenshots — good for asserting or diffing game state. REQUIRES the game running with MCPRuntime.',
@@ -638,7 +688,7 @@ export const projectTools: ToolDefinition[] = [
           description: 'Godot class name to query (e.g., "CharacterBody2D", "Sprite2D", "Control")'
         },
         query: {
-          type: 'string',
+          type: 'string', enum: ['all', 'properties', 'methods', 'signals'],
           description: 'What to return: "all" (default), "properties", "methods", or "signals"'
         },
         include_virtual: {
@@ -706,13 +756,13 @@ export const projectTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        operation: {
+          type: 'string', enum: ['add', 'remove', 'list'],
+          description: '"add" to register, "remove" to unregister, "list" to show all autoloads'
+        },
         name: {
           type: 'string',
           description: 'Autoload name (e.g., "GameManager", "AudioManager")'
-        },
-        operation: {
-          type: 'string',
-          description: '"add" to register, "remove" to unregister, "list" to show all autoloads'
         },
         path: {
           type: 'string',
@@ -776,6 +826,17 @@ export const projectTools: ToolDefinition[] = [
         force: { type: 'boolean', description: 'Discard unsaved changes and close anyway (default: false)' }
       },
       required: ['scene_path']
+    }
+  },
+  {
+    name: 'save_scene',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Write an OPEN scene's unsaved editor state to its .tscn file. Needed because every mutating tool edits the LIVE editor tree when its target scene is open — that is what stops it clobbering the developer's unsaved work — and those edits stay in the editor until something saves them. Without this, editing an open scene and then calling run_scene tests the file as it was BEFORE the edit. Omit scene_path to save the scene the developer is currently looking at. Not needed for a CLOSED scene: tools write those to disk directly. Use close_scene_tab instead when the goal is to DISCARD the edits.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene to save (res://path/to/scene.tscn). Must be open in the editor. Defaults to the currently-edited scene.' }
+      }
     }
   },
   {

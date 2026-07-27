@@ -548,3 +548,101 @@ func _diagnose_rpc_calls(script_path: String, findings: Array) -> void:
 		_add_finding(findings, "error", "%s::%s" % [script_path, target],
 			"'%s' is called with .rpc()/.rpc_id() but has no @rpc annotation, so the remote call is silently dropped." % target,
 			"Add an @rpc annotation to the method (mp_wire_rpc writes a correct one).")
+
+
+
+# =============================================================================
+# mp_set_authority
+# =============================================================================
+## Write the code that assigns a node's multiplayer authority.
+##
+## Authority decides whose writes count: a MultiplayerSynchronizer replicates
+## only FROM the authority, and an @rpc("authority") call is refused anywhere
+## else. Getting it wrong gives the classic Godot 4 symptom — the call runs,
+## nothing happens, no error.
+##
+## This generates code rather than editing the scene because there is nothing to
+## edit: `multiplayer_authority` is NOT a property. Node exposes only
+## set_multiplayer_authority(), so authority is runtime state with no .tscn
+## representation at all — verified against the engine rather than assumed.
+## Anything claiming to "set authority in the scene file" is writing a value
+## Godot will never read back.
+func mp_set_authority(args: Dictionary) -> Dictionary:
+	var script_path: String = _ensure_res_path(str(args.get(&"script_path", "")))
+	var peer_id = args.get(&"peer_id")
+	var recursive: bool = bool(args.get(&"recursive", false))
+	var node_expr: String = str(args.get(&"node", "self"))
+
+	if script_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'script_path' (the script that should claim authority)"}
+	if not FileAccess.file_exists(script_path):
+		return {&"ok": false, &"error": "Script not found: " + script_path}
+	if peer_id == null:
+		return {&"ok": false, &"error": "Missing 'peer_id'. Use 1 for the server/host, or the string \"owner\" to claim authority for the peer that spawned this node (multiplayer.get_unique_id())."}
+
+	var f := FileAccess.open(script_path, FileAccess.READ)
+	if f == null:
+		return {&"ok": false, &"error": "Could not read " + script_path}
+	var source := f.get_as_text()
+	f.close()
+
+	if source.contains("set_multiplayer_authority("):
+		return {&"ok": false, &"error": "%s already calls set_multiplayer_authority(); edit it directly rather than adding a second assignment that would fight the first." % script_path}
+
+	var value_expr := ""
+	if typeof(peer_id) == TYPE_STRING and str(peer_id) == "owner":
+		value_expr = "multiplayer.get_unique_id()"
+	else:
+		var pid := int(peer_id)
+		if pid < 0:
+			return {&"ok": false, &"error": "'peer_id' must be >= 0 (1 = server, 0 = no authority), or the string \"owner\""}
+		value_expr = str(pid)
+
+	var body := "
+
+## Claim multiplayer authority. Written by mp_set_authority.
+"
+	body += "## Authority is runtime state — it has no representation in the .tscn, so it
+"
+	body += "## has to be assigned in code before any replication or @rpc(\"authority\") call.
+"
+	body += "func _mcp_claim_authority() -> void:
+"
+	body += "	%s.set_multiplayer_authority(%s%s)
+" % [node_expr, value_expr, ", true" if recursive else ""]
+
+	var call_line := "	_mcp_claim_authority()
+"
+	var new_source := source
+	# Prefer calling it from an existing _ready(); otherwise write one.
+	var ready_idx := new_source.find("func _ready(")
+	if ready_idx != -1:
+		var line_end := new_source.find("
+", ready_idx)
+		if line_end == -1:
+			return {&"ok": false, &"error": "Could not parse the existing _ready() in " + script_path}
+		new_source = new_source.substr(0, line_end + 1) + call_line + new_source.substr(line_end + 1)
+	else:
+		body += "
+func _ready() -> void:
+" + call_line
+
+	if not new_source.ends_with("
+"):
+		new_source += "
+"
+	new_source += body
+
+	var w := FileAccess.open(script_path, FileAccess.WRITE)
+	if w == null:
+		return {&"ok": false, &"error": "Could not write " + script_path}
+	w.store_string(new_source)
+	w.close()
+	_refresh_filesystem()
+
+	return {
+		&"ok": true, &"script_path": script_path,
+		&"peer_id": value_expr, &"recursive": recursive, &"node": node_expr,
+		&"called_from_existing_ready": ready_idx != -1,
+		&"message": "Wrote _mcp_claim_authority() into %s (authority = %s%s)" % [script_path, value_expr, ", recursive" if recursive else ""],
+	}

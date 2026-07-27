@@ -57,6 +57,18 @@ export const analysisTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'validate_references',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description: "Check that the names your scripts USE actually exist in the project: group names, input actions, and signals emitted but never declared. validate_scripts only answers 'does this parse' — these failures are silent at runtime instead. get_first_node_in_group(\"player\") against a project where nothing is in that group returns null and the enemy simply never moves, with no error anywhere. Reports file, line, the offending name and the closest existing one. Only literal names are checked; a name built at runtime is skipped rather than guessed at.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        root: { type: 'string', description: 'Directory to scan (default res://).' },
+        include_addons: { type: 'boolean', description: 'Also scan res://addons (default false — third-party addons reference their own groups and actions).' }
+      }
+    }
+  },
+  {
     name: 'analyze_signal_flow',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description: 'Map every persisted signal connection in a scene (or the whole project) and flag ORPHANS: connections whose receiver has no script, or whose script never declares the handler method. Those fail silently until the signal actually fires at runtime, so this catches a class of bug the editor does not. Handlers inherited from a base class or written in C# are not detected and may show as false positives.',

@@ -50,9 +50,31 @@ func _get_undo_redo() -> EditorUndoRedoManager:
 ## when a value arrives as a string (e.g. "1" for an int property) and the
 ## readback is a different type. Guard the cross-type case and fall back to a
 ## stringwise compare (also treats int 1 == float 1.0 as equal).
+## setup_collision's vocabulary mapped to the class names this tool wants, so a
+## caller that used the sibling tool's spelling gets told which word to use
+## instead of a bare rejection. 2D wins ties: these tools are used on 2D scenes
+## far more often, and the message names the tool the alias came from.
+const _SHAPE_ALIASES := {
+	"rectangle": "RectangleShape2D",
+	"circle": "CircleShape2D",
+	"capsule": "CapsuleShape2D",
+	"box": "BoxShape3D",
+	"sphere": "SphereShape3D",
+}
+
 func _values_match(a, b) -> bool:
 	if typeof(a) == typeof(b):
 		return a == b
+	# Numbers must be compared numerically, not as text.
+	#
+	# JSON has one number type, so every integer an MCP client sends arrives as a
+	# float. Setting an int property with it works — Godot coerces — but the
+	# read-back returns an int, and the old string fallback compared "1" against
+	# "1.0" and called a perfectly good write a failure. That is why setting
+	# collision_layer/collision_mask reported "set had no effect (type
+	# mismatch?)", and why a single-property call then saved nothing at all.
+	if (a is int or a is float) and (b is int or b is float):
+		return is_equal_approx(float(a), float(b))
 	return str(a) == str(b)
 
 # =============================================================================
@@ -203,6 +225,17 @@ func _count_nodes(node: Node) -> int:
 func read_scene(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var include_properties: bool = args.get(&"include_properties", false)
+	# Ask for exactly the properties you need. `include_properties` is all-or-
+	# nothing over a fixed list of twelve, which is both too much (a tree dump
+	# with modulate and mass on every node) and too little (nothing else is
+	# reachable). For a 2D game the first question is usually "where is
+	# everything", and answering it used to mean one call per node.
+	# Untyped on purpose: `var x: Array = args.get(...)` throws when the caller
+	# sends a string, which kills the handler before the check below can run and
+	# returns an empty dict — a guard that cannot fire is worse than none.
+	var wanted_props = args.get(&"properties", [])
+	if not (wanted_props is Array):
+		return {&"ok": false, &"error": "'properties' must be an array of property names, e.g. [\"position\", \"visible\"]"}
 	# Cap recursion so a big scene doesn't return a giant tree; a depth-limited node
 	# reports children_truncated instead of expanding. -1 = full (default, unchanged).
 	var max_depth: int = int(args.get(&"max_depth", -1))
@@ -219,12 +252,12 @@ func read_scene(args: Dictionary) -> Dictionary:
 		return acq[2]
 	var root: Node = acq[0]
 	var is_live: bool = acq[1]
-	var structure = _build_node_structure(root, include_properties, ".", max_depth, 0)
+	var structure = _build_node_structure(root, include_properties, ".", max_depth, 0, wanted_props)
 	_discard_scene(root, is_live)
 
 	return {&"ok": true, &"scene_path": scene_path, &"max_depth": max_depth, &"root": structure}
 
-func _build_node_structure(node: Node, include_props: bool, path: String = ".", max_depth: int = -1, depth: int = 0) -> Dictionary:
+func _build_node_structure(node: Node, include_props: bool, path: String = ".", max_depth: int = -1, depth: int = 0, wanted_props: Array = []) -> Dictionary:
 	const PROPERTIES: PackedStringArray = ["position", "rotation", "scale", "size", "offset", "visible",
 			"modulate", "z_index", "text", "collision_layer", "collision_mask", "mass"]
 	var data := {&"name": str(node.name), &"type": node.get_class(), &"path": path, &"children": []}
@@ -234,14 +267,27 @@ func _build_node_structure(node: Node, include_props: bool, path: String = ".", 
 	if script:
 		data[&"script"] = script.resource_path
 
-	if include_props:
+	if include_props or not wanted_props.is_empty():
+		# An explicit list wins: it is a narrower question and answering it with
+		# the twelve-property default would defeat the point.
+		var names: Array = wanted_props if not wanted_props.is_empty() else Array(PROPERTIES)
 		var props := {}
-		for prop_name: String in PROPERTIES:
+		var missing: Array = []
+		for prop_name_v in names:
+			var prop_name := str(prop_name_v)
+			# `in` distinguishes "the node has no such property" from "it is set
+			# to null" — asking for a typo used to look like a null value.
+			if not (prop_name in node):
+				if not wanted_props.is_empty():
+					missing.append(prop_name)
+				continue
 			var val = node.get(prop_name)
 			if val != null:
 				props[prop_name] = _serialize_value(val)
 		if not props.is_empty():
 			data[&"properties"] = props
+		if not missing.is_empty():
+			data[&"missing_properties"] = missing
 
 	if max_depth >= 0 and depth >= max_depth:
 		var kids := node.get_child_count()
@@ -251,7 +297,7 @@ func _build_node_structure(node: Node, include_props: bool, path: String = ".", 
 
 	for child: Node in node.get_children():
 		var child_path = child.name if path == "." else path + "/" + child.name
-		data[&"children"].append(_build_node_structure(child, include_props, child_path, max_depth, depth + 1))
+		data[&"children"].append(_build_node_structure(child, include_props, child_path, max_depth, depth + 1, wanted_props))
 	return data
 
 # =============================================================================
@@ -1147,7 +1193,17 @@ func set_collision_shape(args: Dictionary) -> Dictionary:
 	if shape_type.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'shape_type'"}
 	if not ClassDB.class_exists(shape_type):
-		return {&"ok": false, &"error": "Invalid shape type: " + shape_type}
+		# Two tools in this repo take a `shape_type` and accept different
+		# vocabularies: setup_collision wants "rectangle"/"circle"/"box"/"sphere",
+		# this one wants the Godot class name. Passing the other spelling used to
+		# give a bare "Invalid shape type: rectangle" with no hint that a
+		# different word was expected, let alone which.
+		var suggestion := _SHAPE_ALIASES.get(shape_type.to_lower(), "")
+		var msg := "Invalid 'shape_type': '%s'. This tool takes a Godot class name" % shape_type
+		if suggestion != "":
+			msg += " — did you mean '%s'? ('%s' is setup_collision's spelling.)" % [suggestion, shape_type]
+		msg += " Common 2D: RectangleShape2D, CircleShape2D, CapsuleShape2D. Common 3D: BoxShape3D, SphereShape3D, CapsuleShape3D."
+		return {&"ok": false, &"error": msg}
 
 	# _acquire_scene, not _load_scene: on an OPEN scene, loading a disk copy and
 	# saving it back discards the editor's unsaved state and the reload that
