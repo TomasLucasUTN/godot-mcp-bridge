@@ -5,6 +5,62 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.1.4] - 2026-07-27
+
+See [`release-notes/v1.1.4.md`](./release-notes/v1.1.4.md). All of it came from
+making the e2e harness launch a real game for the first time.
+
+### Fixed
+- **`run_scene` froze the editor for its entire timeout, on every call.** Its two
+  wait loops used `OS.delay_msec`, which blocks Godot's main thread — so the
+  addon stopped pumping its WebSocket, stopped answering pings, and the server
+  force-closed the connection after two missed intervals. The agent got
+  `Godot disconnected` back from a call that had launched the game fine. The
+  conditions being waited on are updated by that same main loop, so blocking it
+  meant they could never become true and every call ran the full
+  `startup_timeout_ms` — which is what the "MCPRuntime connects in ~11-20s"
+  comment above the default was actually measuring. `run_scene` is now a
+  coroutine that yields to the SceneTree, as `wait` already did. A test enforces
+  that any handler containing `await` is registered for coroutine dispatch,
+  verified against a deliberate regression.
+- **The activity feed could go silent for an hour.** `begin_agent_call()` opened
+  the agent-attribution window for 3,600,000 ms, closed only by the matching
+  `end_agent_call()`. A handler that dies mid-coroutine never reaches it — and
+  1.1.3 fixed three handlers that did — after which every action the developer
+  took was filed as the agent's own and nothing was reported. The window is now
+  bounded regardless, and counted rather than flagged so overlapping calls do
+  not un-tag each other.
+- A comment in `mcp_runtime.gd` claimed engine errors were captured into the
+  runtime log. Nothing captured them; there is no supported hook for it from
+  inside a running game.
+- `take_screenshot` writes into `addons/godot_mcp/cache`, which the addon bundler
+  copied wholesale — a stale screenshot could ship inside the npm package.
+
+### Added
+- **Activity from the running game**, split by what each side can observe. The
+  runtime autoload reports its own scene swaps (`game_started`,
+  `game_scene_changed`), which the editor cannot see and which invalidate every
+  runtime node path the agent holds. A new passive `EditorDebuggerPlugin` reports
+  the game's life and death (`game_running`, `game_paused`, `game_crashed`,
+  `game_stopped`, `game_resumed`), which the game cannot report about itself. The
+  activity summary now describes game *state* rather than counting transitions,
+  and always calls out a crash.
+
+### Changed
+- The e2e harness launches a real game (31 → 34 assertions), and CI runs it under
+  Xvfb since the game does not inherit the editor's `--headless`. GDScript suite
+  358 → 375; Node suite 118 → 124.
+
+### Known limitation
+- **Breakpoints still do not pause the game.** A real Godot bug was identified
+  from source — the debug adapter's `update_breakpoints` calls
+  `ScriptEditorDebugger::_set_breakpoint`, which only updates the editor UI,
+  rather than the public `set_breakpoint` that messages the running game, which
+  is why it answers `verified: true` and nothing stops. But that is not the whole
+  cause: `EditorDebuggerSession.set_breakpoint` reaches the correct function and,
+  tested against a live game on a line running every physics frame, still did not
+  pause. No fix ships on a source reading alone.
+
 ## [1.1.3] - 2026-07-27
 
 See [`release-notes/v1.1.3.md`](./release-notes/v1.1.3.md). Most of this came out
