@@ -84,14 +84,20 @@ a scene is open, every mutating tool edits the **live editor tree** instead — 
 unsaved edits survive and every change goes through Godot's **undo system** (Ctrl+Z
 works). Closed scenes still edit on disk as usual.
 
-**The claims are tested, not asserted.** Every tool has been run against a real Godot
-4.7 — 204 driven by hand through the editor (a full 185-tool pass in July 2026, plus the
-debugger and language-server tools end-to-end as they were added), and the multiplayer
-scaffolding covered by 15 assertions in the headless GDScript suite. That work found and
-fixed four real bugs: collision presets silently saving an empty bitmask, a live-scene
-write leaving partial state after reporting failure, a 2D navmesh bake that always came
-back empty, and an export poll that hung until timeout. See
-[Limitations](#-limitations) for what it still can't do.
+**The claims are tested, not asserted.** 526 GDScript checks against the tool handlers,
+147 Node tests for the bridge and the tool registry, and 43 that drive a **real Godot
+editor** — creating scenes, mutating one that is open, launching an actual game — on
+every push, on both Godot 4.5 and 4.7. Every one of the tools that writes to your project
+has automated coverage.
+
+That suite is not decoration; it is where the bugs came from. It caught `close_scene_tab`
+being broken on 4.5 (the minimum this README promises), a `run_scene` that froze the
+whole editor for its entire timeout on every single call, and a `res://` texture path
+that five different tools accepted and silently threw away. Each of those was found by a
+test that failed, not by reading the code — and each is in
+[`CHANGELOG.md`](./CHANGELOG.md) with what it cost.
+
+See [Limitations](#-limitations) for what it still can't do.
 
 More of what it does:
 
@@ -214,15 +220,30 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 217 (35 loaded by default) | 155 | 42 | ~14 |
+| Tools | 225 (35 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
 | **Sees what *you* just did** (`get_editor_activity`) | ✅ | ❌ | ❌ | ❌ |
 | Async headless export (doesn't block the editor) | ✅ | CLI export | ❌ | ❌ |
 | Runs your real test suite (GUT) | ✅ | ❌ | ❌ | ❌ |
+| Works with Codex CLI (stdio) | ✅ | ❌ (HTTP only — their issues #1, #24) | ✅ | ✅ |
 | Last release | active | active | Apr 2026 | Apr 2026 |
 | GitHub stars | — | 464 | 397 | 4.9k |
+
+**About the Node process.** `Godot-MCP-Native` runs entirely inside the editor and
+sells that as "no sidecar". It is a real trade, so here is the other half of it. A
+server living in the editor process is bound to the editor's lifetime *and* to its
+main thread. That costs three things: it cannot be spawned over **stdio**, so
+stdio-only clients like Codex CLI cannot load it at all; it **dies when Godot
+crashes**, taking your AI client's connection with it; and any slow work **freezes
+the editor**, because `@tool` scripts run on the main thread.
+
+That last one is measurable. Asked "which assets does nothing reference?" on a
+project with a couple of free asset packs in it (24,649 files, 12,201 images), the
+same analysis takes **1.6 seconds** in a separate process and never touches the
+editor — where an in-editor implementation blocks the UI for **26 seconds**. The
+sidecar is an install step you pay once; the main thread is one you pay every call.
 
 The honest read: undo, a debugger, and runtime control are table stakes now — the good
 projects all have them. What no one else does is the bidirectional half, and the two
@@ -358,7 +379,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 217 Tools, 35 Loaded by Default
+### 225 Tools, 35 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -435,10 +456,46 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 
 ## ⚠️ Limitations
 
-- **Local only** — runs on localhost, no remote connections
-- **Single connection** — one Godot instance at a time
-- **Undo covers every edit to an open scene** — nodes, properties, resources, animation tracks, tilemap cells: all of it registers on Godot's undo history, and `undo_last` lets the agent take back its own change. A `batch_scene_edit` is one entry, so Ctrl+Z reverts the whole batch. The limit worth knowing: editing a scene that is **not** open writes straight to disk with no undo entry — use version control there. Some destructive tools also support `dry_run: true` to preview first
-- **AI is still limited in Godot knowledge** — it struggles with complex UI layouts, compositing scenes, and some node property manipulation; it can't create 100% of a game alone, but it can help debug, write scripts, and tag along for the journey. Still in active development — feedback is welcome.
+Written to be the section you read *before* hitting these, not after.
+
+**Requires a running editor.** This drives a live Godot instance over a WebSocket; it
+is not a headless CLI. No editor open, no tools. Godot **4.5 or newer** — 4.3 and 4.4
+were measured against the live suite and the editor-mode scene path does not work there.
+
+**Local only, one editor at a time.** Port 6505 on localhost, first come first served.
+Two projects open at once means the second one loses; set `GODOT_MCP_PORT` on both the
+server and the addon, or `GODOT_MCP_PROJECT` so the bridge refuses the wrong project
+instead of silently driving it.
+
+**A closed scene is edited on disk, with no undo entry.** When the scene is *open*
+everything goes through Godot's undo history and Ctrl+Z works, including over a whole
+`batch_scene_edit`. When it is closed there is no history to write to — use version
+control. Many destructive tools take `dry_run: true` to preview first.
+
+**Enabling a toolset mid-session may not reach your client.** Only `core` (35 tools) is
+on by default. `enable_toolset` flips it server-side and the server does send
+`notifications/tools/list_changed`, but several clients cache the tool list for the
+whole session and never re-fetch — and then the newly enabled tools stay invisible until
+you restart the client. If you know you want them, set
+`GODOT_MCP_TOOLSETS=runtime,debug` (or `all`) so they are in the *first* list.
+
+**`game_eval` runs your snippet inside the running game.** Code that does not compile is
+now caught in the editor before the game ever sees it, but a snippet that fails at
+*runtime* — dereferencing a freed node, dividing by zero — halts the game under the
+attached debugger, and the tool call times out instead of returning an error. Keep eval
+snippets defensive, or use `query_runtime_node` / `serialize_runtime_tree`, which cannot
+do this.
+
+**C# is scaffolding only.** `create_csharp_script` writes a correctly-shaped file and
+`csharp_status` tells you honestly whether this editor can run C# at all (a standard,
+non-Mono build cannot). The language-server and debugger tools cover GDScript, not C#.
+The blocker is upstream: Godot has no non-interactive way to generate the `.csproj`,
+verified across four CI runs.
+
+**The AI still does not know Godot as well as you do.** It struggles with complex UI
+layouts, compositing scenes, and some property manipulation. It cannot build a game on
+its own — it debugs, writes scripts, runs and inspects the thing, and keeps you company
+while you do. Feedback welcome.
 
 ---
 
