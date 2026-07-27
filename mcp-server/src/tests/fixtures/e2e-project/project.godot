@@ -13,6 +13,10 @@ config_version=5
 config/name="e2e-project"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
+[autoload]
+
+MCPRuntime="*res://addons/godot_mcp/runtime/mcp_runtime.gd"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")

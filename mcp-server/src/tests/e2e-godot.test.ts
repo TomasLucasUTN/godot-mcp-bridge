@@ -592,64 +592,72 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       if (existsSync(RUN_FILE)) rmSync(RUN_FILE);
     });
 
-    it('pushes runtime-sourced events while a game is playing', async () => {
+    /**
+     * One launch-to-stop cycle, captured whole.
+     *
+     * Deliberately a single test rather than three. The first version split it
+     * into "it starts", "it is running", "it stops" and let each lean on the
+     * game the previous one had left alive — which passed on the machine it was
+     * written on and failed on the next one, because there the game exited on
+     * its own partway through. A launched game is not state a later test may
+     * assume; anything that needs one launches it.
+     */
+    it('reports the game starting and stopping', async () => {
       await bridge.invokeTool('create_scene', {
         scene_path: RUN_SCENE, root_node_type: 'Node2D', root_node_name: 'RunRoot',
       });
 
       const events = await captureActivity(async () => {
         await bridge.invokeTool('run_scene', {
-          scene: RUN_SCENE, wait_for_runtime: true, startup_timeout_ms: 30000,
+          scene: RUN_SCENE, wait_for_runtime: true, startup_timeout_ms: 20000,
         });
-        // The autoload reports its scene on the first frame it sees one, and the
-        // editor's debugger reports the session starting. Both are pushed, so
-        // this is a settle window, not a poll.
-        await new Promise((r) => setTimeout(r, 3000));
-      });
-
-      const runtime = events.filter((e) => e.source === 'runtime');
-      // Naming the types found makes a failure say WHAT arrived, not just "none".
-      const types = runtime.map((e) => String(e.type)).join(', ') || '(none)';
-      expect(runtime.length, `runtime events seen: ${types}`).toBeGreaterThan(0);
-
-      // game_started comes from the autoload, game_running from the debugger
-      // watch. Either proves the push path; requiring both would make this
-      // depend on which lands first.
-      expect(types).toMatch(/game_started|game_running/);
-
-      // Whatever arrives must not be tagged as the agent's own work, or the
-      // feed filters it out before the agent ever sees it.
-      expect(runtime.every((e) => e.source !== 'agent')).toBe(true);
-    }, 60000);
-
-    it('reports the scene the game is actually running', async () => {
-      // The detail is the point: "the game switched scenes" without saying to
-      // what leaves the agent knowing its node paths are stale and nothing else.
-      const events = await captureActivity(async () => {
-        await new Promise((r) => setTimeout(r, 500));
-      });
-      const withScene = [...events, ...[]].find(
-        (e) => e.source === 'runtime' && typeof e.detail === 'string' && String(e.detail).endsWith('.tscn')
-      );
-      // Only assert when a scene-bearing event was captured in this window —
-      // the first test consumed the launch burst, so this is a bonus check
-      // rather than a second launch.
-      if (withScene) expect(String(withScene.detail)).toContain('.tscn');
-
-      const playing = JSON.stringify(await bridge.invokeTool('is_playing', {}));
-      expect(playing).toContain('true');
-    }, 30000);
-
-    it('stops the game and says so', async () => {
-      const events = await captureActivity(async () => {
+        // Both sides push, so this is a settle window rather than a poll.
+        await new Promise((r) => setTimeout(r, 2000));
         await bridge.invokeTool('stop_scene', {});
         await new Promise((r) => setTimeout(r, 2000));
       });
-      const types = events.filter((e) => e.source === 'runtime').map((e) => String(e.type));
-      // game_stopped comes from the editor's debugger session, which is the only
-      // side that can report it — a dead game cannot announce its own death.
-      expect(types.join(', ')).toContain('game_stopped');
-    }, 30000);
+
+      const runtime = events.filter((e) => e.source === 'runtime');
+      // Naming what did arrive makes a failure diagnosable instead of just "none".
+      const types = runtime.map((e) => String(e.type));
+      const seen = types.join(', ') || '(none)';
+
+      expect(runtime.length, `runtime events seen: ${seen}`).toBeGreaterThan(0);
+
+      // game_started comes from the autoload, game_running from the debugger
+      // watch. Either proves the push path; requiring a specific one would make
+      // this depend on which lands first.
+      expect(seen).toMatch(/game_started|game_running/);
+
+      // Only the editor can report this — a dead game cannot announce its own
+      // death, which is the whole reason the debugger watch exists.
+      expect(seen, `runtime events seen: ${seen}`).toContain('game_stopped');
+
+      // None of it may be filed as the agent's own work, or the feed drops it
+      // before the agent ever sees it.
+      expect(runtime.every((e) => e.source !== 'agent')).toBe(true);
+    }, 60000);
+
+    it('names the scene the game is running, not just that one changed', async () => {
+      // The detail is the point: telling an agent "the scene changed" without
+      // saying to what leaves it knowing its node paths are stale and nothing
+      // else. This comes from the autoload, which is the only side that sees it.
+      const events = await captureActivity(async () => {
+        await bridge.invokeTool('run_scene', {
+          scene: RUN_SCENE, wait_for_runtime: true, startup_timeout_ms: 20000,
+        });
+        await new Promise((r) => setTimeout(r, 2000));
+        await bridge.invokeTool('stop_scene', {});
+      });
+
+      const withScene = events.find(
+        (e) => e.source === 'runtime' && typeof e.detail === 'string' && String(e.detail).endsWith('.tscn')
+      );
+      const seen = events.filter((e) => e.source === 'runtime')
+        .map((e) => `${e.type}=${JSON.stringify(e.detail)}`).join(', ') || '(none)';
+      expect(withScene, `runtime events seen: ${seen}`).toBeDefined();
+      expect(String(withScene?.detail)).toContain('e2e_run_scene.tscn');
+    }, 60000);
   });
 });
 
