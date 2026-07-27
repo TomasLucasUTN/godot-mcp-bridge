@@ -119,6 +119,10 @@ export const RUNTIME_ONLY_TOOLS = new Set<string>([
   'call_rpc_runtime',
   'start_input_recording',
   'stop_input_recording',
+  'seed_rng',
+  'step_frames',
+  'time_scale',
+  'await_condition',
 ]);
 
 interface PendingRequest {
@@ -496,7 +500,46 @@ export class GodotBridge {
   // Tool invocation
   // --------------------------------------------------------------------------
 
+  /**
+   * Compile a game_eval snippet in the EDITOR before letting the game near it.
+   *
+   * game_eval is the escape hatch, so agents get its snippets wrong routinely.
+   * A snippet that does not parse is reported through the engine's global error
+   * handler, and in a game launched from the editor that handler makes the
+   * debugger break: the game PAUSES mid-call (it does not die — measured), the
+   * helper stops answering, and the typo surfaces ~25s later as "Runtime helper
+   * is not connected". Nothing is debugging the editor, so compiling there first
+   * turns that back into an immediate, accurate error.
+   *
+   * Best-effort by design. No editor connected (a game launched straight from
+   * the CLI) means no debugger either, which is the case that never broke — and
+   * an addon too old to have the handler must not make game_eval unusable.
+   */
+  private async precheckEvalSnippet(args: Record<string, unknown>): Promise<void> {
+    const code = args?.code;
+    if (typeof code !== 'string' || code.trim() === '') return;
+    if (!this.isConnected()) return;
+
+    let verdict: Record<string, unknown>;
+    try {
+      verdict = (await this.invokeTool('validate_eval_snippet', { code })) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (verdict?.valid === false) {
+      const details = Array.isArray(verdict.errors) && verdict.errors.length > 0
+        ? ` Details: ${(verdict.errors as string[]).join('; ')}`
+        : '';
+      throw new Error(
+        `The snippet does not compile, so it was not sent to the game (err=${verdict.error_code}).${details} ` +
+        `It is a function body — no leading indent, and \`return X\` to get a value back.`
+      );
+    }
+  }
+
   async invokeTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    if (toolName === 'game_eval') await this.precheckEvalSnippet(args);
+
     const target: 'editor' | 'runtime' = this.routeIsRuntime(toolName, args) ? 'runtime' : 'editor';
     const slot = target === 'editor' ? this.editor : this.runtime;
     if (!slot || slot.ws.readyState !== WebSocket.OPEN) {

@@ -300,13 +300,18 @@ func _validate_one(path: String) -> Dictionary:
 	# an empty error list. The file loads perfectly in the editor, so the tool
 	# reported a syntax error that does not exist.
 	#
-	# The path only has to LOOK like the original's neighbour — nothing is
-	# written to disk. The counter keeps repeated or nested validations from
-	# colliding in the resource cache.
+	# The path only has to LOOK like the original's neighbour. The counter keeps
+	# repeated or nested validations from colliding in the resource cache.
+	#
+	# It does NOT stay purely in memory, which this comment used to claim: a real
+	# project was found with `__mcp_validate_1.gd` and its `.uid` sitting next to
+	# the scripts they were copied from. Whatever writes them, the fix is to
+	# delete them right after the compile.
 	_validate_seq += 1
 	script.resource_path = "%s/__mcp_validate_%d.gd" % [path.get_base_dir(), _validate_seq]
 	script.source_code = _strip_class_name(source_code)
 	var err := script.reload()  # runs the parser/compiler
+	_discard_validation_artifact(script.resource_path)
 
 	if err != OK:
 		var errors := _collect_recent_script_errors(path)
@@ -325,6 +330,55 @@ func _validate_one(path: String) -> Dictionary:
 		&"path": path,
 		&"message": "No syntax errors found"
 	}
+
+## Delete a throwaway validation script if the engine actually wrote one out.
+## Godot also drops a sidecar `.uid` next to any script it resolves, so both go.
+func _discard_validation_artifact(res_path: String) -> void:
+	for p in [res_path, res_path + ".uid"]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
+
+## Compile a game_eval snippet HERE, in the editor, before it is sent to the game.
+##
+## Not called by agents — the MCP server calls it on their behalf (see the
+## snippet pre-check in godot-bridge.ts). It exists because of where a parse
+## error lands: a snippet that does not compile is reported through the engine's
+## global error handler, and in a game launched from the editor that handler
+## makes the DEBUGGER BREAK. The game pauses mid-call, the helper stops
+## answering, and the agent's typo comes back as "Runtime helper is not
+## connected" ~25s later. Nothing is debugging the editor, so the same compile
+## here is harmless and the typo stays a typo.
+##
+## The wrapper must match `_compile_eval` in runtime/mcp_runtime.gd — same
+## `extends`, same signature, same indent — or this checks something the game
+## never runs.
+func validate_eval_snippet(args: Dictionary) -> Dictionary:
+	var code := str(args.get(&"code", ""))
+	if code.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'code'"}
+
+	var src := "extends RefCounted\nfunc _mcp_eval(tree, node):\n"
+	for line in code.split("\n"):
+		src += "\t" + line + "\n"
+
+	var script := GDScript.new()
+	# Under res://addons/ on purpose: `exclude_addons` (on by default) mutes the
+	# warnings there, so a project that promotes warnings to errors cannot make
+	# this pre-check reject a snippet that would have run. It must only ever fail
+	# on a real parse error — a false block is worse than the break it prevents.
+	_validate_seq += 1
+	script.resource_path = "res://addons/godot_mcp/__mcp_snippet_%d.gd" % _validate_seq
+	script.source_code = src
+	var err := script.reload()
+	_discard_validation_artifact(script.resource_path)
+	if err != OK:
+		return {
+			&"ok": true,
+			&"valid": false,
+			&"error_code": err,
+			&"errors": _collect_recent_script_errors(script.resource_path),
+		}
+	return {&"ok": true, &"valid": true}
 
 ## Removes the top-level `class_name X` declaration so a standalone
 ## GDScript.reload() doesn't collide with the already-registered global class.

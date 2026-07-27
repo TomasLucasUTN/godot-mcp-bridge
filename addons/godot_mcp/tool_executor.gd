@@ -176,6 +176,7 @@ func _init_tools() -> void:
 
 		&"edit_script": [_script_tools, &"edit_script"],
 		&"validate_script": [_script_tools, &"validate_script"],
+		&"validate_eval_snippet": [_script_tools, &"validate_eval_snippet"],
 		&"validate_scripts": [_script_tools, &"validate_scripts"],
 		&"list_scripts": [_script_tools, &"list_scripts"],
 		&"create_folder": [_script_tools, &"create_folder"],

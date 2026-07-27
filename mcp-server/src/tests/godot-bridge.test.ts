@@ -199,6 +199,89 @@ describe('GodotBridge — connections', () => {
 });
 
 // ---------------------------------------------------------------------------
+// game_eval snippet pre-check
+// ---------------------------------------------------------------------------
+//
+// A snippet that does not parse used to reach the game, where the parse error
+// breaks the attached debugger: the game freezes and the typo comes back ~25s
+// later as "Runtime helper is not connected". The editor compiles it first now.
+
+describe('GodotBridge — game_eval snippet pre-check', () => {
+  let bridge: GodotBridge;
+  let editor: WebSocket | null = null;
+  let runtime: WebSocket | null = null;
+
+  afterEach(() => {
+    editor?.close(); editor = null;
+    runtime?.close(); runtime = null;
+    bridge?.stop();
+  });
+
+  /** Answer the editor's next tool_invoke, asserting which tool it was. */
+  async function answerEditor(expectTool: string, result: unknown): Promise<void> {
+    const msg = await nextMessage(editor!);
+    expect(msg.tool).toBe(expectTool);
+    editor!.send(JSON.stringify({ type: 'tool_result', id: msg.id, success: true, result }));
+  }
+
+  async function connectBoth(): Promise<void> {
+    bridge = createBridge(TEST_PORT, SHORT_TIMEOUT);
+    await bridge.start();
+    editor = await connectClient(TEST_PORT);
+    editor.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p' }));
+    runtime = await connectClient(TEST_PORT);
+    runtime.send(JSON.stringify({ type: 'godot_ready', role: 'runtime', project_path: '/p' }));
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  it('a snippet that does not compile never reaches the game', async () => {
+    await connectBoth();
+
+    // If the pre-check leaks, the runtime sees a game_eval. Nothing must arrive.
+    let runtimeSaw: string | null = null;
+    runtime!.on('message', (d) => { runtimeSaw = JSON.parse(d.toString()).tool; });
+
+    const call = bridge.invokeTool('game_eval', { code: 'var x = = 5' });
+    await answerEditor('validate_eval_snippet', { ok: true, valid: false, error_code: 43, errors: ['Expected expression'] });
+
+    await expect(call).rejects.toThrow(/does not compile.*not sent to the game/s);
+    await expect(call).rejects.toThrow('Expected expression');
+    expect(runtimeSaw).toBeNull();
+  });
+
+  it('a snippet that compiles is forwarded to the game', async () => {
+    await connectBoth();
+
+    const call = bridge.invokeTool('game_eval', { code: 'return 1 + 1' });
+    await answerEditor('validate_eval_snippet', { ok: true, valid: true });
+
+    const forwarded = await nextMessage(runtime!);
+    expect(forwarded.tool).toBe('game_eval');
+    expect(forwarded.args).toEqual({ code: 'return 1 + 1' });
+
+    runtime!.send(JSON.stringify({ type: 'tool_result', id: forwarded.id, success: true, result: { ok: true, result: 2 } }));
+    expect(await call).toEqual({ ok: true, result: 2 });
+  });
+
+  it('with no editor connected the snippet goes straight through', async () => {
+    // The CLI-launched case: no editor means no debugger, which is the setup
+    // that never froze. The pre-check must not make game_eval unusable there.
+    bridge = createBridge(TEST_PORT, SHORT_TIMEOUT);
+    await bridge.start();
+    runtime = await connectClient(TEST_PORT);
+    runtime.send(JSON.stringify({ type: 'godot_ready', role: 'runtime', project_path: '/p' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const call = bridge.invokeTool('game_eval', { code: 'var x = = 5' });
+    const forwarded = await nextMessage(runtime);
+    expect(forwarded.tool).toBe('game_eval');
+
+    runtime.send(JSON.stringify({ type: 'tool_result', id: forwarded.id, success: false, error: 'Compile error in eval snippet (err=43).' }));
+    await expect(call).rejects.toThrow('Compile error');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // WebSocket protocol
 // ---------------------------------------------------------------------------
 

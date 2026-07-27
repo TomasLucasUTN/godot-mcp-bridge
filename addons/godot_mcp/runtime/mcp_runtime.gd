@@ -33,6 +33,16 @@ var _started_at_msec := 0
 var _monitor_jobs: Array = []
 var _replay_jobs: Array = []
 
+## Caps for the deterministic-testing tools. These bound a single call, not the
+## session: an agent that asks for a million frames has made a mistake, and
+## blocking the game for minutes while it finds out is the wrong way to say so.
+const _STEP_FRAMES_MAX := 3600         # a minute at 60fps
+const _TIME_SCALE_MAX := 10.0
+const _AWAIT_CONDITION_MAX_MS := 60000
+
+var _step_jobs: Array = []
+var _condition_jobs: Array = []
+
 # Activity the agent is told about as it happens, over the same push channel the
 # editor plugin uses. Scoped to what only the running game can see: the editor
 # has no way to know that change_scene_to_file() just swapped the scene out, and
@@ -49,6 +59,7 @@ func _ready() -> void:
 	# network clients; the agent inspects the server instance instead.
 	if OS.get_cmdline_user_args().has("--no-mcp"):
 		set_process(false)
+		set_physics_process(false)
 		return
 	_project_path = ProjectSettings.globalize_path("res://")
 	_started_at_msec = Time.get_ticks_msec()
@@ -86,6 +97,7 @@ func _process(_delta: float) -> void:
 		_tick_monitors()
 		_tick_replays()
 		_tick_scene_awareness()
+		_tick_step_jobs("process")
 
 	elif st == WebSocketPeer.STATE_CLOSED:
 		if _connected:
@@ -94,6 +106,15 @@ func _process(_delta: float) -> void:
 		var now := Time.get_ticks_msec()
 		if now >= _reconnect_at_msec:
 			_attempt_connect()
+
+
+## Physics frames are what move bodies, so they are what a game-state assertion
+## actually cares about — and they tick at a fixed rate regardless of frame rate,
+## which is what makes step_frames reproducible across machines. await_condition
+## samples here for the same reason.
+func _physics_process(_delta: float) -> void:
+	_tick_step_jobs("physics")
+	_tick_condition_jobs()
 
 
 func _attempt_connect() -> void:
@@ -136,6 +157,14 @@ func _handle_message(json_string: String) -> void:
 				return
 			if tool_name == "await_signal_runtime":
 				_start_await_signal(rid, args)
+				return
+			# step_frames and await_condition both resolve over frames rather
+			# than immediately, so they answer from their own tick like the above.
+			if tool_name == "step_frames":
+				_start_step_frames(rid, args)
+				return
+			if tool_name == "await_condition":
+				_start_await_condition(rid, args)
 				return
 			var result := _dispatch(tool_name, args)
 			var success: bool = bool(result.get("ok", false))
@@ -219,8 +248,205 @@ func _dispatch(tool_name: String, args: Dictionary) -> Dictionary:
 			return _get_multiplayer_status(args)
 		"call_rpc_runtime":
 			return _call_rpc_runtime(args)
+		"seed_rng":
+			return _seed_rng(args)
+		"time_scale":
+			return _time_scale(args)
 		_:
 			return {"ok": false, "error": "Unknown runtime tool: %s" % tool_name}
+
+
+# =============================================================================
+# Deterministic testing — seed_rng / time_scale / step_frames / await_condition
+# =============================================================================
+# Testing a game that involves chance or motion is only meaningful if a run can
+# be repeated. `wait` cannot give that: it waits wall-clock milliseconds, so the
+# number of frames that elapse depends on the machine and the frame rate, and a
+# test that passes here fails on a slower box for no reason anyone can see.
+
+## Pin the global RNG so a run involving chance can be replayed.
+func _seed_rng(args: Dictionary) -> Dictionary:
+	if not args.has("seed"):
+		return {"ok": false, "error": "Missing 'seed' (an integer)"}
+	var s := int(args.get("seed"))
+	seed(s)
+	return {
+		"ok": true,
+		"seed": s,
+		# Said out loud rather than left to be discovered: a run that LOOKS
+		# reproducible but is not is worse than one that never claimed to be.
+		"note": "Seeds the global functions only (randi, randf, randi_range, ...). A RandomNumberGenerator the game created itself keeps its own state — seed that instance through set_runtime_property if the code under test uses one.",
+	}
+
+
+## Speed the game up or slow it down. 0 freezes it without pausing the tree, so
+## frames still process and step_frames still advances.
+func _time_scale(args: Dictionary) -> Dictionary:
+	if not args.has("scale"):
+		return {"ok": false, "error": "Missing 'scale' (1.0 = normal, 0.5 = half speed, 0 = frozen)"}
+	var requested := float(args.get("scale"))
+	# Negative time is not meaningful, and a very large scale makes physics
+	# tunnel through colliders rather than fast-forward, which reads as a bug in
+	# the game under test.
+	var scale := clampf(requested, 0.0, _TIME_SCALE_MAX)
+	Engine.time_scale = scale
+	var out := {"ok": true, "time_scale": scale}
+	if not is_equal_approx(scale, requested):
+		out["clamped"] = true
+		out["requested"] = requested
+		out["note"] = "Clamped to 0..%d. Above that, physics tunnels instead of fast-forwarding." % _TIME_SCALE_MAX
+	return out
+
+
+## Advance an exact number of frames, then answer. Deterministic where `wait` is
+## not: the same call advances the same amount of simulation on every machine.
+func _start_step_frames(rid: String, args: Dictionary) -> void:
+	var requested := int(args.get("frames", 1))
+	if requested < 1:
+		_send_async_result(rid, false, {"error": "'frames' must be at least 1"})
+		return
+	var mode := str(args.get("mode", "physics")).to_lower()
+	if mode != "physics" and mode != "process":
+		_send_async_result(rid, false, {"error": "'mode' must be \"physics\" (default) or \"process\""})
+		return
+	var frames := mini(requested, _STEP_FRAMES_MAX)
+	_step_jobs.append({
+		"rid": rid, "mode": mode, "remaining": frames,
+		"frames": frames, "requested": requested,
+		"started_ms": Time.get_ticks_msec(),
+	})
+
+
+func _tick_step_jobs(mode: String) -> void:
+	if _step_jobs.is_empty():
+		return
+	var still_running: Array = []
+	for job in _step_jobs:
+		if str(job["mode"]) != mode:
+			still_running.append(job)
+			continue
+		job["remaining"] = int(job["remaining"]) - 1
+		if int(job["remaining"]) > 0:
+			still_running.append(job)
+			continue
+		var out := {
+			"frames": int(job["frames"]),
+			"mode": mode,
+			"elapsed_ms": Time.get_ticks_msec() - int(job["started_ms"]),
+		}
+		if int(job["requested"]) > int(job["frames"]):
+			out["clamped"] = true
+			out["requested"] = int(job["requested"])
+		_send_async_result(str(job["rid"]), true, out)
+	_step_jobs = still_running
+
+
+## Wait until a GDScript expression is true, rather than for a fixed time or a
+## specific signal. Compiled once, then evaluated once per physics frame.
+func _start_await_condition(rid: String, args: Dictionary) -> void:
+	var code := str(args.get("condition", ""))
+	if code.strip_edges().is_empty():
+		_send_async_result(rid, false, {"error": "Missing 'condition' (a GDScript expression, e.g. \"node.is_on_floor()\")"})
+		return
+
+	# Expression, NOT a compiled GDScript. Building a GDScript from a string
+	# inside a running game and calling reload() on it reports any parse error
+	# through the engine's global error handler, and when the game was launched
+	# from the editor that handler makes the debugger BREAK: the game freezes
+	# mid-call and the failure surfaces ~25s later as a disconnect. Measured both
+	# ways — the same bad source from a CLI-launched game returns cleanly in 0s,
+	# so it is the attached debugger, not the reload. Expression.parse returns an
+	# error code and a message and never involves the debugger at all. game_eval
+	# cannot use it (it needs statements) and is pre-checked in the editor
+	# instead; see validate_eval_snippet.
+	var expr := Expression.new()
+	var parse_err := expr.parse(code, ["tree", "node"])
+	if parse_err != OK:
+		_send_async_result(rid, false, {
+			"error": "Could not parse the condition: %s" % expr.get_error_text(),
+			"hint": "It is an expression, not a function body — write `node.is_on_floor()`, not `return node.is_on_floor()`. `tree` and `node` are in scope.",
+		})
+		return
+
+	var node_path := str(args.get("node_path", ""))
+	var node: Node = null
+	if not node_path.is_empty():
+		node = _resolve_runtime_node(node_path)
+		if node == null:
+			_send_async_result(rid, false, {"error": "Node not found: " + node_path})
+			return
+
+	var timeout_ms := clampi(int(args.get("timeout_ms", 5000)), 1, _AWAIT_CONDITION_MAX_MS)
+	_condition_jobs.append({
+		"rid": rid, "expression": expr, "node": node,
+		"deadline_ms": Time.get_ticks_msec() + timeout_ms,
+		"timeout_ms": timeout_ms,
+		"started_ms": Time.get_ticks_msec(),
+		"frames": 0, "last": null,
+	})
+
+
+func _tick_condition_jobs() -> void:
+	if _condition_jobs.is_empty():
+		return
+	var still_running: Array = []
+	var now := Time.get_ticks_msec()
+	for job in _condition_jobs:
+		job["frames"] = int(job["frames"]) + 1
+		var expr: Expression = job["expression"]
+		var value = expr.execute([get_tree(), job["node"]], null, false)
+		if expr.has_execute_failed():
+			# A parse-clean expression can still fail at runtime (a null node, a
+			# method that does not exist). Report it once and stop, rather than
+			# re-failing every frame until the timeout.
+			_send_async_result(str(job["rid"]), false, {
+				"error": "The condition failed while evaluating: %s" % expr.get_error_text(),
+				"frames_waited": int(job["frames"]),
+			})
+			continue
+		job["last"] = value
+		if _is_truthy(value):
+			_send_async_result(str(job["rid"]), true, {
+				"met": true,
+				"value": _serialize(value),
+				"frames_waited": int(job["frames"]),
+				"elapsed_ms": now - int(job["started_ms"]),
+			})
+			continue
+		if now >= int(job["deadline_ms"]):
+			# Not an error: "it never became true" is a result a test asserts on.
+			# The last value is included because that is what makes it debuggable.
+			_send_async_result(str(job["rid"]), true, {
+				"met": false,
+				"value": _serialize(value),
+				"frames_waited": int(job["frames"]),
+				"elapsed_ms": now - int(job["started_ms"]),
+				"note": "Condition never became true within timeout_ms; the last value it evaluated to is above.",
+			})
+			continue
+		still_running.append(job)
+	_condition_jobs = still_running
+
+
+## GDScript truthiness for the values a condition realistically returns. An empty
+## array or dictionary counts as false so `return get_tree().get_nodes_in_group("enemies")`
+## behaves the way the caller obviously meant.
+func _is_truthy(value) -> bool:
+	match typeof(value):
+		TYPE_NIL:
+			return false
+		TYPE_BOOL:
+			return value
+		TYPE_INT, TYPE_FLOAT:
+			return value != 0
+		TYPE_STRING, TYPE_STRING_NAME:
+			return not str(value).is_empty()
+		TYPE_ARRAY:
+			return not (value as Array).is_empty()
+		TYPE_DICTIONARY:
+			return not (value as Dictionary).is_empty()
+		_:
+			return value != null
 
 ## Shared node resolver: absolute paths (starting with "/") are looked up
 ## from tree.root; relative paths try current_scene first, then tree.root —
@@ -247,12 +473,32 @@ func _resolve_runtime_node(node_path: String) -> Node:
 ## — arbitrary code in your own running game — and runtime-only. Note: a RUNTIME
 ## error inside the snippet can't be caught from GDScript and will time out the call;
 ## the compile step is guarded, the execution is on you.
+##
+## The compile below is the second line of defence: the MCP server already tried
+## the same source in the editor (validate_eval_snippet), because a parse error
+## HERE breaks the attached debugger and freezes the game. This branch is what
+## catches it when no editor is connected, where the freeze cannot happen.
 func _game_eval(args: Dictionary) -> Dictionary:
 	var code := str(args.get("code", ""))
 	if code.strip_edges().is_empty():
 		return {"ok": false, "error": "Missing 'code' (a GDScript snippet; use `return X` for a result)"}
 	var node_path := str(args.get("node_path", ""))
 
+	var compiled := _compile_eval(code)
+	if not compiled.get("ok", false):
+		return compiled
+
+	var node = _resolve_runtime_node(node_path) if not node_path.is_empty() else null
+	var result = compiled["instance"].call("_mcp_eval", get_tree(), node)
+	return {"ok": true, "result": _serialize(result)}
+
+
+## Compile a GDScript snippet into a callable `_mcp_eval(tree, node)`.
+##
+## Shared by game_eval and await_condition: the latter compiles ONCE and then
+## calls the result every frame, so re-parsing per frame would be the whole cost
+## of the tool.
+func _compile_eval(code: String) -> Dictionary:
 	var src := "extends RefCounted\nfunc _mcp_eval(tree, node):\n"
 	for line in code.split("\n"):
 		src += "\t" + line + "\n"
@@ -265,10 +511,7 @@ func _game_eval(args: Dictionary) -> Dictionary:
 	var inst = gd.new()
 	if inst == null or not inst.has_method("_mcp_eval"):
 		return {"ok": false, "error": "Eval snippet did not compile into a runnable method"}
-
-	var node = _resolve_runtime_node(node_path) if not node_path.is_empty() else null
-	var result = inst.call("_mcp_eval", get_tree(), node)
-	return {"ok": true, "result": _serialize(result)}
+	return {"ok": true, "instance": inst}
 
 # =============================================================================
 # serialize_runtime_tree — snapshot the running scene tree to JSON

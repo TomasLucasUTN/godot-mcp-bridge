@@ -91,6 +91,7 @@ describe('Tool registry', () => {
     get_scene_hierarchy: 'Superseded by scene_tree_dump / read_scene.',
     get_scene_node_properties: 'Superseded by read_scene; see backlog 8c (it ignores its filter and dumps ~8k tokens).',
     set_scene_node_property: 'Superseded by modify_node_property / set_node_properties — advertising it would recreate a three-way naming collision.',
+    validate_eval_snippet: 'Called by the server on the agent\'s behalf, to compile a game_eval snippet in the editor before the game sees it (see precheckEvalSnippet).',
   };
 
   it('every wired handler is either advertised or declared internal', () => {

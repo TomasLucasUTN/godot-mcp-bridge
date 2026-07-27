@@ -171,6 +171,23 @@ func _test_validate_scripts() -> void:
 	_rm(good)
 	_rm(bad)
 
+	# validate_eval_snippet: the same compile, but for a game_eval snippet, and
+	# done HERE so the running game never sees code that does not parse (a parse
+	# error in the game breaks the attached debugger and freezes it).
+	var ok_snip = scr.validate_eval_snippet({"code": "return 1 + 1"})
+	_check(ok_snip.get("valid", false), "a compiling snippet validates")
+	var bad_snip = scr.validate_eval_snippet({"code": "var x = = 5"})
+	_check(not bad_snip.get("valid", true), "a broken snippet is rejected")
+	_check(bad_snip.get("error_code", 0) != 0, "and reports the compile error code")
+	# The snippet is a function BODY, so a bare statement must compile without
+	# the caller having to indent it — the wrapper does that.
+	_check(scr.validate_eval_snippet({"code": "var v = 2\nreturn v"}).get("valid", false),
+		"a multi-line body compiles unindented")
+	_check(not scr.validate_eval_snippet({"code": ""}).get("ok", true), "empty code is an error")
+	# The throwaway compile must not leave a script behind in the project.
+	_check(not FileAccess.file_exists("res://addons/godot_mcp/__mcp_snippet_1.gd"),
+		"validation leaves no script behind")
+
 	scr.free()
 
 # batch_scene_edit applies N ops with one load + one save, and stop_on_error
