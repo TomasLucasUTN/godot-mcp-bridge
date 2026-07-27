@@ -160,6 +160,13 @@ export async function handleDebugTool(
       const launchArgs: Record<string, unknown> = {
         project: projectPath ?? undefined,
         stopOnEntry: args.stop_on_entry === true,
+        // Godot's adapter reads this key directly and TOGGLES its
+        // skip-breakpoints flag when it disagrees with the current editor
+        // state: `if ((bool)args["noDebug"] != dbg->is_skip_breakpoints())
+        // dbg->debug_skip_breakpoints();`. Omitting it makes the outcome depend
+        // on whatever that flag happened to be, which is how a session could
+        // launch with breakpoints skipped and never stop at anything.
+        noDebug: false,
       };
       if (typeof args.scene === 'string' && args.scene.trim()) launchArgs.scene = args.scene.trim();
 
@@ -187,7 +194,7 @@ export async function handleDebugTool(
     }
 
     case 'debug_attach': {
-      await c.start('attach', { project: projectPath ?? undefined });
+      await c.start('attach', { project: projectPath ?? undefined, noDebug: false });
       return { attached: true, ...stateSummary(c) };
     }
 
