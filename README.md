@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![213 tools](https://img.shields.io/badge/tools-213-brightgreen)](#-what-can-it-do)
+[![225 tools](https://img.shields.io/badge/tools-225-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 213 tools that were
+server, live-tree edits that never clobber your unsaved work, and 225 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -137,7 +137,8 @@ More of what it does:
   AI exactly why the editor isn't connecting.
 - **Fast + robust** — `batch_execute` / `batch_scene_edit` cut N calls to one; heavy reads
   (`read_scene`, `scene_tree_dump`, `classdb_query`) take `max_depth`/`filter` to stay
-  token-cheap; only 35 tools load by default so the agent stays focused.
+  token-cheap; only 35 tools load by default so the agent stays focused. **Measured, not
+  claimed** — see below.
 - **Symbol-accurate refactoring** — `gd_rename` and `gd_references` go through Godot's
   language server, so they understand scope: renaming a local `speed` won't touch an
   unrelated class's `speed` the way a text search would. `gd_diagnostics` surfaces type
@@ -150,6 +151,7 @@ More of what it does:
   tells you up front whether C# can work here at all. The standard Godot build has no C#
   support: a `.cs` file saves fine, attaches to nothing, and fails silently. Better to
   find that out before writing any.
+- **Preset toolsets at startup** — `GODOT_MCP_TOOLSETS=runtime,debug` (or `all`) puts those tools in the FIRST tool list. Enabling one mid-session relies on the client re-fetching `list_tools`, and several clients cache it for the session; presetting sidesteps that entirely.
 - **Opt-in confirmation gate** — set `GODOT_MCP_REQUIRE_CONFIRM=true` and operations with
   no undo path (file deletes/renames, script rewrites, mass renames, project settings)
   require an explicit `confirm: true`. Edits to an **open** scene are exempt — those do
@@ -179,6 +181,32 @@ silently taking the work.
 
 ---
 
+## 🧮 What it costs per request
+
+Tool definitions are sent on **every** request, so a large always-on surface is a
+standing tax on every message — the most common complaint about Godot MCP servers,
+and one nobody publishes a number for. Here is ours, from
+[`scripts/measure-tools.mjs`](./mcp-server/scripts/measure-tools.mjs) so you can
+re-run it:
+
+| | tools | ~tokens |
+|---|---:|---:|
+| **`core`** — what loads by default | 35 | **7,540** |
+| Everything, every toolset on | 225 | 45,132 |
+
+So the default surface is **16.7% of the full one**, and turning everything on
+costs roughly **37,600 extra tokens on every request**. That is the reason the
+default is small and the rest is opt-in per toolset (or preset once via
+`GODOT_MCP_TOOLSETS`), rather than a judgement that the other 190 tools do not
+matter.
+
+The estimate is chars ÷ 4, which is close enough to compare sets and honest about
+being an estimate. The most expensive definitions inside `core` are
+`modify_node_property`, `add_node` and `run_scene` — verbose because they carry
+the "use this, NOT that" wording that stops an agent picking the wrong neighbour.
+
+---
+
 ## 📊 How it compares
 
 Checked in July 2026 by reading each project's **source**, not its marketing. Star count
@@ -186,7 +214,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 213 (35 loaded by default) | 155 | 42 | ~14 |
+| Tools | 217 (35 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -298,6 +326,24 @@ Windows:
 claude mcp add godot -- npx -y godot-mcp-bridge
 ```
 
+**Codex CLI** — run in terminal:
+```bash
+codex mcp add godot -- npx -y godot-mcp-bridge
+```
+
+Or add it to `~/.codex/config.toml` by hand:
+```toml
+[mcp_servers.godot]
+command = "npx"
+args = ["-y", "godot-mcp-bridge"]
+```
+
+On Windows use `command = "cmd"` and `args = ["/c", "npx", "-y", "godot-mcp-bridge"]`.
+
+Codex CLI speaks stdio only — it cannot use an MCP server that is reachable
+solely over HTTP. This server is a stdio server, so it works there without a
+bearer token or a port to keep track of.
+
 Works with any MCP-compatible client (Cline, Windsurf, etc.)
 
 ### 3. Restart your AI client
@@ -312,7 +358,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 213 Tools, 35 Loaded by Default
+### 217 Tools, 35 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -375,7 +421,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 │  AI Client  │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
 │  (Claude,   │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
 │   Cursor)   │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  213 tool    │
+└─────────────┘                  │  Visualizer  │               │  225 tool    │
                                  │  HTTP :6510  │               │  handlers    │
                                  └──────┬───────┘               └──────────────┘
                                         │

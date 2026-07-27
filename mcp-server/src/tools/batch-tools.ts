@@ -9,7 +9,7 @@ export const batchTools: ToolDefinition[] = [
   {
     name: 'batch_execute',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Run a sequence of tool calls in ONE request instead of N separate round-trips. Each operation is {tool, args}. Operations run in order; each is subject to the same read-only-mode gating as a direct call. NOT a transaction — a scene tool inside still does its own load/save, and set stop_on_error to halt on the first failure. Cannot be nested. Returns {count, all_ok, results:[...]} where results[i] is the full response of operation i. Use to cut latency when applying many edits.',
+    description: 'Run a sequence of tool calls in ONE request instead of N separate round-trips. Each operation is {tool, args}. Operations run in order; each is subject to the same read-only-mode gating as a direct call. IMPORTANT: this dispatches inside the EDITOR, so it cannot reach runtime tools that live in the running game (take_screenshot, send_input, query_runtime_node, game_eval, step_frames, ...). Call those directly; batching them fails. NOT a transaction — a scene tool inside still does its own load/save, and set stop_on_error to halt on the first failure. Cannot be nested. Returns {count, all_ok, results:[...]} where results[i] is the full response of operation i. Use to cut latency when applying many edits.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,7 +40,7 @@ export const batchTools: ToolDefinition[] = [
   {
     name: 'batch_set_property',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Set the same property to the same value on multiple nodes in one scene, in a single call/save. Nodes that don\'t exist or lack the property are reported in "failed" without aborting the rest.',
+    description: 'Set ONE property to the SAME value across MANY nodes, in a single call and save. Pairs with find_nodes_by_type. NOT for several properties on one node (set_node_properties) and NOT for a single node (modify_node_property). Nodes that don\'t exist or lack the property are reported in "failed" without aborting the rest.',
     inputSchema: {
       type: 'object',
       properties: {

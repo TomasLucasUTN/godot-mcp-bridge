@@ -22,6 +22,15 @@ const AGENT_MAX_CALL_MS := 120000
 ## through get_editor_activity; this is only a nudge, so it stays cheap.
 const DIGEST_MAX := 5
 
+## Longest a single event's detail may be. Godot hands `resources_reimported` an
+## array of EVERY path it just imported, and this digest rides on every tool
+## response — so dropping an asset pack into the project made the next unrelated
+## tool call return 1.5 MB (~390,000 tokens). Measured, in the server whose whole
+## argument is that context is expensive. DIGEST_MAX caps how many events ride
+## along; nothing capped how big one could be.
+const DETAIL_MAX_ITEMS := 8
+const DETAIL_MAX_CHARS := 300
+
 ## Emitted for each HUMAN-sourced event as it happens, so the plugin can push it
 ## to the server instead of the server polling for it. Agent-sourced events are
 ## not emitted: the agent already knows what it did, and pushing them back would
@@ -53,12 +62,31 @@ func record(type: String, detail) -> void:
 	# Best-effort attribution: a human action within the grace window can be
 	# mis-tagged agent, and a very slow deferred signal can slip to human.
 	var source := "agent" if Time.get_ticks_msec() < _agent_deadline_ms else "human"
-	var event := {&"id": _seq, &"t_ms": Time.get_ticks_msec(), &"type": type, &"detail": detail, &"source": source}
+	var event := {&"id": _seq, &"t_ms": Time.get_ticks_msec(), &"type": type, &"detail": _clamp_detail(detail), &"source": source}
 	_ring.append(event)
 	if _ring.size() > CAP:
 		_ring = _ring.slice(_ring.size() - CAP)
 	if source == "human":
 		human_activity.emit(event)
+
+## Bound one event's detail. Keeps the shape (array stays an array, string stays
+## a string) so readers do not need a special case, and reports what was dropped
+## instead of silently truncating — "reimported 8 files" when it was 3,000 would
+## be a lie the agent cannot detect.
+func _clamp_detail(detail):
+	if detail is Array:
+		var arr: Array = detail
+		if arr.size() <= DETAIL_MAX_ITEMS:
+			return arr
+		var head: Array = arr.slice(0, DETAIL_MAX_ITEMS)
+		head.append("... and %d more (%d total)" % [arr.size() - DETAIL_MAX_ITEMS, arr.size()])
+		return head
+	if detail is String:
+		var s: String = detail
+		if s.length() <= DETAIL_MAX_CHARS:
+			return s
+		return s.substr(0, DETAIL_MAX_CHARS) + "... (%d chars)" % s.length()
+	return detail
 
 ## Events after `since_id` (0 = everything buffered), newest last. `source_filter`
 ## of "human"/"agent" narrows to that origin. `latest_id` lets a poller advance

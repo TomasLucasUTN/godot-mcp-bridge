@@ -34,6 +34,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve as resolvePath } from 'path';
 import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from './tools/index.js';
+import type { ToolDefinition } from './types.js';
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
 import { ActivityFeed, type ActivityEvent } from './activity-feed.js';
@@ -108,8 +109,55 @@ let activityFeed: ActivityFeed | undefined;
 // list_tools *shows* — executeToolCall below still executes any known tool
 // regardless of toolset state, so a client that already knows a tool name
 // (e.g. from a previous session) doesn't get a confusing hard failure.
-const activeToolsets = new Set<string>(['core']);
 const OPTIONAL_TOOLSET_NAMES = Object.keys(TOOLSETS).filter(name => name !== 'core');
+
+/**
+ * Toolsets to have on from the very first list_tools, from
+ * GODOT_MCP_TOOLSETS (comma-separated; "all" for everything).
+ *
+ * Why this exists: enabling a toolset mid-session only works if the client
+ * re-fetches list_tools. The server does send notifications/tools/list_changed,
+ * but several clients cache the list for the session and never ask again — and
+ * then the agent is stuck, because `enable_toolset`'s own advice ("call
+ * list_tools again") is a client action an agent cannot perform. Measured on a
+ * real session: after enable_toolset('runtime') the runtime tools stayed
+ * unreachable for the rest of the session.
+ *
+ * Presetting sidesteps the refresh entirely — the tools are simply there. A user
+ * who always drives the running game puts `runtime` here once, in their client
+ * config, and never thinks about it again.
+ */
+export function initialToolsets(
+  // A parameter rather than a direct env read so the rule is testable without
+  // mutating process.env.
+  rawEnv: string = process.env.GODOT_MCP_TOOLSETS ?? '',
+): Set<string> {
+  const active = new Set<string>(['core']);
+  const raw = rawEnv.trim();
+  if (!raw) return active;
+
+  const unknown: string[] = [];
+  for (const token of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+    if (token === 'all') {
+      for (const name of OPTIONAL_TOOLSET_NAMES) active.add(name);
+    } else if (token === 'core' || OPTIONAL_TOOLSET_NAMES.includes(token)) {
+      active.add(token);
+    } else {
+      unknown.push(token);
+    }
+  }
+  // Warn rather than throw: a typo should not stop the server from starting,
+  // but it must not pass silently either or the user just sees missing tools.
+  if (unknown.length > 0) {
+    console.error(
+      `[godot-mcp-bridge] GODOT_MCP_TOOLSETS: ignoring unknown toolset(s) ${unknown.join(', ')}. ` +
+      `Valid: core, all, ${OPTIONAL_TOOLSET_NAMES.join(', ')}`
+    );
+  }
+  return active;
+}
+
+const activeToolsets = initialToolsets();
 
 // Tools that write to a scene file and thus can leave dangling resource
 // references behind (empty CollisionShape2D.shape, etc.). After one of
@@ -168,6 +216,91 @@ export function needsConfirmation(
   if (name === 'gd_rename' && args.apply !== true) return false;
   if (name === 'delete_file') return false;
   return true;
+}
+
+/**
+ * Arguments every tool tolerates regardless of its own schema.
+ *
+ * `confirm` is the confirmation gate's, and only `delete_file` declares it —
+ * without this the gate would be unusable on the other eight irreversible
+ * tools the moment unknown arguments started being rejected.
+ */
+const UNIVERSAL_ARGS = new Set(['confirm']);
+
+/** Levenshtein, bounded — only used to suggest a key the caller probably meant. */
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+/**
+ * Refuse a call that passes an argument the tool does not declare.
+ *
+ * Silently dropping them is how three separate mistakes went wrong in one
+ * session, each surfacing somewhere unrelated:
+ *   - `create_animation({player_path})` used the default node and reported
+ *     "Node '.' is CharacterBody2D, expected AnimationPlayer".
+ *   - `compare_screenshots({image_a, image_b})` reported
+ *     "Could not load image: res://__mcp_rejected_path__" — the path guard
+ *     complaining about a default, not about the two keys that do not exist.
+ * The agent then debugs the wrong thing. Naming the nearest valid key turns a
+ * confusing chain into one obvious correction.
+ *
+ * Deliberately not a full JSON-Schema validation: types and required fields are
+ * the handler's business and it reports them better. This is only about keys
+ * that will be thrown away.
+ */
+export function unknownArgumentError(
+  name: string,
+  args: Record<string, unknown>,
+  toolLookup: (n: string) => ToolDefinition | undefined = (n) => allTools.find((t) => t.name === n),
+): ToolCallResult | null {
+  const tool = toolLookup(name);
+  const schema = tool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+  // No schema, or a schema that declares no properties at all: nothing to
+  // check against, and guessing would reject legitimate calls.
+  if (!schema?.properties) return null;
+
+  const declared = Object.keys(schema.properties);
+  if (declared.length === 0) return null;
+
+  const unknown = Object.keys(args).filter((k) => !declared.includes(k) && !UNIVERSAL_ARGS.has(k));
+  if (unknown.length === 0) return null;
+
+  const suggestions: Record<string, string> = {};
+  for (const key of unknown) {
+    let best: string | undefined;
+    let bestScore = Infinity;
+    for (const candidate of declared) {
+      const d = editDistance(key.toLowerCase(), candidate.toLowerCase());
+      if (d < bestScore) { bestScore = d; best = candidate; }
+    }
+    // Only suggest when it is plausibly a typo rather than a different idea.
+    if (best && bestScore <= Math.max(3, Math.ceil(best.length / 2))) suggestions[key] = best;
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ok: false,
+        error: `Unknown argument(s) for '${name}': ${unknown.join(', ')}.`,
+        did_you_mean: Object.keys(suggestions).length > 0 ? suggestions : undefined,
+        accepted_arguments: declared,
+        hint: 'The call was refused rather than run with those values dropped — a dropped argument fails later, somewhere unrelated.',
+      }),
+    }],
+    isError: true,
+  };
 }
 
 function confirmationBlock(name: string, args: Record<string, unknown>): ToolCallResult | null {
@@ -243,7 +376,14 @@ async function executeToolCall(
           ok: true,
           toolset: toolsetName,
           enabled: activeToolsets.has(toolsetName),
-          hint: 'Call list_tools again to see the updated tool list.',
+          // Do NOT advise "call list_tools again": that is a CLIENT action, and an
+          // agent cannot perform it. Several clients cache the list for the whole
+          // session, so on those the newly enabled tools stay unreachable no matter
+          // how many times the agent asks. GODOT_MCP_TOOLSETS is the fix that works
+          // without the client cooperating.
+          hint: activeToolsets.has(toolsetName)
+            ? 'Enabled for this server. Your client may have cached the tool list at startup — if these tools stay unreachable, preset them with GODOT_MCP_TOOLSETS in the client config instead of enabling them mid-session.'
+            : 'Disabled for this server.',
         }),
       }],
     };
@@ -317,8 +457,11 @@ async function executeToolCall(
     };
   }
 
-  // Checked before any dispatch path so it covers addon tools, LSP tools and
-  // debugger tools alike.
+  // Both checks sit before any dispatch path so they cover addon tools, LSP
+  // tools and debugger tools alike.
+  const unknownArgs = unknownArgumentError(name, toolArgs);
+  if (unknownArgs) return unknownArgs;
+
   const blocked = confirmationBlock(name, toolArgs);
   if (blocked) return blocked;
 
@@ -362,7 +505,32 @@ async function executeToolCall(
       { check: 'WebSocket bridge listening', ok: listening, detail: `port ${WEBSOCKET_PORT}` },
       { check: 'Godot editor connected', ok: status.connected, detail: status.connected ? `${status.projectPath || 'connected'} since ${status.connectedAt?.toISOString()}` : 'no editor on the bridge' },
     ];
+
+    // The runtime helper is a separate connection, and it used to be invisible
+    // here: with a game running and MCPRuntime absent, this answered "healthy"
+    // while every runtime tool refused. Reported rather than failed, because a
+    // session that never runs the game is perfectly healthy without it.
+    const runtimeConnected = status.runtimeConnected === true;
+    checks.push({
+      check: 'Runtime helper (in-game) connected',
+      // Not a failure on its own: a session that never runs the game is
+      // perfectly healthy without it. Reported because it used to be invisible —
+      // with a game running and MCPRuntime absent this answered "healthy" while
+      // every runtime tool refused.
+      ok: runtimeConnected,
+      detail: runtimeConnected
+        ? 'MCPRuntime is on the bridge; runtime tools will run'
+        : 'not connected — expected if no game is running. If one IS running, runtime tools will refuse; see runtime_remedies.',
+    });
+
     const healthy = status.connected && listening;
+    const runtimeRemedies = runtimeConnected ? [] : [
+      'Only relevant if a game is actually running (check is_playing).',
+      'Confirm the MCPRuntime autoload exists: Project Settings > Autoload should list MCPRuntime -> res://addons/godot_mcp/runtime/mcp_runtime.gd. The plugin adds it when enabled.',
+      "Read the game's OWN log — user://logs/godot*.log under the project's app_userdata folder. The editor Output panel shows the EDITOR's messages, not the game's, which is a trap when diagnosing this.",
+      `Launch the game straight from a terminal (Godot --path <project> <scene>): it connects to port ${WEBSOCKET_PORT} the same way, which separates a launch problem from a runtime-code problem.`,
+    ];
+
     const remedies = healthy ? [] : [
       `Open your project in the Godot editor — the plugin auto-connects to port ${WEBSOCKET_PORT} on load.`,
       'Enable the plugin: Project > Project Settings > Plugins > "Godot MCP" checkbox ON.',
@@ -381,14 +549,16 @@ async function executeToolCall(
           websocket_port: WEBSOCKET_PORT,
           http_bridge_port: HTTP_PORT,
           editor_connected: status.connected,
+          runtime_connected: runtimeConnected,
           project_path: status.projectPath || null,
           connected_at: status.connectedAt?.toISOString() || null,
           pending_requests: status.pendingRequests,
           checks,
           message: healthy
-            ? 'Connection healthy — the editor is connected and tools will run.'
+            ? `Editor connected and tools will run.${runtimeConnected ? ' The in-game helper is connected too.' : ' The in-game helper is NOT connected — fine unless a game is running.'}`
             : 'Editor not connected. Work through the remedies in order; the first that applies usually fixes it.',
-          ...(healthy ? {} : { remedies }),
+          ...(remedies.length > 0 ? { remedies } : {}),
+          ...(runtimeRemedies.length > 0 ? { runtime_remedies: runtimeRemedies } : {}),
         })
       }]
     };
@@ -463,6 +633,20 @@ async function executeToolCall(
         console.error(`[${SERVER_NAME}] Auto integrity check failed for ${name}:`, integrityError);
         resultPayload = { ...resultPayload, _integrity_check: { ok: false, error: 'Automatic integrity check could not run.' } };
       }
+    }
+
+    // A live-tree edit is not on disk yet. That is the whole point — it is what
+    // keeps the developer's unsaved work from being clobbered — but it means
+    // running the game right afterwards tests the file as it was BEFORE the
+    // edit. Tools reported `live_editor_scene: true` and left the agent to
+    // infer the rest, which cost a debugging session chasing a HUD that had
+    // been instanced successfully and simply was not in the running game.
+    if (resultPayload && resultPayload.live_editor_scene === true && resultPayload.ok !== false) {
+      resultPayload = {
+        ...resultPayload,
+        unsaved: true,
+        _hint: 'This edit is in the editor only — the .tscn on disk is unchanged. Call save_scene before run_scene, or the game will load the previous version.',
+      };
     }
 
     return {

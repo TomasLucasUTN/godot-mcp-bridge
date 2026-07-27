@@ -120,7 +120,7 @@ export const lspTools: ToolDefinition[] = [
   {
     name: 'gd_lsp_status',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Report whether the language server is reachable and which capabilities it advertises. Call this first when an LSP tool behaves unexpectedly — Godot supports fewer LSP features than a typical language server.',
+    description: "Report whether the language server is reachable and what it advertises: supported_capabilities, which gd_* tools that makes available (tools_available / tools_unavailable), and unwrapped_capabilities — anything this Godot supports that has no tool here. Call it first when an LSP tool behaves unexpectedly; Godot implements far fewer LSP features than a typical language server, so 'not supported' is usually the engine's limit rather than a bug.",
     inputSchema: { type: 'object', properties: {} }
   }
 ];

@@ -78,6 +78,37 @@ describe('Tool registry', () => {
     expect(missing).toEqual([]);
   });
 
+  // The other direction. The test above proves nothing advertised is unreachable;
+  // this proves nothing REACHABLE is invisible. Four handlers were wired and had
+  // no schema, so no client could ever call them — they were being exercised only
+  // through batch_execute, which is how they stayed unnoticed.
+  //
+  // A handler that is deliberately internal has to be named here, with a reason.
+  // That makes the choice explicit at the moment someone adds one, instead of a
+  // tool going dark and nobody finding out.
+  const INTENTIONALLY_INTERNAL: Record<string, string> = {
+    map_scenes: 'Backs the interactive visualizer; the agent uses map_project.',
+    get_scene_hierarchy: 'Superseded by scene_tree_dump / read_scene.',
+    get_scene_node_properties: 'Superseded by read_scene; see backlog 8c (it ignores its filter and dumps ~8k tokens).',
+    set_scene_node_property: 'Superseded by modify_node_property / set_node_properties — advertising it would recreate a three-way naming collision.',
+  };
+
+  it('every wired handler is either advertised or declared internal', () => {
+    const executorTools = getExecutorToolNames();
+    const advertised = new Set(allTools.map(t => t.name));
+    const dark = [...executorTools]
+      .filter(name => !advertised.has(name) && !(name in INTENTIONALLY_INTERNAL));
+
+    expect(dark, 'wired but invisible to every client — advertise it, delete it, or declare it internal').toEqual([]);
+  });
+
+  it('the internal list does not name tools that are actually advertised', () => {
+    // Keeps the list from rotting into a lie once one of these gets a schema.
+    const advertised = new Set(allTools.map(t => t.name));
+    const contradictions = Object.keys(INTENTIONALLY_INTERNAL).filter(n => advertised.has(n));
+    expect(contradictions).toEqual([]);
+  });
+
   it('every name the server-side dispatchers claim is actually advertised', () => {
     // The reverse guard. The test above proves no advertised tool is unreachable;
     // this one proves the exemption sets aren't hiding a tool that was renamed or

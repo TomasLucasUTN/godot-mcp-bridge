@@ -24,6 +24,84 @@ export function isLspTool(name: string): boolean {
 
 const LSP_PORT = Number(process.env.GODOT_MCP_LSP_PORT) || DEFAULT_LSP_PORT;
 
+/**
+ * The LSP capability each of our tools needs, so drift is visible in both
+ * directions.
+ *
+ * Godot's GDScript server implements far less than a typical language server —
+ * `workspaceSymbolProvider`, `codeActionProvider`, `documentFormattingProvider`,
+ * `typeDefinitionProvider` and `implementationProvider` are all hardcoded false
+ * in `godot_lsp.h`, and call hierarchy does not exist at all. That is why this
+ * server wraps six LSP features rather than twenty: the rest would be tools that
+ * always answer "not supported".
+ *
+ * But that is a fact about the Godot version in front of us, not a permanent
+ * one. If a later Godot turns one of them on, nothing would have told us — so
+ * `gd_lsp_status` reports what the server advertises that we do NOT wrap.
+ */
+const CAPABILITY_TOOLS: Record<string, string> = {
+  definitionProvider: 'gd_definition',
+  referencesProvider: 'gd_references',
+  renameProvider: 'gd_rename',
+  hoverProvider: 'gd_hover',
+  documentSymbolProvider: 'gd_document_symbols',
+  completionProvider: 'gd_completion',
+};
+
+/** True when the server advertised this capability (bool true, or an options object). */
+function advertises(capabilities: Record<string, unknown>, key: string): boolean {
+  const v = capabilities[key];
+  return v === true || (typeof v === 'object' && v !== null);
+}
+
+/**
+ * What the connected language server can do, what we expose for it, and — the
+ * point of this — anything it gained that we have not wrapped.
+ */
+export function summarizeLspCapabilities(capabilities: Record<string, unknown>): {
+  supported_capabilities: string[];
+  tools_available: string[];
+  tools_unavailable: string[];
+  unwrapped_capabilities: string[];
+  note: string;
+} {
+  const supported = Object.keys(capabilities).filter((k) => advertises(capabilities, k));
+
+  const available: string[] = [];
+  const unavailable: string[] = [];
+  for (const [cap, tool] of Object.entries(CAPABILITY_TOOLS)) {
+    (advertises(capabilities, cap) ? available : unavailable).push(tool);
+  }
+
+  // Only `*Provider` keys are feature flags; the rest (textDocumentSync and
+  // friends) are transport details and would be noise here.
+  const unwrapped = supported
+    .filter((k) => k.endsWith('Provider') && !CAPABILITY_TOOLS[k])
+    .sort();
+
+  let note: string;
+  if (supported.length === 0) {
+    note = 'The language server has not completed a handshake yet, so nothing is known about its capabilities.';
+  } else if (unwrapped.length > 0) {
+    note =
+      `This Godot advertises ${unwrapped.length} LSP capability/ies with no tool here: ${unwrapped.join(', ')}. ` +
+      'That is worth reporting — it means Godot gained a feature this server could expose and does not.';
+  } else {
+    note =
+      'Every LSP capability this Godot advertises is wrapped by a tool. Godot implements far fewer ' +
+      'features than a typical language server (no workspace symbols, code actions, formatting, ' +
+      'implementations or type definitions), so a small tool count here is the engine\'s limit, not a gap.';
+  }
+
+  return {
+    supported_capabilities: supported,
+    tools_available: available,
+    tools_unavailable: unavailable,
+    unwrapped_capabilities: unwrapped,
+    note,
+  };
+}
+
 let client: LspClient | null = null;
 
 function getClient(): LspClient {
@@ -214,16 +292,7 @@ export async function handleLspTool(
         error = err instanceof Error ? err.message : String(err);
       }
     }
-    const supported = Object.entries(c.capabilities)
-      .filter(([, v]) => v === true || (typeof v === 'object' && v !== null))
-      .map(([k]) => k);
-    return {
-      reachable,
-      port: LSP_PORT,
-      error,
-      supported_capabilities: supported,
-      note: 'Godot supports fewer LSP features than a typical language server — no workspace symbols, code actions, formatting, folding ranges, implementations or type definitions.',
-    };
+    return { reachable, port: LSP_PORT, error, ...summarizeLspCapabilities(c.capabilities) };
   }
 
   const rawPath = String(args.path ?? '').trim();
