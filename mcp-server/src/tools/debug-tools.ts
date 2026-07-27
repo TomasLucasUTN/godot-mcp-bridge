@@ -18,7 +18,7 @@ export const debugTools: ToolDefinition[] = [
   {
     name: 'debug_launch',
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    description: 'Start a debug session: launch the project (or a specific scene) under Godot\'s debug adapter so breakpoints hit. Set breakpoints FIRST with debug_set_breakpoints — they are buffered and applied during the launch handshake. Returns the session state; if a breakpoint is hit immediately, state is "stopped".',
+    description: 'KNOWN LIMITATION (1.1.3): the session connects and Godot accepts and VERIFIES breakpoints, but execution does not actually pause at them - tested against a line that runs every frame, against _ready, and with stop_on_entry. Under investigation; until it is fixed, inspect a running game with get_runtime_log, game_eval and query_runtime_node instead. Start a debug session: launch the project (or a specific scene) under Godot\'s debug adapter. Set breakpoints FIRST with debug_set_breakpoints — they are buffered and applied during the launch handshake. Returns the session state; if a breakpoint is hit immediately, state is "stopped".',
     inputSchema: {
       type: 'object',
       properties: {

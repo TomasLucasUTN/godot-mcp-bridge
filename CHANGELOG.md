@@ -5,6 +5,80 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.1.3] - 2026-07-27
+
+See [`release-notes/v1.1.3.md`](./release-notes/v1.1.3.md). Most of this came out
+of two things: finishing the automated coverage of every mutating tool, and
+hand-testing the 28 tools added since the original 185-tool pass.
+
+### Known limitation
+- **Breakpoints do not pause the game.** `debug_launch` starts a session,
+  `debug_status` reports the adapter connected, and Godot accepts *and verifies*
+  each breakpoint (`verified: true`, with source checksums) — but execution never
+  stops. Reproduced against a line that runs every frame, against `_ready`, and
+  with `stop_on_entry`. Every downstream tool (`debug_stack_trace`,
+  `debug_variables`, …) then correctly refuses because nothing is paused. Found
+  by hand-testing; cause not yet identified. The `debug` toolset's descriptions
+  now say so instead of promising otherwise, and the swallowed error that hid it
+  is gone. Inspect a running game with `get_runtime_log`, `game_eval` and
+  `query_runtime_node` in the meantime.
+
+### Fixed
+- **Every analysis tool was reading the last SAVED scene.** `analysis_tools` was
+  the one tool node the executor never called `set_editor_plugin` on, so
+  `_edited_root_if_open` could never find the live tree. `scene_diff` reported
+  "no changes" for an edit sitting unsaved in the editor — the same stale-read
+  class eleven read tools were fixed for in 1.1.1, reintroduced by a new file
+  being wired in without that one line. A test now asserts the wiring itself.
+- **`close_scene_tab` was broken on Godot 4.5**, the advertised minimum:
+  `EditorInterface.get_unsaved_scenes()` is 4.6+, so calling it aborted the
+  handler and the caller got "Tool returned no status". Where that API is
+  missing there is no way to ask which scenes are dirty, so `force` is now
+  required explicitly rather than risking a tab holding unsaved work. Caught by
+  the new two-version CI matrix on its first real run.
+- **`remove_state_machine_transition` never worked** — it called
+  `find_transition()`, which does not exist on `AnimationNodeStateMachine`. The
+  handler aborted mid-edit and returned an empty dictionary: no `ok`, no `error`,
+  undo action left open.
+- **Vector properties rejected `[x, y]` arrays.** `{x, y}` is canonical, but an
+  agent that just wrote `position: [100, 100]` elsewhere reasonably tries an
+  array — and `set_node_properties` passed it straight to `node.set()`, which
+  no-ops on a type mismatch, so the caller got "set had no effect (type
+  mismatch?)". The shared codec now accepts arrays wherever a type hint asks for
+  a vector, and `set_node_properties` passes each property's declared type so the
+  hint exists at all. Same fix applied to tilemap coordinates (which silently
+  painted at `(0, 0)`) and navmesh outlines.
+- **A `res://` path for a Resource-typed property silently did nothing.**
+  Assigning a resource by path is what `attach_script`, `set_sprite_texture` and
+  `assign_shader_material` all take; `set_node_properties` now loads it, and says
+  clearly if the path is missing or fails to load.
+- **Painting a tilemap cell with no TileSet reported plain success.** The cells
+  are stored but nothing can render them. Refusing would break assigning the
+  TileSet afterwards, so `tilemap_set_cell` and `tilemap_fill_rect` now warn —
+  and the warning disappears once a TileSet is assigned.
+
+### Added
+- **`scene_diff`** — "what changed since I last looked", without re-reading the
+  tree. One call takes a snapshot and returns an id (no tree sent); the next
+  returns only added/removed/modified nodes with per-property before/after. It
+  compares the actual tree, so the developer's edits are caught like the agent's.
+- **`mp_diagnose`** — finds the multiplayer mistakes that fail silently: an
+  `.rpc()` call to a method with no `@rpc` annotation, a `MultiplayerSynchronizer`
+  replicating nothing, a `MultiplayerSpawner` with no spawnable scenes or an
+  unresolvable `spawn_path`. Static analysis; the game is never run.
+- **Editor activity is now pushed, not polled.** The addon sends each human
+  action over the existing socket as it happens, so the activity resource
+  notifies immediately instead of waiting for a 1.5s tick. Polling remains as a
+  fallback for older addons and backs off to a 30s heartbeat once a push arrives.
+- **The activity resource leads with intent**, not records: "The developer saved
+  levels/one.tscn and changed the selection 12 times." Selection churn collapses
+  to a count; saves, script edits, reimports and undo are named.
+- **Automated coverage for every mutating tool: 99 of 99** (was 52 at the start
+  of this cycle). The GDScript suite goes 285 → 358 assertions; the live harness
+  28 → 31. Tools that need a real editor moved to the live harness; ones that
+  cannot do their real work in CI (`export_project`, the headless-peer tools)
+  assert their refusal contract instead.
+
 ## [1.1.2] - 2026-07-27
 
 See [`release-notes/v1.1.2.md`](./release-notes/v1.1.2.md) for the narrative

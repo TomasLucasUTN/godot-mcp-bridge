@@ -217,7 +217,7 @@ export const TOOLSET_DESCRIPTIONS: Record<string, string> = {
   export: 'Build and ship: export presets and async export jobs.',
   refactor: 'Project-wide renames, bulk property edits, file moves.',
   code_intel: "Symbol-accurate navigation, renames and type diagnostics from Godot's GDScript language server.",
-  debug: "Breakpoint debugging over Godot's Debug Adapter: stop the game and read real stack frames and variable values.",
+  debug: "Godot Debug Adapter session. KNOWN LIMITATION in 1.1.3: it connects and Godot verifies breakpoints, but execution does not pause at them - inspect a running game with get_runtime_log / game_eval / query_runtime_node instead.",
   animation: 'AnimationPlayer tracks/keyframes and AnimationTree state machines.',
   physics: 'Collision shapes, raycasts, physics layers (by name or index), collision presets.',
   audio: 'AudioStreamPlayer nodes and buses.',

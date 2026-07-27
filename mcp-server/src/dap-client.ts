@@ -248,7 +248,12 @@ export class DapClient extends EventEmitter {
     const startRequest = this.request(mode, args);
     await initialized;
     for (const path of this.breakpoints.keys()) {
-      await this.applyBreakpoints(path).catch(() => undefined);
+      // Do NOT swallow this. A rejected setBreakpoints is the difference
+      // between "your breakpoint is set" and "your breakpoint will never hit",
+      // and hiding it makes that indistinguishable from a working session.
+      await this.applyBreakpoints(path).catch((err) => {
+        this.emit('breakpoint_error', { path, error: String(err) });
+      });
     }
     await this.request('configurationDone', {}).catch(() => undefined);
     this.configured = true;
