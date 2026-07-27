@@ -220,7 +220,7 @@ export const TOOLSET_DESCRIPTIONS: Record<string, string> = {
   export: 'Build and ship: export presets and async export jobs.',
   refactor: 'Project-wide renames, bulk property edits, file moves.',
   code_intel: "Symbol-accurate navigation, renames and type diagnostics from Godot's GDScript language server.",
-  debug: "Godot Debug Adapter session. KNOWN LIMITATION in 1.1.4: it connects and Godot verifies breakpoints, but execution does not pause at them - inspect a running game with get_runtime_log / game_eval / query_runtime_node instead.",
+  debug: "Step-debug the running game through Godot's own Debug Adapter: breakpoints, stepping, call stack, scope variables, and expression evaluation in the paused frame. If a verified breakpoint never pauses, check the editor's \"Skip Breakpoints\" toggle in the Debugger panel — it silences every breakpoint from every source.",
   animation: 'AnimationPlayer tracks/keyframes and AnimationTree state machines.',
   physics: 'Collision shapes, raycasts, physics layers (by name or index), collision presets.',
   audio: 'AudioStreamPlayer nodes and buses.',
