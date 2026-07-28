@@ -45,6 +45,7 @@ func _initialize() -> void:
 	_test_validate_script_sees_project_context()
 	_test_properties_apply_after_script_attaches()
 	_test_set_node_reference()
+	_test_validate_scripts_sweep()
 	_test_tilemap_cells()
 	_test_animation_authoring()
 	_test_script_rewrites()
@@ -1037,6 +1038,38 @@ func bad():
 	# The temp compile must not leave files behind next to the real ones.
 	_check(not FileAccess.file_exists("res://addons/godot_mcp/tools/__mcp_validate_1.gd"),
 		"no throwaway validation file written to disk")
+	scr.free()
+
+
+# The plural sweep. It shares _validate_one, so the false positives are already
+# covered — what is tested here is the sweep's own behaviour: what it reports for
+# a broken file (a bare error_code with an empty errors array told the caller
+# nothing), and that it does not walk the whole addon by default. Validation
+# costs ~34ms per script on the editor's main thread, so an unbounded sweep on a
+# large project can approach the bridge's 20s watchdog.
+func _test_validate_scripts_sweep() -> void:
+	print("\n[validate_scripts — sweep]")
+	var scr = preload("res://addons/godot_mcp/tools/script_tools.gd").new()
+
+	var bad := "res://__gdtest_sweep_broken.gd"
+	_write_text(bad, "extends Node\n\nfunc hi() -> void\n\tpass\n")
+	var r: Dictionary = scr.validate_scripts({"paths": [bad]})
+	_check(int(r.get("invalid_count", 0)) == 1, "an explicit path list reports the broken file")
+	var entry: Dictionary = r.get("invalid", [{}])[0]
+	_check(entry.has("message"), "the invalid entry carries a message")
+	_check(not str(entry.get("message", "")).is_empty(), "and the message is not empty")
+	_check(r.has("elapsed_ms"), "the sweep reports its own cost")
+	_rm(bad)
+
+	# addons/ is the bulk of most projects and is not the caller's code.
+	var own: Dictionary = scr.validate_scripts({})
+	var with_addons: Dictionary = scr.validate_scripts({"include_addons": true})
+	_check(int(own.get("total", 0)) < int(with_addons.get("total", 0)),
+		"the default sweep skips addons/ and include_addons brings them back")
+	for e in own.get("invalid", []):
+		_check(not str(e.get("path", "")).begins_with("res://addons/"),
+			"no addon path in the default sweep")
+
 	scr.free()
 
 

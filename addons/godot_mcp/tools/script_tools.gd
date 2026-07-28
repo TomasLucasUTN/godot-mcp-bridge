@@ -430,6 +430,7 @@ func _strip_class_name(source: String) -> String:
 ## every broken script at once instead of N separate calls.
 func validate_scripts(args: Dictionary) -> Dictionary:
 	var paths_arg = args.get(&"paths", [])
+	var include_addons: bool = bool(args.get(&"include_addons", false))
 	var targets: Array = []
 
 	if paths_arg is Array and not paths_arg.is_empty():
@@ -444,23 +445,50 @@ func validate_scripts(args: Dictionary) -> Dictionary:
 				return {&"ok": false, &"error": "File not found: " + gp}
 	else:
 		_collect_gd_files("res://", targets)
+		# addons/ is skipped by default. Validating a whole project costs ~34ms
+		# per script on the editor's main thread, and plugin code is usually the
+		# bulk of it — on a big project the sweep can outlast the bridge's own
+		# 20s ping watchdog and kill the connection it is reporting through, the
+		# same way find_unused_resources used to. You did not write the addons;
+		# pass include_addons when you actually want them checked.
+		if not include_addons:
+			var own: Array = []
+			for t: String in targets:
+				if not t.begins_with("res://addons/"):
+					own.append(t)
+			targets = own
 
 	if targets.is_empty():
 		return {&"ok": true, &"total": 0, &"invalid_count": 0, &"invalid": [], &"message": "No .gd scripts to validate."}
 
+	var started := Time.get_ticks_msec()
 	var invalid: Array = []
 	for t: String in targets:
 		var r := _validate_one(t)
 		if not r.get(&"valid", false):
-			invalid.append({&"path": t, &"error_code": r.get(&"error_code"), &"errors": r.get(&"errors", [])})
+			# The MESSAGE, not just error_code: a bare code with an empty errors
+			# array is what made this tool's output useless to act on. The
+			# message always says something, even when the engine logged nothing.
+			invalid.append({
+				&"path": t,
+				&"errors": r.get(&"errors", []),
+				&"message": r.get(&"message", "Script has errors."),
+			})
 
-	return {
+	var elapsed := Time.get_ticks_msec() - started
+	var out := {
 		&"ok": true,
 		&"total": targets.size(),
 		&"invalid_count": invalid.size(),
 		&"invalid": invalid,
+		&"elapsed_ms": elapsed,
 		&"message": "Validated %d script(s): %d invalid." % [targets.size(), invalid.size()],
 	}
+	# Loud about its own cost, so a sweep that is creeping toward the watchdog is
+	# visible before it takes the connection down.
+	if elapsed > 8000:
+		out[&"warning"] = "This sweep took %.1fs on the editor's main thread. Pass an explicit 'paths' list to keep it fast; past ~20s the bridge's ping watchdog drops the connection mid-call." % (elapsed / 1000.0)
+	return out
 
 func _collect_gd_files(dir_path: String, out: Array, depth: int = 0) -> void:
 	if depth > 20:
