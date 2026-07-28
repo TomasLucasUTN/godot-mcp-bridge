@@ -162,8 +162,21 @@ More of what it does:
   no undo path (file deletes/renames, script rewrites, mass renames, project settings)
   require an explicit `confirm: true`. Edits to an **open** scene are exempt — those do
   land on Godot's undo history, so Ctrl+Z (or `undo_last`) already covers them.
-- **Pre-flight validation** — `validate_scripts` sweeps every `.gd`; `validate_scene_integrity`
-  flags nodes left with an empty required resource; `validate_meshes` catches empty geometry.
+- **Pre-flight validation** — `validate_scripts` sweeps every `.gd` (loading each the way
+  the editor does, so a script using an autoload isn't reported as broken);
+  `validate_scene_integrity` flags nodes left with an empty required resource — including
+  an instance whose script went missing, which otherwise just stops behaving with no error;
+  `validate_meshes` catches empty geometry.
+- **Look at a scene without running it** — `render_scene_preview` renders a 2D scene to a
+  PNG offscreen, auto-framed on its content. Checking whether a level's platforms line up
+  used to mean launching the game; now it doesn't, so it actually gets checked.
+- **Says when a write didn't land** — a property can exist, accept an assignment and still
+  hold something else (Godot clamps and coerces silently: a `TextureRect` asked for
+  `size.y = 6.667` keeps 16). Scene tools read back what they wrote and report the
+  mismatch instead of reporting success.
+- **Wires exported node slots** — `set_node_reference` points an `@export var target: Area2D`
+  at another node, the thing you'd otherwise do by dragging in the inspector and which no
+  value-based property tool can express.
 
 ---
 
@@ -399,21 +412,21 @@ via the `get_guide` tool, in browsable form.
 
 | Toolset | Tools | What it's for |
 |---------|-------|---------|
-| **core** *(always on)* | 35 | Look around (`read_scene`, `scene_tree_dump`, `search_project`, `classdb_query`), edit scenes/nodes (live-tree + undo, `batch_scene_edit`), scripts, run the game, read errors |
-| **runtime** | 25 | Drive the running game: input (keyboard/mouse/**gamepad/touch**), `game_eval`, live node/property access, `await_signal_runtime`, UI-by-text clicking + `assert_screen_text`, input record/replay, multiplayer + `spawn_headless_peers` |
+| **core** *(always on)* | 38 | Look around (`read_scene`, `scene_tree_dump`, `search_project`, `classdb_query`), edit scenes/nodes (live-tree + undo, `batch_scene_edit`, `set_node_reference`), scripts, run the game, **see a scene without running it** (`render_scene_preview`), read errors, `restart_editor` |
+| **runtime** | 29 | Drive the running game: input (keyboard/mouse/**gamepad/touch**), `game_eval`, live node/property access, `await_signal_runtime`, UI-by-text clicking + `assert_screen_text`, input record/replay, multiplayer + `spawn_headless_peers` |
 | **debug** | 11 | Step-debugger over Godot's own Debug Adapter: breakpoints, step over/in/out, call stack, scope variables, expression evaluation in the paused frame |
 | **code_intel** | 8 | Godot's language server: scope-aware `gd_definition`, `gd_references` and `gd_rename` (unlike text search), plus type diagnostics without running the game |
 | **scene_editing** | 14 | Deeper scene work: collision shapes, sprites/meshes/materials, groups, anchors, spatial queries |
 | **project_config** | 13 | Project settings, input map, autoloads, resources, `sync_localization` |
-| **animation** | 12 | AnimationPlayer tracks/keyframes, AnimationTree state machines |
-| **editor** | 11 | The editor itself: `get_editor_activity` (what *you* just did), selection, scene tabs, performance |
+| **animation** | 14 | AnimationPlayer tracks/keyframes, AnimationTree state machines |
+| **editor** | 14 | The editor itself: `get_editor_activity` (what *you* just did), selection, scene tabs, performance |
 | **physics** | 7 | Collision shapes, raycasts, layers **by name**, collision presets |
 | **tilemap** | 8 | TileMapLayer cell painting, terrain + deterministic bitwise autotiling |
-| **analysis** | 8 | `scene_diff` (what changed since you last looked, without re-reading the tree), `mp_diagnose` (silent multiplayer bugs), `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
-| **scaffolding** | 11 | `wire_signal`, `generate_onready_refs`, `scaffold_entity`, `scaffold_state_machine`, `create_csharp_script`, plus multiplayer: `mp_add_spawner`, `mp_add_synchronizer`, `mp_wire_rpc`, `mp_scaffold_lobby` |
+| **analysis** | 9 | `scene_diff` (what changed since you last looked, without re-reading the tree), `mp_diagnose` (silent multiplayer bugs), `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
+| **scaffolding** | 12 | `wire_signal`, `generate_onready_refs`, `scaffold_entity`, `scaffold_state_machine`, `create_csharp_script`, plus multiplayer: `mp_add_spawner`, `mp_add_synchronizer`, `mp_wire_rpc`, `mp_scaffold_lobby` |
 | **testing** | 6 | GUT test runner (sync/async), scene/mesh integrity validation, assertions |
 | **ui** | 6 | Theme resources, colors, stylebox overrides |
-| **3d** | 6 | Mesh instances, lighting presets, materials, environment, cameras, gridmaps |
+| **3d** | 9 | Mesh instances, lighting presets, materials, environment, cameras, gridmaps |
 | **shaders** | 6 | Create/read/edit GDShader, assign materials, set params |
 | **navigation** | 5 | NavigationRegion setup, mesh baking, agents, layers |
 | **vfx** | 5 | GPUParticles2D/3D, gradients, presets |

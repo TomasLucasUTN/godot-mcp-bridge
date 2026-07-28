@@ -274,6 +274,7 @@ the same rule the addon's tools follow.
 - Class-level property metadata: \`get_node_properties\` (with \`node_type\`)
 - Groups: \`set_node_groups\`, \`get_node_groups\`, \`find_nodes_in_group\`
 - Scripts on nodes: \`attach_script\`, \`detach_script\`
+- Wiring a node into another node's exported slot: \`set_node_reference\` (an \`@export var x: SomeNode\` takes an object, so the property tools cannot set it)
 - Resources on nodes: \`set_collision_shape\`, \`set_sprite_texture\`, \`set_mesh\`, \`set_material\`, \`set_resource_property\`, \`save_resource_to_file\`
 - Resource introspection: \`get_resource_info\`
 - Signals: \`list_signal_connections\` (source scene_file or runtime), \`connect_signal\`, \`disconnect_signal\`
@@ -289,6 +290,8 @@ the same rule the addon's tools follow.
 - Output / errors: \`get_console_log\`, \`get_errors\`, \`clear_console_log\`
 - Filesystem: \`rescan_filesystem\`, \`list_dir\`, \`read_file\`, \`search_project\`
 - Open in editor: \`open_in_godot\`
+- Look at a scene WITHOUT running it: \`render_scene_preview\` (renders to PNG offscreen, auto-framed)
+- Restart the editor: \`restart_editor\` (needed after adding an autoload or a new class_name — until it restarts, scripts using them fail to compile and nodes silently lose their exported properties)
 
 ## Running the game
 - Launch: \`run_scene\` (block_until_started, wait_for_runtime)
