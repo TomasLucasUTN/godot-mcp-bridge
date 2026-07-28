@@ -101,12 +101,6 @@ jobs:
       - name: Run GDScript handler tests
         run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/run_tests.gd
 
-      - name: Check send_input actually reaches Input
-        # Runs as a SCENE, not with -s: the Input singleton only advances its
-        # action state on real frames. send_input was once reported broken on
-        # the strength of a jump that never fired; this answers that in seconds.
-        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project res://tests/input_delivery.tscn
-
       # The live-scene half — scene open in the editor, tools mutating the real
       # node tree — is where this project's hardest invariants live (no clobber,
       # no partial write, undo actually registered). It only runs with a real
@@ -125,11 +119,6 @@ jobs:
         # the runtime-activity tests would fail for an environmental reason.
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Check scene rendering produces a real image
-        # Under xvfb because --headless uses the dummy driver: the viewport
-        # produces no image at all, so this would pass by rendering nothing.
-        run: xvfb-run -a ./godot --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/render_preview.gd
-
       - name: Run the live-scene e2e harness
         working-directory: mcp-server
         env:
@@ -138,3 +127,18 @@ jobs:
           npm ci
           npm run build
           xvfb-run -a npx vitest run src/tests/e2e-godot.test.ts
+
+      # Both of these run LAST on purpose. Each launches a Godot that loads the
+      # fixture, whose MCPRuntime autoload dials the bridge port, and the e2e
+      # harness above refuses to start when anything else is on 6505. Running
+      # them before it broke that suite in CI.
+      - name: Check send_input actually reaches Input
+        # Runs as a SCENE, not with -s: the Input singleton only advances its
+        # action state on real frames. send_input was once reported broken on
+        # the strength of a jump that never fired; this answers that in seconds.
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project res://tests/input_delivery.tscn
+
+      - name: Check scene rendering produces a real image
+        # Under xvfb because --headless uses the dummy driver: the viewport
+        # produces no image at all, so this would pass by rendering nothing.
+        run: xvfb-run -a ./godot --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/render_preview.gd
