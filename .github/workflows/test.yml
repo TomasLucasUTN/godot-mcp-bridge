@@ -26,6 +26,15 @@ jobs:
       - run: npm run build
       - run: npm test
 
+      # The GitHub About carries the tool count, and it drifted to fifteen
+      # releases out of date because nothing checked it. Read-only, so the
+      # default token is enough; it self-skips where gh is unavailable.
+      - name: Check the GitHub About is in step with the tool count
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/sync-about.mjs --check
+
   gdscript:
     # The Node suite exercises the bridge and the tool registry, but every
     # GDScript handler — the half that actually mutates scenes — only runs
@@ -118,3 +127,18 @@ jobs:
           npm ci
           npm run build
           xvfb-run -a npx vitest run src/tests/e2e-godot.test.ts
+
+      # Both of these run LAST on purpose. Each launches a Godot that loads the
+      # fixture, whose MCPRuntime autoload dials the bridge port, and the e2e
+      # harness above refuses to start when anything else is on 6505. Running
+      # them before it broke that suite in CI.
+      - name: Check send_input actually reaches Input
+        # Runs as a SCENE, not with -s: the Input singleton only advances its
+        # action state on real frames. send_input was once reported broken on
+        # the strength of a jump that never fired; this answers that in seconds.
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project res://tests/input_delivery.tscn
+
+      - name: Check scene rendering produces a real image
+        # Under xvfb because --headless uses the dummy driver: the viewport
+        # produces no image at all, so this would pass by rendering nothing.
+        run: xvfb-run -a ./godot --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/render_preview.gd

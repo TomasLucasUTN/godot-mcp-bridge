@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![225 tools](https://img.shields.io/badge/tools-225-brightgreen)](#-what-can-it-do)
+[![228 tools](https://img.shields.io/badge/tools-228-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 225 tools that were
+server, live-tree edits that never clobber your unsaved work, and 228 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -143,7 +143,7 @@ More of what it does:
   AI exactly why the editor isn't connecting.
 - **Fast + robust** — `batch_execute` / `batch_scene_edit` cut N calls to one; heavy reads
   (`read_scene`, `scene_tree_dump`, `classdb_query`) take `max_depth`/`filter` to stay
-  token-cheap; only 35 tools load by default so the agent stays focused. **Measured, not
+  token-cheap; only 38 tools load by default so the agent stays focused. **Measured, not
   claimed** — see below.
 - **Symbol-accurate refactoring** — `gd_rename` and `gd_references` go through Godot's
   language server, so they understand scope: renaming a local `speed` won't touch an
@@ -162,8 +162,21 @@ More of what it does:
   no undo path (file deletes/renames, script rewrites, mass renames, project settings)
   require an explicit `confirm: true`. Edits to an **open** scene are exempt — those do
   land on Godot's undo history, so Ctrl+Z (or `undo_last`) already covers them.
-- **Pre-flight validation** — `validate_scripts` sweeps every `.gd`; `validate_scene_integrity`
-  flags nodes left with an empty required resource; `validate_meshes` catches empty geometry.
+- **Pre-flight validation** — `validate_scripts` sweeps every `.gd` (loading each the way
+  the editor does, so a script using an autoload isn't reported as broken);
+  `validate_scene_integrity` flags nodes left with an empty required resource — including
+  an instance whose script went missing, which otherwise just stops behaving with no error;
+  `validate_meshes` catches empty geometry.
+- **Look at a scene without running it** — `render_scene_preview` renders a 2D scene to a
+  PNG offscreen, auto-framed on its content. Checking whether a level's platforms line up
+  used to mean launching the game; now it doesn't, so it actually gets checked.
+- **Says when a write didn't land** — a property can exist, accept an assignment and still
+  hold something else (Godot clamps and coerces silently: a `TextureRect` asked for
+  `size.y = 6.667` keeps 16). Scene tools read back what they wrote and report the
+  mismatch instead of reporting success.
+- **Wires exported node slots** — `set_node_reference` points an `@export var target: Area2D`
+  at another node, the thing you'd otherwise do by dragging in the inspector and which no
+  value-based property tool can express.
 
 ---
 
@@ -198,7 +211,7 @@ re-run it:
 | | tools | ~tokens |
 |---|---:|---:|
 | **`core`** — what loads by default | 35 | **7,540** |
-| Everything, every toolset on | 225 | 45,132 |
+| Everything, every toolset on | 228 | 45,132 |
 
 So the default surface is **16.7% of the full one**, and turning everything on
 costs roughly **37,600 extra tokens on every request**. That is the reason the
@@ -220,7 +233,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 225 (35 loaded by default) | 155 | 42 | ~14 |
+| Tools | 228 (38 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -379,11 +392,11 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 225 Tools, 35 Loaded by Default
+### 228 Tools, 38 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
-(35 tools)** is visible by default — the smallest set that carries a normal
+(38 tools)** is visible by default — the smallest set that carries a normal
 session end to end: look around, edit scenes and scripts, run the game, read the
 errors.
 
@@ -399,21 +412,21 @@ via the `get_guide` tool, in browsable form.
 
 | Toolset | Tools | What it's for |
 |---------|-------|---------|
-| **core** *(always on)* | 35 | Look around (`read_scene`, `scene_tree_dump`, `search_project`, `classdb_query`), edit scenes/nodes (live-tree + undo, `batch_scene_edit`), scripts, run the game, read errors |
-| **runtime** | 25 | Drive the running game: input (keyboard/mouse/**gamepad/touch**), `game_eval`, live node/property access, `await_signal_runtime`, UI-by-text clicking + `assert_screen_text`, input record/replay, multiplayer + `spawn_headless_peers` |
+| **core** *(always on)* | 38 | Look around (`read_scene`, `scene_tree_dump`, `search_project`, `classdb_query`), edit scenes/nodes (live-tree + undo, `batch_scene_edit`, `set_node_reference`), scripts, run the game, **see a scene without running it** (`render_scene_preview`), read errors, `restart_editor` |
+| **runtime** | 29 | Drive the running game: input (keyboard/mouse/**gamepad/touch**), `game_eval`, live node/property access, `await_signal_runtime`, UI-by-text clicking + `assert_screen_text`, input record/replay, multiplayer + `spawn_headless_peers` |
 | **debug** | 11 | Step-debugger over Godot's own Debug Adapter: breakpoints, step over/in/out, call stack, scope variables, expression evaluation in the paused frame |
 | **code_intel** | 8 | Godot's language server: scope-aware `gd_definition`, `gd_references` and `gd_rename` (unlike text search), plus type diagnostics without running the game |
 | **scene_editing** | 14 | Deeper scene work: collision shapes, sprites/meshes/materials, groups, anchors, spatial queries |
 | **project_config** | 13 | Project settings, input map, autoloads, resources, `sync_localization` |
-| **animation** | 12 | AnimationPlayer tracks/keyframes, AnimationTree state machines |
-| **editor** | 11 | The editor itself: `get_editor_activity` (what *you* just did), selection, scene tabs, performance |
+| **animation** | 14 | AnimationPlayer tracks/keyframes, AnimationTree state machines |
+| **editor** | 14 | The editor itself: `get_editor_activity` (what *you* just did), selection, scene tabs, performance |
 | **physics** | 7 | Collision shapes, raycasts, layers **by name**, collision presets |
 | **tilemap** | 8 | TileMapLayer cell painting, terrain + deterministic bitwise autotiling |
-| **analysis** | 8 | `scene_diff` (what changed since you last looked, without re-reading the tree), `mp_diagnose` (silent multiplayer bugs), `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
-| **scaffolding** | 11 | `wire_signal`, `generate_onready_refs`, `scaffold_entity`, `scaffold_state_machine`, `create_csharp_script`, plus multiplayer: `mp_add_spawner`, `mp_add_synchronizer`, `mp_wire_rpc`, `mp_scaffold_lobby` |
+| **analysis** | 9 | `scene_diff` (what changed since you last looked, without re-reading the tree), `mp_diagnose` (silent multiplayer bugs), `find_unused_resources`, `detect_circular_dependencies`, `analyze_scene_complexity`, `analyze_signal_flow`, `get_project_statistics`, `compare_screenshots` |
+| **scaffolding** | 12 | `wire_signal`, `generate_onready_refs`, `scaffold_entity`, `scaffold_state_machine`, `create_csharp_script`, plus multiplayer: `mp_add_spawner`, `mp_add_synchronizer`, `mp_wire_rpc`, `mp_scaffold_lobby` |
 | **testing** | 6 | GUT test runner (sync/async), scene/mesh integrity validation, assertions |
 | **ui** | 6 | Theme resources, colors, stylebox overrides |
-| **3d** | 6 | Mesh instances, lighting presets, materials, environment, cameras, gridmaps |
+| **3d** | 9 | Mesh instances, lighting presets, materials, environment, cameras, gridmaps |
 | **shaders** | 6 | Create/read/edit GDShader, assign materials, set params |
 | **navigation** | 5 | NavigationRegion setup, mesh baking, agents, layers |
 | **vfx** | 5 | GPUParticles2D/3D, gradients, presets |
@@ -442,7 +455,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 │  AI Client  │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
 │  (Claude,   │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
 │   Cursor)   │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  225 tool    │
+└─────────────┘                  │  Visualizer  │               │  228 tool    │
                                  │  HTTP :6510  │               │  handlers    │
                                  └──────┬───────┘               └──────────────┘
                                         │
@@ -472,7 +485,7 @@ everything goes through Godot's undo history and Ctrl+Z works, including over a 
 `batch_scene_edit`. When it is closed there is no history to write to — use version
 control. Many destructive tools take `dry_run: true` to preview first.
 
-**Enabling a toolset mid-session may not reach your client.** Only `core` (35 tools) is
+**Enabling a toolset mid-session may not reach your client.** Only `core` (38 tools) is
 on by default. `enable_toolset` flips it server-side and the server does send
 `notifications/tools/list_changed`, but several clients cache the tool list for the
 whole session and never re-fetch — and then the newly enabled tools stay invisible until

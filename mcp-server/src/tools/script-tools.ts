@@ -39,14 +39,18 @@ export const scriptTools: ToolDefinition[] = [
   {
     name: 'validate_scripts',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Validate many GDScript files at once. Pass "paths" (array of res:// .gd paths) to check a specific set, or omit it to sweep every .gd in the project. Returns only the invalid scripts plus a summary — use after a refactor to catch all broken scripts in one call.',
+    description: "Validate many GDScript files at once. Pass \"paths\" (array of res:// .gd paths) to check a specific set, or omit it to sweep the project (addons/ excluded unless include_addons). Returns only the invalid scripts, each with a message you can act on, plus elapsed_ms. PREFER an explicit paths list: validation runs on the editor's main thread at roughly 34ms per script, so a whole-project sweep on a large codebase is slow and can approach the bridge's 20s watchdog.",
     inputSchema: {
       type: 'object',
       properties: {
         paths: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional list of res:// .gd paths to validate. Omit to validate every .gd file in the project.'
+          description: 'res:// .gd paths to validate. Omit to sweep the project — but pass the files you changed instead when you know them.'
+        },
+        include_addons: {
+          type: 'boolean',
+          description: 'Include res://addons/ in a whole-project sweep. Default false: plugin code is usually most of the files and is not yours to fix.'
         }
       }
     }

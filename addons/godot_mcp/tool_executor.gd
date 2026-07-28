@@ -141,6 +141,7 @@ func _init_tools() -> void:
 		&"set_sprite_texture": [_scene_tools, &"set_sprite_texture"],
 		&"instance_scene": [_scene_tools, &"instance_scene"],
 		&"set_mesh": [_scene_tools, &"set_mesh"],
+		&"set_node_reference": [_scene_tools, &"set_node_reference"],
 		&"set_material": [_scene_tools, &"set_material"],
 		&"get_node_spatial_info": [_scene_tools, &"get_node_spatial_info"],
 		&"measure_node_distance": [_scene_tools, &"measure_node_distance"],
@@ -204,6 +205,8 @@ func _init_tools() -> void:
 		&"stop_headless_peers": [_project_tools, &"stop_headless_peers"],
 		&"classdb_query": [_project_tools, &"classdb_query"],
 		&"rescan_filesystem": [_project_tools, &"rescan_filesystem"],
+		&"render_scene_preview": [_project_tools, &"render_scene_preview"],
+		&"restart_editor": [_project_tools, &"restart_editor"],
 		&"undo_last": [_project_tools, &"undo_last"],
 		&"redo_last": [_project_tools, &"redo_last"],
 		&"run_scene": [_project_tools, &"run_scene"],
@@ -371,6 +374,7 @@ func set_mcp_client(client: Object) -> void:
 const _COROUTINE_TOOLS := {
 	"wait": true,
 	"run_scene": true,
+	"render_scene_preview": true,
 }
 
 ## Tools that write to the project (files, nodes, scenes, settings). Blocked
@@ -381,6 +385,7 @@ const _DESTRUCTIVE_TOOLS := {
 	"rename_node": true, "move_node": true, "attach_script": true, "detach_script": true,
 	"set_collision_shape": true, "set_sprite_texture": true, "instance_scene": true,
 	"set_mesh": true, "set_material": true, "snap_node_to_grid": true,
+	"set_node_reference": true,
 	"set_scene_node_property": true, "set_node_properties": true, "set_node_groups": true,
 	"set_resource_property": true, "save_resource_to_file": true, "connect_signal": true,
 	"wire_signal": true, "generate_onready_refs": true,
@@ -507,6 +512,8 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 				result = await node.wait(args)
 			"run_scene":
 				result = await node.run_scene(args)
+			"render_scene_preview":
+				result = await node.render_scene_preview(args)
 			_:
 				push_error("[MCP] Coroutine tool '%s' has no direct dispatch case." % tool_name)
 				result = {&"ok": false, &"error": "Coroutine tool '%s' missing dispatch case" % tool_name}

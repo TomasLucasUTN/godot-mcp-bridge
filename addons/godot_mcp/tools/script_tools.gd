@@ -270,59 +270,69 @@ func validate_script(args: Dictionary) -> Dictionary:
 ## two validations never claim the same cache slot.
 var _validate_seq: int = 0
 
-## Validate a single .gd by compiling its current on-disk source. Runs inside
-## the editor process, so project autoloads/global class names ARE registered —
-## a reference to an autoload singleton validates correctly (unlike a headless
-## --check-only pass, which would false-positive with "Identifier not declared").
+## Validate a single .gd by loading it the way the ENGINE does.
+##
+## This used to build a GDScript in memory and call reload() on the source. That
+## compiles the file in ISOLATION, and isolation is exactly what a real project
+## script does not have: it reported
+##   - `Identifier not found: <Autoload>` (err 36) for any file touching a
+##     singleton, because autoloads are not visible to a standalone compile even
+##     inside the editor — the old comment here claimed they were, and that
+##     claim was simply wrong;
+##   - `Could not find base class <X>` (err 43) for any file extending a global
+##     class declared in another file.
+## Measured against a real project: 4 of 4 scripts reported invalid, all 4
+## compiled and ran fine. A validator with false positives on ordinary code is
+## worse than no validator, because it trains you to ignore it.
+##
+## ResourceLoader.load() runs the same path the editor uses when it opens the
+## file, so autoloads, global classes and inherited scripts all resolve. Errors
+## still surface — a file that does not parse loads as null.
 func _validate_one(path: String) -> Dictionary:
-	var file := FileAccess.open(path, FileAccess.READ)
-	if not file:
-		return {&"ok": false, &"valid": false, &"path": path, &"error": "Cannot read file: " + path}
-	var source_code := file.get_as_text()
-	file.close()
+	if not FileAccess.file_exists(path):
+		return {&"ok": false, &"valid": false, &"path": path, &"error": "File not found: " + path}
 
-	# A fresh GDScript.new().reload() of source that declares `class_name X` fails
-	# with a false ERR_PARSE_ERROR (43) when X is ALREADY registered as a global
-	# class — which it always is for any file that's part of the loaded project.
-	# The collision is not a real syntax error and isn't even logged, so it just
-	# looks like a broken script. Strip the class_name line (kept as blank so line
-	# numbers still line up) before compiling; it doesn't affect the validity of
-	# the rest of the file.
-	var script := GDScript.new()
-	# Give the throwaway script a path NEXT TO the real file before compiling.
-	#
-	# Several GDScript warning settings are path-sensitive — most importantly
-	# `debug/gdscript/warnings/exclude_addons`, which is on by default and mutes
-	# warnings for anything under res://addons/. A GDScript built from
-	# source_code alone has no path, so it loses that exclusion; any warning the
-	# project has promoted to an error (this project ships
-	# `inference_on_variant = 2`) then fails the compile with ERR_PARSE_ERROR and
-	# an empty error list. The file loads perfectly in the editor, so the tool
-	# reported a syntax error that does not exist.
-	#
-	# The path only has to LOOK like the original's neighbour. The counter keeps
-	# repeated or nested validations from colliding in the resource cache.
-	#
-	# It does NOT stay purely in memory, which this comment used to claim: a real
-	# project was found with `__mcp_validate_1.gd` and its `.uid` sitting next to
-	# the scripts they were copied from. Whatever writes them, the fix is to
-	# delete them right after the compile.
-	_validate_seq += 1
-	script.resource_path = "%s/__mcp_validate_%d.gd" % [path.get_base_dir(), _validate_seq]
-	script.source_code = _strip_class_name(source_code)
-	var err := script.reload()  # runs the parser/compiler
-	_discard_validation_artifact(script.resource_path)
+	# REPLACE, not REUSE and emphatically not IGNORE:
+	#   REUSE   — hands back the cached copy without re-reading disk, so a script
+	#             edited a moment ago validates as its previous version. Useless
+	#             for the main use of this tool.
+	#   IGNORE  — reads disk but builds a SEPARATE copy each time. Sweeping a set
+	#             of scripts that extend each other then produces two live copies
+	#             of the same global class, and the engine hard-crashes (exit 5,
+	#             reproduced on a 3-file sweep of this very addon).
+	#   REPLACE — reads disk and updates the one cached entry. Fresh, and no
+	#             duplicate class. This is what the editor itself does when it
+	#             notices a file changed underneath it.
+	var script := ResourceLoader.load(path, "Script", ResourceLoader.CACHE_MODE_REPLACE) as GDScript
+	if script == null:
+		return _invalid(path, "Could not load as a GDScript")
 
-	if err != OK:
-		var errors := _collect_recent_script_errors(path)
-		return {
-			&"ok": true,
-			&"valid": false,
-			&"path": path,
-			&"error_code": err,
-			&"errors": errors,
-			&"message": "Script has errors." + (" Details: " + "; ".join(errors) if errors.size() > 0 else " Check Godot console for details.")
-		}
+	# load() alone is NOT a verdict: a file that fails to parse still comes back
+	# as a GDScript object, just an unusable one. The verdict is whether the
+	# parser resolved a base type.
+	#
+	# It has to be get_instance_base_type() and NOT can_instantiate(), and the
+	# difference is the whole point of this rewrite. Measured across 13 shapes:
+	#
+	#   file                            base   can_instantiate
+	#   valid                           Node   true
+	#   valid, calls an autoload        Node   FALSE   <- can_instantiate lies
+	#   valid, extends a global class   Node   true
+	#   valid, extends Resource         Resource  true
+	#   missing colon                   ''     false
+	#   calls an undefined function     ''     false
+	#   extends a class that not exist  ''     false
+	#   assigns a String to an int      ''     false
+	#
+	# can_instantiate() is false for a perfectly good script that references a
+	# singleton — singletons only exist at runtime — so using it is what made
+	# this tool report 4 of 4 healthy scripts as broken. The base type comes from
+	# the parse, which is the thing actually being asked about.
+	#
+	# Do NOT "improve" this by calling reload(): reload() compiles in isolation
+	# and brings every autoload false positive straight back. Verified twice.
+	if script.get_instance_base_type() == &"":
+		return _invalid(path, "Could not be parsed — no base type resolved. If it extends a class_name declared in a file added during this session, call rescan_filesystem first: an unregistered global class looks exactly like a missing one")
 
 	return {
 		&"ok": true,
@@ -330,6 +340,26 @@ func _validate_one(path: String) -> Dictionary:
 		&"path": path,
 		&"message": "No syntax errors found"
 	}
+
+func _invalid(path: String, reason: String = "", err: int = OK) -> Dictionary:
+	var errors := _collect_recent_script_errors(path)
+	var detail := ""
+	if errors.size() > 0:
+		detail = " Details: " + "; ".join(errors)
+	elif not reason.is_empty():
+		detail = " " + reason + "."
+	else:
+		detail = " Check the Godot console for details."
+	var out := {
+		&"ok": true,
+		&"valid": false,
+		&"path": path,
+		&"errors": errors,
+		&"message": "Script has errors." + detail,
+	}
+	if err != OK:
+		out[&"error_code"] = err
+	return out
 
 ## Delete a throwaway validation script if the engine actually wrote one out.
 ## Godot also drops a sidecar `.uid` next to any script it resolves, so both go.
@@ -400,6 +430,7 @@ func _strip_class_name(source: String) -> String:
 ## every broken script at once instead of N separate calls.
 func validate_scripts(args: Dictionary) -> Dictionary:
 	var paths_arg = args.get(&"paths", [])
+	var include_addons: bool = bool(args.get(&"include_addons", false))
 	var targets: Array = []
 
 	if paths_arg is Array and not paths_arg.is_empty():
@@ -414,23 +445,50 @@ func validate_scripts(args: Dictionary) -> Dictionary:
 				return {&"ok": false, &"error": "File not found: " + gp}
 	else:
 		_collect_gd_files("res://", targets)
+		# addons/ is skipped by default. Validating a whole project costs ~34ms
+		# per script on the editor's main thread, and plugin code is usually the
+		# bulk of it — on a big project the sweep can outlast the bridge's own
+		# 20s ping watchdog and kill the connection it is reporting through, the
+		# same way find_unused_resources used to. You did not write the addons;
+		# pass include_addons when you actually want them checked.
+		if not include_addons:
+			var own: Array = []
+			for t: String in targets:
+				if not t.begins_with("res://addons/"):
+					own.append(t)
+			targets = own
 
 	if targets.is_empty():
 		return {&"ok": true, &"total": 0, &"invalid_count": 0, &"invalid": [], &"message": "No .gd scripts to validate."}
 
+	var started := Time.get_ticks_msec()
 	var invalid: Array = []
 	for t: String in targets:
 		var r := _validate_one(t)
 		if not r.get(&"valid", false):
-			invalid.append({&"path": t, &"error_code": r.get(&"error_code"), &"errors": r.get(&"errors", [])})
+			# The MESSAGE, not just error_code: a bare code with an empty errors
+			# array is what made this tool's output useless to act on. The
+			# message always says something, even when the engine logged nothing.
+			invalid.append({
+				&"path": t,
+				&"errors": r.get(&"errors", []),
+				&"message": r.get(&"message", "Script has errors."),
+			})
 
-	return {
+	var elapsed := Time.get_ticks_msec() - started
+	var out := {
 		&"ok": true,
 		&"total": targets.size(),
 		&"invalid_count": invalid.size(),
 		&"invalid": invalid,
+		&"elapsed_ms": elapsed,
 		&"message": "Validated %d script(s): %d invalid." % [targets.size(), invalid.size()],
 	}
+	# Loud about its own cost, so a sweep that is creeping toward the watchdog is
+	# visible before it takes the connection down.
+	if elapsed > 8000:
+		out[&"warning"] = "This sweep took %.1fs on the editor's main thread. Pass an explicit 'paths' list to keep it fast; past ~20s the bridge's ping watchdog drops the connection mid-call." % (elapsed / 1000.0)
+	return out
 
 func _collect_gd_files(dir_path: String, out: Array, depth: int = 0) -> void:
 	if depth > 20:

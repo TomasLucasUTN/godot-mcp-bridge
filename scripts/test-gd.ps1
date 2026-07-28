@@ -27,5 +27,20 @@ robocopy "$repo\addons\godot_mcp" "$fixture\addons\godot_mcp" /MIR /NFL /NDL /NJ
 & $Godot --headless --path $fixture -s "res://tests/parse_all.gd"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Input delivery runs as a SCENE, not with -s: Input only advances its action
+# state on real frames, so the SceneTree runner cannot test it.
+& $Godot --headless --path $fixture "res://tests/input_delivery.tscn"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Scene rendering needs a real display: --headless uses the dummy driver and the
+# viewport produces no image at all, so this runs windowed. CI runs the same
+# check under xvfb (see .github/workflows/test.yml).
+if ($env:GODOT_MCP_SKIP_RENDER) {
+    Write-Host "Skipping render test (GODOT_MCP_SKIP_RENDER set)."
+} else {
+    & $Godot --path $fixture -s "res://tests/render_preview.gd"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 & $Godot --headless --path $fixture -s "res://tests/run_tests.gd"
 exit $LASTEXITCODE

@@ -103,6 +103,17 @@ func query(since_id: int, limit: int, source_filter: String = "") -> Dictionary:
 		out = out.slice(out.size() - limit, out.size())
 	return {&"events": out, &"latest_id": _seq, &"count": out.size()}
 
+## Event types that carry no information the agent can act on, and are therefore
+## left out of the piggybacked digest (query() still returns them).
+##
+## `filesystem_changed` is the whole reason this exists. It fires on every file
+## the AGENT writes, but arrives deferred — after end_agent_call() — so it is
+## attributed to the human and rides along on nearly every response. Across one
+## session it was ~90% of all digest content, always as
+## `{"type":"filesystem_changed","detail":""}`: pure token toll telling the agent
+## it had written a file it had just written.
+const _DIGEST_NOISE: Array[String] = ["filesystem_changed"]
+
 ## Compact summary of human events since the last call, or {} if there were none.
 ## Advances its own cursor (kept separate from query()'s caller-supplied since_id,
 ## so the two do not consume each other's events) — each event is digested once.
@@ -111,8 +122,11 @@ func human_digest() -> Dictionary:
 	for e in _ring:
 		if int(e[&"id"]) <= _digest_cursor:
 			continue
-		if str(e.get(&"source", "")) == "human":
-			events.append(e)
+		if str(e.get(&"source", "")) != "human":
+			continue
+		if str(e.get(&"type", "")) in _DIGEST_NOISE:
+			continue
+		events.append(e)
 	_digest_cursor = _seq
 	if events.is_empty():
 		return {}

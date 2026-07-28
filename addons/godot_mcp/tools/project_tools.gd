@@ -1427,6 +1427,215 @@ func rescan_filesystem(_args: Dictionary) -> Dictionary:
 	return {&"ok": true, &"message": "Filesystem rescan triggered."}
 
 # =============================================================================
+# render_scene_preview
+# =============================================================================
+
+## Render a scene to a PNG without running the game.
+##
+## The gap: `take_screenshot` needs a running game, so the only way to LOOK at a
+## scene was to launch it — a couple of seconds, a runtime connection, and a
+## scene left running if you forget to stop it. Checking whether a level's
+## platforms line up should not cost that. Building one, every visual mistake
+## (grass strips three times too tall, a hitbox in the wrong place) was found by
+## launching the game or not at all.
+##
+## Renders offscreen in a SubViewport, so the editor's own layout, grid and
+## gizmos are not in the shot and nothing about the editor state changes.
+## 2D only — a 3D scene needs a camera decision this cannot make for you.
+func render_scene_preview(args: Dictionary) -> Dictionary:
+	var raw_scene: String = str(args.get(&"scene_path", ""))
+	if raw_scene.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	# PathGuard, not SceneToolBase's _ensure_res_path: this file extends Node, so
+	# it does not inherit the scene helpers.
+	var guarded_scene := PathGuard.sanitize(raw_scene)
+	if not guarded_scene[&"ok"]:
+		return {&"ok": false, &"error": guarded_scene[&"error"]}
+	var scene_path: String = str(guarded_scene[&"path"])
+	if not FileAccess.file_exists(scene_path):
+		return {&"ok": false, &"error": "Scene not found: " + scene_path}
+
+	var width: int = clampi(int(args.get(&"width", 1152)), 64, 4096)
+	var height: int = clampi(int(args.get(&"height", 648)), 64, 4096)
+	var save_to: String = str(args.get(&"save_to", ""))
+	if save_to.strip_edges().is_empty():
+		save_to = "res://addons/godot_mcp/cache/previews/%s.png" % scene_path.get_file().get_basename()
+	var guarded_out := PathGuard.sanitize(save_to)
+	if not guarded_out[&"ok"]:
+		return {&"ok": false, &"error": "'save_to' rejected: " + str(guarded_out[&"error"])}
+	save_to = str(guarded_out[&"path"])
+
+	var packed := load(scene_path) as PackedScene
+	if packed == null:
+		return {&"ok": false, &"error": "Could not load as a scene: " + scene_path}
+	var instance := packed.instantiate()
+	if instance == null:
+		return {&"ok": false, &"error": "Scene failed to instantiate: " + scene_path}
+
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(width, height)
+	viewport.transparent_bg = bool(args.get(&"transparent", false))
+	# ALWAYS, not the default ONCE: the render has to survive the frames we wait,
+	# and a one-shot update would have cleared before the texture is read.
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.add_child(instance)
+
+	# Any tree will do — rendering needs frames, not an editor. Falling back to
+	# the main loop's root keeps this runnable (and testable) headless instead of
+	# refusing without a plugin.
+	var host: Node = _editor_plugin
+	if host == null and is_inside_tree():
+		# This node's own tree, which is the reliable handle — Engine's main loop
+		# is not always castable to a SceneTree depending on how the tool was
+		# reached.
+		host = get_tree().root
+	if host == null:
+		instance.free()
+		viewport.free()
+		return {&"ok": false, &"error": "No scene tree available to render into"}
+	host.add_child(viewport)
+
+	# Frame the content instead of trusting it to sit at the origin — a level's
+	# nodes are wherever the designer put them, often thousands of pixels out.
+	var bounds := _content_bounds(instance)
+	var camera := Camera2D.new()
+	if bounds.has_area():
+		camera.position = bounds.get_center()
+		var margin: float = 1.08
+		var zoom_factor: float = minf(
+			float(width) / (bounds.size.x * margin),
+			float(height) / (bounds.size.y * margin))
+		# Never zoom IN past 1:1 — a magnified pixel-art scene reads as blurry
+		# and hides exactly the alignment problems this is for.
+		camera.zoom = Vector2.ONE * minf(zoom_factor, 1.0)
+	viewport.add_child(camera)
+	camera.make_current()
+
+	# Two frames: one to build the render target, one to draw into it.
+	var tree := host.get_tree()
+	await tree.process_frame
+	await tree.process_frame
+
+	var image := viewport.get_texture().get_image()
+	host.remove_child(viewport)
+	viewport.queue_free()
+
+	if image == null:
+		return {&"ok": false, &"error": "Viewport produced no image"}
+
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_to.get_base_dir()))
+	var err := image.save_png(save_to)
+	if err != OK:
+		return {&"ok": false, &"error": "Could not write %s (err %d)" % [save_to, err]}
+	# So the new PNG shows up in the editor's filesystem dock and can be loaded.
+	if _editor_plugin:
+		_editor_plugin.get_editor_interface().get_resource_filesystem().scan()
+
+	return {
+		&"ok": true,
+		&"scene_path": scene_path,
+		&"resource_path": save_to,
+		&"absolute_path": ProjectSettings.globalize_path(save_to),
+		&"width": image.get_width(),
+		&"height": image.get_height(),
+		&"content_bounds": {&"x": bounds.position.x, &"y": bounds.position.y,
+			&"width": bounds.size.x, &"height": bounds.size.y},
+		&"zoom": camera.zoom.x,
+		&"message": "Rendered %s to %s (no game launched)" % [scene_path, save_to],
+	}
+
+## World-space rectangle covering the scene's visible 2D content. Empty Rect2
+## when nothing measurable was found, which the caller treats as "do not frame".
+func _content_bounds(root: Node) -> Rect2:
+	var bounds := Rect2()
+	var first := true
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		for child in node.get_children():
+			stack.append(child)
+
+		var rect := _node_rect(node)
+		if rect == null:
+			continue
+		if first:
+			bounds = rect
+			first = false
+		else:
+			bounds = bounds.merge(rect)
+	return bounds
+
+## The world-space rect of one node, or null when it has no measurable extent.
+## Covers the node types that actually carry a level's silhouette; anything else
+## contributes nothing rather than guessing.
+func _node_rect(node: Node) -> Variant:
+	if node is Control:
+		var c := node as Control
+		if not c.is_visible_in_tree():
+			return null
+		return c.get_global_rect()
+	if node is Sprite2D:
+		var s := node as Sprite2D
+		if s.texture == null or not s.is_visible_in_tree():
+			return null
+		var size := s.texture.get_size()
+		size.x /= maxf(1.0, float(s.hframes))
+		size.y /= maxf(1.0, float(s.vframes))
+		var local := Rect2(-size * 0.5 if s.centered else Vector2.ZERO, size)
+		return s.get_global_transform() * local
+	if node is CollisionShape2D:
+		var cs := node as CollisionShape2D
+		if cs.shape == null:
+			return null
+		return cs.get_global_transform() * cs.shape.get_rect()
+	# A bare Node2D is deliberately NOT counted. It has no extent, and folding its
+	# origin into the bounds drags the frame toward wherever the scene root sits:
+	# a level whose content lives at x=2000 framed from 0 renders mostly empty
+	# space. Only things with a real silhouette decide the framing.
+	return null
+
+# =============================================================================
+# restart_editor
+# =============================================================================
+
+## Restart the Godot editor, optionally saving first.
+##
+## Exists because a rescan is not always enough. Two things a running editor
+## will not pick up on its own:
+##   - an AUTOLOAD added during the session. Until it restarts, every script
+##     referencing that singleton fails to compile, and — worse — a node whose
+##     script failed to compile silently loses its exported properties, so
+##     create_scene reports ok and writes defaults.
+##   - a brand-new `class_name`, which the same failure mode follows.
+## Both cost real time to diagnose, because nothing reports them as errors.
+## Before this tool the only way out was killing the process from a shell.
+##
+## The connection drops with the editor and comes back a few seconds after it
+## reopens — poll get_godot_status until connected, the same as a manual restart.
+func restart_editor(args: Dictionary) -> Dictionary:
+	if not _editor_plugin:
+		return {&"ok": false, &"error": "No editor plugin available"}
+	var save_first: bool = bool(args.get(&"save", true))
+
+	var interface := _editor_plugin.get_editor_interface()
+	if save_first:
+		# Scenes first, then project settings: restart_editor(true) saves open
+		# scenes but NOT ProjectSettings, and a setting changed through these
+		# tools this session would otherwise be lost by the very restart meant to
+		# make it take effect.
+		interface.save_all_scenes()
+		ProjectSettings.save()
+
+	# Deferred so this call can return before the editor goes down — otherwise
+	# the response never reaches the agent and the restart looks like a crash.
+	interface.call_deferred(&"restart_editor", save_first)
+	return {
+		&"ok": true,
+		&"saved": save_first,
+		&"message": "Editor is restarting. The bridge will disconnect; poll get_godot_status until it reports connected again (usually 20-40s).",
+	}
+
+# =============================================================================
 # classdb_query
 # =============================================================================
 

@@ -62,25 +62,11 @@ const _SHAPE_ALIASES := {
 	"sphere": "SphereShape3D",
 }
 
-func _values_match(a, b) -> bool:
-	if typeof(a) == typeof(b):
-		return a == b
-	# Numbers must be compared numerically, not as text.
-	#
-	# JSON has one number type, so every integer an MCP client sends arrives as a
-	# float. Setting an int property with it works — Godot coerces — but the
-	# read-back returns an int, and the old string fallback compared "1" against
-	# "1.0" and called a perfectly good write a failure. That is why setting
-	# collision_layer/collision_mask reported "set had no effect (type
-	# mismatch?)", and why a single-property call then saved nothing at all.
-	if (a is int or a is float) and (b is int or b is float):
-		return is_equal_approx(float(a), float(b))
-	return str(a) == str(b)
-
 # =============================================================================
 # create_scene
 # =============================================================================
 func create_scene(args: Dictionary) -> Dictionary:
+	_clear_warnings()
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var root_node_name: String = str(args.get(&"root_node_name", "Node"))
 	var root_node_type: String = str(args.get(&"root_node_type", ""))
@@ -143,8 +129,8 @@ func create_scene(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"path": scene_path, &"root_type": root_node_type, &"child_count": node_count,
-		&"message": "Scene created at " + scene_path}
+	return _with_warnings({&"ok": true, &"path": scene_path, &"root_type": root_node_type, &"child_count": node_count,
+		&"message": "Scene created at " + scene_path})
 
 ## Known child-spec keys. Anything else is a typo (common agent mistake: using
 ## parent_path, class, kind, etc. in a child block). We reject unknown keys so
@@ -183,8 +169,12 @@ func _create_node_recursive(data: Dictionary, parent: Node, owner: Node) -> Arra
 
 	if not n_name.is_empty():
 		node.name = n_name
-	_set_node_properties(node, props)
 
+	# SCRIPT FIRST, then properties. The other order looks harmless and is not:
+	# a node's exported properties do not exist until its script is attached, so
+	# `{script: "health.gd", properties: {max_health: 400}}` silently dropped
+	# max_health and the node kept the default. Found by building a game with
+	# these tools and wondering why a boss had 100 HP instead of 400.
 	if not n_script.is_empty():
 		n_script = _ensure_res_path(n_script)
 		if n_script == "res://__mcp_rejected_path__":
@@ -196,6 +186,8 @@ func _create_node_recursive(data: Dictionary, parent: Node, owner: Node) -> Arra
 		else:
 			node.free()
 			return [null, "Failed to load script for child '%s': %s" % [n_name, n_script]]
+
+	_note_unknown_properties(node, _set_node_properties(node, props))
 
 	for g in groups:
 		var gname := str(g)
@@ -304,6 +296,7 @@ func _build_node_structure(node: Node, include_props: bool, path: String = ".", 
 # add_node
 # =============================================================================
 func add_node(args: Dictionary) -> Dictionary:
+	_clear_warnings()
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var node_name: String = str(args.get(&"node_name", ""))
 	var node_type: String = str(args.get(&"node_type", "Node"))
@@ -344,8 +337,9 @@ func add_node(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Failed to create node of type: " + node_type}
 
 	new_node.name = node_name
-	_set_node_properties(new_node, properties)
 
+	# Script before properties — an exported property does not exist until the
+	# script is on the node. See _create_node_recursive for the incident.
 	if not script_path.is_empty():
 		script_path = _ensure_res_path(script_path)
 		if script_path == "res://__mcp_rejected_path__":
@@ -357,6 +351,8 @@ func add_node(args: Dictionary) -> Dictionary:
 		else:
 			root.queue_free()
 			return {&"ok": false, &"error": "Failed to load script: " + script_path}
+
+	_note_unknown_properties(new_node, _set_node_properties(new_node, properties))
 
 	for g in groups:
 		var gname := str(g)
@@ -389,10 +385,10 @@ func add_node(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"node_name": new_node.name, &"node_type": node_type,
+	return _with_warnings({&"ok": true, &"scene_path": scene_path, &"node_name": new_node.name, &"node_type": node_type,
 		&"descendants_added": added_descendants,
 		&"message": "Added %s (%s) to scene%s" % [new_node.name, node_type,
-			(" with %d descendant(s)" % added_descendants) if added_descendants > 0 else ""]}
+			(" with %d descendant(s)" % added_descendants) if added_descendants > 0 else ""]})
 
 # =============================================================================
 # remove_node
@@ -698,7 +694,7 @@ func _add_node_live(root: Node, scene_path: String, node_name: String, node_type
 	if not new_node:
 		return {&"ok": false, &"error": "Failed to create node of type: " + node_type}
 	new_node.name = node_name
-	_set_node_properties(new_node, properties)
+	# Script before properties — see _create_node_recursive.
 	if not script_path.is_empty():
 		var sp := _ensure_res_path(script_path)
 		if sp == "res://__mcp_rejected_path__":
@@ -709,6 +705,7 @@ func _add_node_live(root: Node, scene_path: String, node_name: String, node_type
 			new_node.free()
 			return {&"ok": false, &"error": "Failed to load script: " + sp}
 		new_node.set_script(s)
+	_note_unknown_properties(new_node, _set_node_properties(new_node, properties))
 	for g in groups:
 		var gname := str(g)
 		if not gname.is_empty():
@@ -848,6 +845,7 @@ func _duplicate_node_live(root: Node, node_path: String, new_name: String) -> Di
 ## batch (nothing saved) on the first failure. Supported op types: add_node,
 ## set_properties, remove_node, rename_node, move_node.
 func batch_scene_edit(args: Dictionary) -> Dictionary:
+	_clear_warnings()
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var operations: Array = args.get(&"operations", [])
 	var stop_on_error: bool = bool(args.get(&"stop_on_error", true))
@@ -896,10 +894,10 @@ func batch_scene_edit(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"live_editor_scene": is_live,
+	return _with_warnings({&"ok": true, &"scene_path": scene_path, &"live_editor_scene": is_live,
 		&"operations_run": results.size(), &"applied": applied, &"all_ok": all_ok,
 		&"results": results,
-		&"message": "Applied %d/%d edit(s) to %s with a single %s" % [applied, results.size(), scene_path, "live-tree update" if is_live else "load+save"]}
+		&"message": "Applied %d/%d edit(s) to %s with a single %s" % [applied, results.size(), scene_path, "live-tree update" if is_live else "load+save"]})
 
 ## Detach a node without freeing it. Paired with _attach_node_at as the undo of a
 ## batch remove; the node stays alive through the undo entry's reference.
@@ -924,7 +922,7 @@ func _apply_op(root: Node, op: Dictionary, ctx: Dictionary) -> Dictionary:
 			if not n:
 				return {&"ok": false, &"op": kind, &"error": "Failed to create " + node_type}
 			n.name = str(op.get(&"node_name", node_type))
-			_set_node_properties(n, op.get(&"properties", {}))
+			# Script before properties — see _create_node_recursive.
 			var script_path := str(op.get(&"script", ""))
 			if not script_path.is_empty():
 				var sp := _ensure_res_path(script_path)
@@ -934,6 +932,7 @@ func _apply_op(root: Node, op: Dictionary, ctx: Dictionary) -> Dictionary:
 				else:
 					n.free()
 					return {&"ok": false, &"op": kind, &"error": "Failed to load script: " + script_path}
+			_note_unknown_properties(n, _set_node_properties(n, op.get(&"properties", {})))
 			for g in op.get(&"groups", []):
 				if not str(g).is_empty():
 					n.add_to_group(str(g), true)
@@ -1369,6 +1368,7 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 # instance_scene
 # =============================================================================
 func instance_scene(args: Dictionary) -> Dictionary:
+	_clear_warnings()
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var instance_path: String = _ensure_res_path(str(args.get(&"instance_path", "")))
 	var node_name: String = str(args.get(&"node_name", ""))
@@ -1411,7 +1411,9 @@ func instance_scene(args: Dictionary) -> Dictionary:
 	if not node_name.strip_edges().is_empty():
 		instance.name = node_name
 
-	_set_node_properties(instance, properties)
+	# No reordering needed here: an instanced scene arrives with its script
+	# already attached, so its exported properties exist.
+	_note_unknown_properties(instance, _set_node_properties(instance, properties))
 
 	parent.add_child(instance, true)
 	instance.owner = root
@@ -1422,9 +1424,117 @@ func instance_scene(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"instance_path": instance_path,
+	return _with_warnings({&"ok": true, &"scene_path": scene_path, &"instance_path": instance_path,
 		&"node_name": actual_name, &"node_type": instance.get_class(),
-		&"message": "Instanced '%s' as '%s' in scene" % [instance_path, actual_name]}
+		&"message": "Instanced '%s' as '%s' in scene" % [instance_path, actual_name]})
+
+# =============================================================================
+# set_node_reference
+# =============================================================================
+
+## Point an exported property at another NODE in the same scene.
+##
+## The gap this fills: a property typed as a node — `@export var target: Area2D`,
+## `@export var health: HealthComponent`, `@export var initial_state: State` —
+## cannot be set through modify_node_property or set_node_properties. Those take
+## a VALUE, and the value here is a live object, not something JSON can carry.
+## Until this existed, the only way to wire one was dragging it in the inspector,
+## which is not available to an agent — so a whole game's components had to be
+## redesigned to discover each other at runtime instead of being wired in the
+## scene. That is the tool bending the code, which is backwards.
+##
+## Handles both shapes automatically:
+##   @export var x: SomeNode  → assigns the node object (Godot serialises the
+##                              NodePath into the .tscn on save)
+##   @export var x: NodePath  → assigns the path itself
+func set_node_reference(args: Dictionary) -> Dictionary:
+	_clear_warnings()
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var node_path: String = str(args.get(&"node_path", "."))
+	var property: String = str(args.get(&"property", ""))
+	var target_path: String = str(args.get(&"target_path", ""))
+
+	if scene_path.strip_edges() == "res://":
+		return {&"ok": false, &"error": "Missing 'scene_path'"}
+	if property.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'property' (the exported property to point at a node)"}
+	if target_path.strip_edges().is_empty():
+		return {&"ok": false, &"error": "Missing 'target_path' (the node to point it at, relative to the scene root)"}
+
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
+
+	var node := _find_node(root, node_path)
+	if not node:
+		var err := _node_not_found(root, node_path)
+		_discard_scene(root, is_live)
+		return err
+
+	var target := _find_node(root, target_path)
+	if not target:
+		var err := _node_not_found(root, target_path, "Target node")
+		_discard_scene(root, is_live)
+		return err
+
+	# The property has to actually exist, or this becomes the very silent-drop
+	# bug it was written to avoid.
+	var types := _property_type_map(node)
+	if not types.has(property):
+		_discard_scene(root, is_live)
+		var known := PackedStringArray()
+		for candidate in types:
+			var t: int = int(types[candidate])
+			if t == TYPE_OBJECT or t == TYPE_NODE_PATH:
+				known.append(str(candidate))
+		var hint := ""
+		if known.size() > 0:
+			hint = " Node-typed properties on this node: %s." % ", ".join(known)
+		elif node.get_script() == null:
+			hint = " The node has no script, so it has no exported node properties."
+		else:
+			hint = " Its script may not be compiled yet — try rescan_metadata or restart_editor."
+		return {&"ok": false, &"error": "No property '%s' on '%s' (%s).%s" % [
+			property, node_path, node.get_class(), hint]}
+
+	var declared: int = int(types[property])
+	var assigned: Variant = target
+	if declared == TYPE_NODE_PATH:
+		# Relative to the node holding the property, which is how Godot resolves
+		# an exported NodePath — not relative to the scene root.
+		assigned = node.get_path_to(target)
+	node.set(property, assigned)
+
+	# Read back rather than trust the set: assigning a node to a property typed
+	# for a DIFFERENT node class silently does nothing, and that is exactly the
+	# kind of failure this tool exists to stop reporting as success.
+	var readback: Variant = node.get(property)
+	var landed := false
+	if declared == TYPE_NODE_PATH:
+		landed = str(readback) == str(assigned)
+	else:
+		landed = readback == target
+	if not landed:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Assignment did not take on '%s.%s'. The property is probably typed for a different node class than '%s' (%s)." % [
+			node_path, property, target.name, target.get_class()]}
+
+	var result := _finish_scene_edit(root, scene_path, is_live)
+	if not result.is_empty() and result.get(&"ok", true) == false:
+		return result
+
+	return _with_warnings({
+		&"ok": true,
+		&"scene_path": scene_path,
+		&"node_path": node_path,
+		&"property": property,
+		&"target_path": target_path,
+		&"stored_as": "NodePath" if declared == TYPE_NODE_PATH else "node reference",
+		&"live_editor_scene": is_live,
+		&"message": "Pointed %s.%s at '%s'" % [node_path, property, target_path],
+	})
 
 # =============================================================================
 # set_mesh

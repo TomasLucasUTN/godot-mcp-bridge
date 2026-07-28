@@ -401,6 +401,21 @@ export const sceneTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'set_node_reference',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    description: "Point an exported property at another NODE in the same scene — the wiring you would otherwise do by dragging a node into an inspector slot. Use for any @export typed as a node (`@export var target: Area2D`, `@export var health: HealthComponent`) or as a NodePath. set_node_properties CANNOT do this: it takes a JSON value, and this needs a live object reference. Fails loudly if the property does not exist or is typed for a different node class, instead of silently doing nothing.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
+        node_path: { type: 'string', description: 'Node that HOLDS the property (. for root, or a relative path)' },
+        property: { type: 'string', description: 'Name of the exported property to set, e.g. "initial_state" or "health"' },
+        target_path: { type: 'string', description: 'Node it should point AT, relative to the scene root, e.g. "StateMachine/Idle"' }
+      },
+      required: ['scene_path', 'node_path', 'property', 'target_path']
+    }
+  },
+  {
     name: 'set_mesh',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     description: 'Create and assign a mesh resource to a MeshInstance3D node. REQUIRED to make 3D geometry visible. Primitive types: BoxMesh, SphereMesh, CylinderMesh, CapsuleMesh, PlaneMesh, PrismMesh, TorusMesh, QuadMesh, TextMesh. Or load from file.',

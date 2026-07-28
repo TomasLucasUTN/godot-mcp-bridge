@@ -1,7 +1,7 @@
 # godot-mcp-bridge — project guide
 
 Godot 4 MCP server: a GDScript editor addon (`addons/godot_mcp/`) talking over a
-WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 209 tools.
+WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 228 tools.
 Architecture is the converged standard for the space (Node stdio ↔ WS ↔ editor plugin).
 
 ## Two rules that keep the codebase healthy (apply these first)
@@ -45,7 +45,7 @@ truth — the registry test uses them to exempt those tools, so a new one that s
 them fails the build.
 
 **Toolsets are by intent, not by file.** `mcp-server/src/tools/index.ts` builds them:
-`CORE_TOOL_NAMES` (35 tools, the only set on by default) and `SEMANTIC_GROUPS`
+`CORE_TOOL_NAMES` (38 tools, the only set on by default) and `SEMANTIC_GROUPS`
 (runtime, scaffolding, analysis, editor, project_config, export, refactor) pick tools
 **by name**; anything unclaimed falls back to its source file's group. The builder
 throws if a tool ends up in no toolset, so an unreachable tool breaks the build instead
@@ -87,10 +87,29 @@ live (open-scene) mutation leaves the `.tscn` file's md5 unchanged (proving no c
   here when you add or change a tool's disk-path logic — it's the regression net a
   refactor needs.
 
+## Driving a USER's project (learned by building a game with these tools)
+
+- **New autoload or new `class_name` → `restart_editor`**, not
+  `rescan_filesystem`. A running editor registers neither, so scripts using them
+  fail to compile — silently: an uncompiled script has no exported properties, so
+  writes land as defaults and still answer `ok`. Symptom: set a property, call
+  succeeds, read it back wrong.
+- **Wire node-typed `@export` slots with `set_node_reference`** —
+  `set_node_properties` takes a JSON value, this needs a live object.
+- **Change project config through the tools** (`setup_autoload`,
+  `update_project_settings`, `configure_input_map`); an open editor holds its own
+  copy of `project.godot` and overwrites text edits.
+- `script` + `properties` in one call is safe (script attaches first). Whatever
+  still would not apply comes back under `warnings` — read it.
+
 ## Gotchas
 
-- `validate_script` strips the `class_name` line before compiling; keep it that way, or
-  every script that declares a `class_name` false-positives on a global-class collision.
+- `validate_script` loads with `CACHE_MODE_REPLACE` and judges by
+  `get_instance_base_type()`. Keep both. `GDScript.reload()` on source compiles in
+  isolation, where autoloads and global classes do not exist; `can_instantiate()` is
+  false for any valid script touching a singleton — together they once called 4 of 4
+  working scripts broken. `CACHE_MODE_IGNORE` builds a second live copy of a global
+  class and hard-crashes the engine on a multi-file sweep.
 - `run_scene`'s scene arg is `scene`, not `scene_path`.
 - Launch Godot with the full `Godot_v4.7-stable_win64.exe` (the `_console.exe` sibling is
   a broken stub — CreateProcess error 193), and quote the `--path` value so a space in the
