@@ -5,6 +5,95 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [Unreleased]
+
+Everything here was found by building a game with the tools rather than by
+reading them. Three of the four gaps reported after that session turned out to
+be real; one was a misdiagnosis, recorded below because the misdiagnosis is the
+more useful lesson.
+
+### Added
+- **`set_node_reference`** — points an exported node slot (`@export var target:
+  Area2D`) at another node. There was no way to do this at all: every property
+  tool takes a JSON value and this needs a live object, so wiring components
+  meant redesigning them to discover each other at runtime. The tool bending the
+  code, rather than the other way round.
+- **`render_scene_preview`** — renders a 2D scene to a PNG without launching the
+  game, auto-framed on its content. Looking at a scene previously required a
+  launch, a runtime connection, and remembering to stop it, so in practice
+  nobody looked and visual mistakes were found late. Needs a real display;
+  `--headless` uses the dummy driver and produces no image.
+- **`restart_editor`** — saves scenes and project settings, then restarts. A new
+  autoload or `class_name` is invisible to a running editor (measured: the
+  setting registers, the script still fails to compile), and the only previous
+  way out was killing the process from a shell.
+
+### Fixed
+- **`validate_scripts` called healthy scripts broken.** It compiled each file in
+  isolation, where a project's autoloads and global classes do not exist, so
+  anything touching a singleton came back as a parse error — 4 of 4 scripts in a
+  real project, all of which ran fine. It now loads the file the way the editor
+  does and judges it by whether the parser resolved a base type.
+- **Exported properties passed with a script were silently dropped.** Properties
+  were applied *before* `set_script`, so the property did not exist yet: a scene
+  built with `max_health: 400` shipped with 100 and reported ok. Scripts attach
+  first now, and anything still unapplied is returned under `warnings`.
+- **Writes are read back.** A property can exist, accept an assignment and still
+  hold something else — a `TextureRect` asked for `size.y = 6.667` keeps 16,
+  because a Control's minimum size is its texture's. Mismatches are reported;
+  exact writes stay silent.
+- **`validate_scripts` sweeps are bounded.** Validation costs ~34ms per script on
+  the editor's main thread, so a whole-project sweep could approach the bridge's
+  20s ping watchdog and drop the connection it was answering through. `addons/`
+  is skipped by default, and the response carries `elapsed_ms`.
+- **`game_eval` no longer loses the runtime connection** to a stale `node_path`.
+  The null access that followed could not be caught, broke the attached debugger,
+  and cost the whole connection.
+- **The piggybacked editor digest dropped `filesystem_changed`.** It fires on
+  every file the *agent* writes but arrives deferred, so it was attributed to the
+  developer and rode along on nearly every response — about 90% of all digest
+  content, reporting writes the agent had just made.
+
+### Not a bug, recorded so it is not "fixed" again
+- **`send_input` works.** It was reported broken on the strength of a jump that
+  never fired; the real cause was floor snapping cancelling the velocity. All
+  three delivery routes update `is_action_pressed` and `is_action_just_pressed`,
+  now covered by a test that runs as a scene (Input only advances on real frames).
+- **`create_sprite_animation` already sets `UPDATE_DISCRETE`** on the frame track.
+  That was a hypothesis recorded without checking.
+
+## [1.1.5] - 2026-07-27
+
+See [`release-notes/v1.1.5.md`](./release-notes/v1.1.5.md). Twelve tools added
+and a long backlog closed, but the pattern is the part worth keeping: **five
+times a recorded cause turned out to be wrong**, and each real one came from a
+test that failed rather than from re-reading the code.
+
+### Added
+- **`save_scene`** — the loop-breaker. Every mutating tool edits the LIVE tree
+  when its target scene is open, which is what stops it clobbering unsaved work,
+  and nothing could persist those edits: an agent that edited a scene and then
+  ran the game tested the PREVIOUS version of the file, silently, every time.
+  Live-path responses now also carry `unsaved: true`.
+- Runtime determinism cluster: `seed_rng`, `step_frames`, `time_scale`,
+  `await_condition`.
+- `validate_references`, which checks that the groups, input actions and signals
+  scripts *use* actually exist — they fail silently at runtime otherwise.
+
+### Fixed
+- **Every write to an integer property was reported as a failure.** `_values_match`
+  compared different types as text; JSON has one number type, so every integer
+  arrives as a float, and the check compared `"1"` against `"1.0"`. A
+  single-property call seeing a failure saved nothing. Two backlog entries were
+  this one bug.
+- **Breakpoints were never broken.** 1.1.4 shipped a section explaining that they
+  never pause the game, with a Godot source reading behind it, and that reading
+  led to a drafted engine bug report. The blocker was the editor's **"Skip
+  Breakpoints"** toggle, which persists between sessions and cannot be read from
+  GDScript. All eleven `debug_*` tools work on 4.7 with it off.
+- `run_scene`'s editor freeze, the 1.5 MB activity digest, and unknown-tool
+  errors that cost ~1,000 tokens each.
+
 ## [1.1.4] - 2026-07-27
 
 See [`release-notes/v1.1.4.md`](./release-notes/v1.1.4.md). All of it came from
