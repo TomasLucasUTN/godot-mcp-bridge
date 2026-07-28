@@ -42,6 +42,9 @@ func _initialize() -> void:
 	_test_csharp_status()
 	_test_port_resolution()
 	_test_validate_addon_scripts()
+	_test_validate_script_sees_project_context()
+	_test_properties_apply_after_script_attaches()
+	_test_set_node_reference()
 	_test_tilemap_cells()
 	_test_animation_authoring()
 	_test_script_rewrites()
@@ -1034,6 +1037,143 @@ func bad():
 	# The temp compile must not leave files behind next to the real ones.
 	_check(not FileAccess.file_exists("res://addons/godot_mcp/tools/__mcp_validate_1.gd"),
 		"no throwaway validation file written to disk")
+	scr.free()
+
+
+# Wiring one node into another node's exported slot. There was no way to do this
+# through the tools at all — an @export typed as a node takes an object, and
+# every property tool takes a JSON value — so building a game with them meant
+# rewriting the game's components to find each other at runtime instead.
+func _test_set_node_reference() -> void:
+	print("\n[set_node_reference]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var script_path := "res://__gdtest_ref.gd"
+	var scene := "res://__gdtest_ref.tscn"
+	_rm(scene)
+	_write_text(script_path, "@tool\nextends Node2D\n\n@export var target: Node2D\n@export var target_path: NodePath\n")
+
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root",
+		"nodes": [{"name": "Holder", "type": "Node2D", "script": script_path},
+			{"name": "Marker", "type": "Marker2D"}]})
+
+	# A node-typed export gets the node itself; Godot writes it out as a NodePath.
+	var r: Dictionary = st.set_node_reference({"scene_path": scene, "node_path": "Holder",
+		"property": "target", "target_path": "Marker"})
+	_check(r.get("ok", false), "points a node-typed export at another node")
+	_check(str(r.get("stored_as", "")) == "node reference", "and reports how it was stored")
+	_check(FileAccess.get_file_as_string(scene).contains("target = NodePath(\"../Marker\")"),
+		"the .tscn holds the resolved NodePath")
+
+	# A NodePath-typed export gets the path, relative to the holder.
+	var rp: Dictionary = st.set_node_reference({"scene_path": scene, "node_path": "Holder",
+		"property": "target_path", "target_path": "Marker"})
+	_check(rp.get("ok", false), "points a NodePath-typed export at another node")
+	_check(str(rp.get("stored_as", "")) == "NodePath", "and knows it stored a NodePath")
+
+	# The failures have to be loud, or this repeats the silent-drop bug.
+	var missing: Dictionary = st.set_node_reference({"scene_path": scene, "node_path": "Holder",
+		"property": "no_such_export", "target_path": "Marker"})
+	_check(not missing.get("ok", true), "an unknown property is rejected, not ignored")
+	_check(str(missing.get("error", "")).contains("target"),
+		"and the error lists the node-typed properties that DO exist")
+
+	var no_target: Dictionary = st.set_node_reference({"scene_path": scene, "node_path": "Holder",
+		"property": "target", "target_path": "NotHere"})
+	_check(not no_target.get("ok", true), "a missing target node is rejected")
+
+	_rm(scene)
+	_rm(script_path)
+	st.free()
+
+
+# An exported property set in the SAME call that attaches the script used to be
+# dropped on the floor: properties were applied before set_script, so the
+# property did not exist yet, and the response still said ok. A boss scene was
+# built with max_health 400 and shipped with 100.
+func _test_properties_apply_after_script_attaches() -> void:
+	print("\n[exported properties survive script attachment]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var script_path := "res://__gdtest_exported.gd"
+	var scene := "res://__gdtest_exported.tscn"
+	_rm(scene)
+	_write_text(script_path, "@tool\nextends Node2D\n\n@export var max_health: int = 100\n@export var label_text: String = \"default\"\n")
+
+	# 1. create_scene, script and properties on a CHILD in one call.
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root",
+		"nodes": [{"name": "Kid", "type": "Node2D", "script": script_path,
+			"properties": {"max_health": 400, "label_text": "set"}}]})
+	var text := FileAccess.get_file_as_string(scene)
+	_check(text.contains("max_health = 400"), "child: exported int survives the same call as its script")
+	_check(text.contains("label_text = \"set\""), "child: exported String survives too")
+
+	# 2. add_node, same thing on a node added later.
+	st.add_node({"scene_path": scene, "node_name": "Second", "node_type": "Node2D",
+		"parent_path": ".", "script": script_path, "properties": {"max_health": 250}})
+	_check(FileAccess.get_file_as_string(scene).contains("max_health = 250"),
+		"add_node: exported property survives the same call as its script")
+
+	# 3. A property that genuinely does not exist must be REPORTED, not ignored.
+	var r: Dictionary = st.add_node({"scene_path": scene, "node_name": "Third", "node_type": "Node2D",
+		"parent_path": ".", "script": script_path, "properties": {"no_such_property_at_all": 1}})
+	_check(r.has("warnings"), "an unknown property comes back as a warning")
+	_check(str(r.get("warnings", [])).contains("no_such_property_at_all"),
+		"and the warning names the property that was dropped")
+
+	# 4. A clean call must stay clean — no warnings key when nothing was dropped.
+	var clean: Dictionary = st.add_node({"scene_path": scene, "node_name": "Fourth", "node_type": "Node2D",
+		"parent_path": ".", "script": script_path, "properties": {"max_health": 5}})
+	_check(not clean.has("warnings"), "a call with nothing dropped carries no warnings")
+
+	_rm(scene)
+	_rm(script_path)
+	st.free()
+
+
+# The false positives that made this tool unusable on a real project: it called
+# 4 of 4 healthy scripts broken. Both causes were the same mistake — compiling
+# the file in ISOLATION, where a project's autoloads and global classes do not
+# exist. Found by building a game with it, not by reading the code.
+func _test_validate_script_sees_project_context() -> void:
+	print("\n[validate_script — project context]")
+	var scr = preload("res://addons/godot_mcp/tools/script_tools.gd").new()
+
+	# A singleton only exists at runtime, so an isolated compile cannot resolve
+	# it. This is the one that reported err 36 on every file touching GameState.
+	var uses_autoload := "res://__gdtest_v_autoload.gd"
+	_write_text(uses_autoload, "extends Node\n\nfunc hi() -> void:\n\tMCPRuntime.push_runtime_log(\"info\", \"x\")\n")
+	_check(scr.validate_script({"path": uses_autoload}).get("valid", false),
+		"a script calling an autoload validates as valid")
+	_rm(uses_autoload)
+
+	# Extending a class_name from another file — reported err 43 before.
+	var extends_global := "res://__gdtest_v_global.gd"
+	_write_text(extends_global, "@tool\nextends SceneToolBase\n\nfunc hi() -> void:\n\tpass\n")
+	_check(scr.validate_script({"path": extends_global}).get("valid", false),
+		"a script extending a registered global class validates as valid")
+	_rm(extends_global)
+
+	# Declaring a class_name is not an error either, even though the name is
+	# already registered for this very file.
+	var declares_name := "res://__gdtest_v_named.gd"
+	_write_text(declares_name, "class_name GdTestValidateNamed\nextends Node\n\nfunc hi() -> void:\n\tpass\n")
+	_check(scr.validate_script({"path": declares_name}).get("valid", false),
+		"a script declaring a class_name validates as valid")
+	_rm(declares_name)
+
+	# ...and the other half: it must still catch every kind of real breakage.
+	# A validator with no false positives and no true positives is just `true`.
+	var broken := {
+		"res://__gdtest_v_syntax.gd": "extends Node\n\nfunc hi() -> void\n\tpass\n",
+		"res://__gdtest_v_undefined.gd": "extends Node\n\nfunc hi() -> void:\n\tno_such_function()\n",
+		"res://__gdtest_v_badbase.gd": "extends NoSuchBaseClassAnywhere\n\nfunc hi() -> void:\n\tpass\n",
+		"res://__gdtest_v_badtype.gd": "extends Node\n\nfunc hi() -> void:\n\tvar x: int = \"not an int\"\n",
+	}
+	for path in broken:
+		_write_text(path, broken[path])
+		_check(not scr.validate_script({"path": path}).get("valid", true),
+			"still invalid: %s" % String(path).get_file())
+		_rm(path)
+
 	scr.free()
 
 

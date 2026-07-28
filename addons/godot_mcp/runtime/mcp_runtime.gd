@@ -488,7 +488,21 @@ func _game_eval(args: Dictionary) -> Dictionary:
 	if not compiled.get("ok", false):
 		return compiled
 
-	var node = _resolve_runtime_node(node_path) if not node_path.is_empty() else null
+	# A node_path that does not resolve is checked HERE rather than being handed
+	# to the snippet as null. GDScript cannot catch the "Invalid access on a null
+	# instance" that follows, the attached debugger breaks on it, and the helper
+	# stops answering — so one stale path in a query costs the whole runtime
+	# connection and a scene restart. Measured: that is exactly how it was lost,
+	# on a node that had been freed a few seconds earlier.
+	var node = null
+	if not node_path.is_empty():
+		node = _resolve_runtime_node(node_path)
+		if node == null:
+			return {
+				"ok": false,
+				"error": "No node at '%s'. It may have been freed, or the path may be missing the runtime root prefix (run_scene reports it as runtime_root, e.g. \"/root/Main/Player\"). Nothing was executed — passing a null node into the snippet would break the debugger and drop this connection." % node_path,
+			}
+
 	var result = compiled["instance"].call("_mcp_eval", get_tree(), node)
 	return {"ok": true, "result": _serialize(result)}
 

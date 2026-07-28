@@ -191,7 +191,7 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'update_project_settings',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Update one or more Godot project settings. Pass a dictionary of setting paths to their new values. Use list_settings first to discover available setting paths, current values, and valid options for a category. For input action bindings, prefer configure_input_map — if you do pass input/* keys here, partial updates are merged safely (existing events are preserved).',
+    description: "Update one or more Godot project settings. Pass a dictionary of setting paths to their new values. Use list_settings first to discover available setting paths, current values, and valid options for a category. For input action bindings, prefer configure_input_map — if you do pass input/* keys here, partial updates are merged safely (existing events are preserved). Use this rather than editing project.godot as text: a running editor keeps its own copy in memory and will overwrite a text edit without noticing it.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -706,10 +706,21 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'rescan_filesystem',
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    description: 'Trigger a full filesystem rescan in the Godot editor. Use after creating, deleting, or modifying files externally (e.g. from the terminal or another tool). The scan is asynchronous and returns immediately.',
+    description: 'Trigger a full filesystem rescan in the Godot editor. Use after creating, deleting, or modifying files externally (e.g. from the terminal or another tool). The scan is asynchronous and returns immediately. NOT enough for a new autoload or a new class_name — those need restart_editor.',
     inputSchema: {
       type: 'object',
       properties: {}
+    }
+  },
+  {
+    name: 'restart_editor',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: "Restart the Godot editor. Needed for two things a rescan cannot fix: an AUTOLOAD added this session, and a brand-new class_name. Until the editor restarts, every script referencing them fails to compile — and a node whose script failed to compile loses its exported properties, so create_scene/add_node write defaults and still report ok. Symptom: you set a property, the call succeeds, and the value is wrong when you read it back. The bridge disconnects with the editor; poll get_godot_status until it reconnects (usually 20-40s).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        save: { type: 'boolean', description: 'Save all open scenes and project settings before restarting. Default true. Setting false discards unsaved editor work.' }
+      }
     }
   },
   {
@@ -752,7 +763,7 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'setup_autoload',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Register, unregister, or list autoload singletons. Autoloads are scripts/scenes loaded automatically at project start.',
+    description: "Register, unregister, or list autoload singletons. Autoloads are scripts/scenes loaded automatically at project start. ALWAYS use this rather than writing project.godot as text: a running editor holds its own copy of that file, so a text edit is invisible to it and gets overwritten the next time the editor saves. After adding one, call restart_editor — until the editor restarts, every script referencing the new singleton fails to compile, and a node whose script failed to compile silently loses its exported properties.",
     inputSchema: {
       type: 'object',
       properties: {

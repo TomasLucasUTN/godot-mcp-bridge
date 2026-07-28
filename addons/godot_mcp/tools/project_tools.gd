@@ -1427,6 +1427,47 @@ func rescan_filesystem(_args: Dictionary) -> Dictionary:
 	return {&"ok": true, &"message": "Filesystem rescan triggered."}
 
 # =============================================================================
+# restart_editor
+# =============================================================================
+
+## Restart the Godot editor, optionally saving first.
+##
+## Exists because a rescan is not always enough. Two things a running editor
+## will not pick up on its own:
+##   - an AUTOLOAD added during the session. Until it restarts, every script
+##     referencing that singleton fails to compile, and — worse — a node whose
+##     script failed to compile silently loses its exported properties, so
+##     create_scene reports ok and writes defaults.
+##   - a brand-new `class_name`, which the same failure mode follows.
+## Both cost real time to diagnose, because nothing reports them as errors.
+## Before this tool the only way out was killing the process from a shell.
+##
+## The connection drops with the editor and comes back a few seconds after it
+## reopens — poll get_godot_status until connected, the same as a manual restart.
+func restart_editor(args: Dictionary) -> Dictionary:
+	if not _editor_plugin:
+		return {&"ok": false, &"error": "No editor plugin available"}
+	var save_first: bool = bool(args.get(&"save", true))
+
+	var interface := _editor_plugin.get_editor_interface()
+	if save_first:
+		# Scenes first, then project settings: restart_editor(true) saves open
+		# scenes but NOT ProjectSettings, and a setting changed through these
+		# tools this session would otherwise be lost by the very restart meant to
+		# make it take effect.
+		interface.save_all_scenes()
+		ProjectSettings.save()
+
+	# Deferred so this call can return before the editor goes down — otherwise
+	# the response never reaches the agent and the restart looks like a crash.
+	interface.call_deferred(&"restart_editor", save_first)
+	return {
+		&"ok": true,
+		&"saved": save_first,
+		&"message": "Editor is restarting. The bridge will disconnect; poll get_godot_status until it reports connected again (usually 20-40s).",
+	}
+
+# =============================================================================
 # classdb_query
 # =============================================================================
 

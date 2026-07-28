@@ -49,13 +49,13 @@ const CORE_TOOL_NAMES: string[] = [
   'classdb_query', 'get_project_settings',
   // Scenes and nodes
   'create_scene', 'add_node', 'remove_node', 'modify_node_property',
-  'set_node_properties', 'rename_node', 'move_node', 'duplicate_node',
+  'set_node_properties', 'set_node_reference', 'rename_node', 'move_node', 'duplicate_node',
   'instance_scene', 'attach_script', 'connect_signal', 'batch_scene_edit',
   // Scripts
   'create_script', 'edit_script', 'list_scripts', 'validate_scripts', 'delete_file',
   // Run and observe
   'run_scene', 'stop_scene', 'is_playing', 'get_runtime_log', 'take_screenshot',
-  'get_errors', 'get_console_log', 'rescan_filesystem',
+  'get_errors', 'get_console_log', 'rescan_filesystem', 'restart_editor',
   // Cross-cutting
   'batch_execute', 'find_nodes_by_type', 'get_scene_dependencies',
 ];

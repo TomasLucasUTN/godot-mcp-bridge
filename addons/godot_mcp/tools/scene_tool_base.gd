@@ -163,16 +163,60 @@ func _parse_value(value: Variant) -> Variant:
 func _serialize_value(value: Variant) -> Variant:
 	return VariantCodec.serialize_value(value)
 
-func _set_node_properties(node: Node, properties: Dictionary) -> void:
+## Apply properties to a node. RETURNS the names it could not apply, because a
+## property the node does not have is the failure mode that costs the most time:
+## `node.set()` on an unknown name does nothing at all and reports nothing.
+##
+## That is not hypothetical. Building a game with these tools, a scene was
+## created with `max_health: 400` and came back with 100 — the node's script had
+## not compiled yet, so the exported property did not exist, and create_scene
+## answered "ok". The wrong value was only noticed hours later, at runtime.
+## Callers must surface what comes back here.
+func _set_node_properties(node: Node, properties: Dictionary) -> Array[String]:
 	# Parse against the property's DECLARED type rather than guessing from the
 	# value's shape. Without the hint, `[100, 100]` for a Vector2 property stays
 	# an Array, `node.set()` quietly does nothing, and the caller gets "set had
 	# no effect (type mismatch?)" for a value that reads perfectly natural — and
 	# that some other tools here do accept.
 	var types := _property_type_map(node)
+	var unknown: Array[String] = []
 	for prop_name: String in properties:
+		if not types.has(prop_name):
+			unknown.append(prop_name)
+			continue
 		var hint: int = int(types.get(prop_name, -1))
 		node.set(prop_name, VariantCodec.parse_typed_value(properties[prop_name], hint))
+	return unknown
+
+## Warnings collected while building nodes, drained into the tool's response.
+##
+## A plain accumulator rather than a return value threaded through every call:
+## node creation recurses through children, and widening five signatures to
+## carry a warnings array would touch far more code than the problem is worth.
+var _pending_warnings: Array[String] = []
+
+## Start collecting. Call at the top of any tool that creates or edits nodes.
+func _clear_warnings() -> void:
+	_pending_warnings.clear()
+
+## Record that a node rejected some properties. Names them AND the likely cause,
+## since by far the most common one is a script the editor has not compiled yet.
+func _note_unknown_properties(node: Node, unknown: Array[String]) -> void:
+	if unknown.is_empty():
+		return
+	var script_hint := ""
+	if node.get_script() != null:
+		script_hint = " The node has a script — if it was created during this session the editor may not have compiled it yet: call rescan_filesystem, or restart_editor when the script declares a new class_name or autoload."
+	_pending_warnings.append("Ignored %d propert%s not found on '%s' (%s): %s.%s" % [
+		unknown.size(), "y" if unknown.size() == 1 else "ies",
+		node.name, node.get_class(), ", ".join(unknown), script_hint])
+
+## Merge any collected warnings into a tool response. Returns it unchanged when
+## there is nothing to say, so a clean call stays clean.
+func _with_warnings(result: Dictionary) -> Dictionary:
+	if not _pending_warnings.is_empty():
+		result[&"warnings"] = _pending_warnings.duplicate()
+	return result
 
 ## name -> Variant.Type for the node's declared properties.
 func _property_type_map(node: Object) -> Dictionary:
