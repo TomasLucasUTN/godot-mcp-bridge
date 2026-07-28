@@ -15,20 +15,19 @@
  * --check needs only read access, so CI runs it with the default GITHUB_TOKEN.
  * --apply edits repository metadata, which that token cannot do: run it locally,
  * or from a workflow with a PAT.
+ *
+ * The wording and the comparison live in about-description.mjs so a test can
+ * pin them without touching the network.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { buildDescription, isInSync } from './about-description.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-/** The one sentence GitHub shows. Everything variable in it is computed. */
-function buildDescription(toolCount) {
-  return `MCP server for Godot 4 — give Claude, Cursor, or any MCP client full control of the Godot editor: ${toolCount} tools, live-tree editing with undo, DAP step debugger, GDScript LSP, runtime play-testing.`;
-}
 
 function toolCount() {
   const distPath = path.join(ROOT, 'mcp-server', 'dist', 'tools', 'index.js');
@@ -64,13 +63,14 @@ if (mode === '--check') {
   let current;
   try {
     current = JSON.parse(gh(['repo', 'view', '--json', 'description'])).description ?? '';
-  } catch (err) {
-    // No gh, no auth, no network: not a reason to fail someone's build.
-    console.log('Skipping About check (gh unavailable or not authenticated).');
+  } catch {
+    // No gh, no auth, no network: not a reason to fail someone's build. Said out
+    // loud, because a silent skip reads identically to a passing check.
+    console.log('SKIPPED: gh unavailable or not authenticated — the About was NOT verified.');
     process.exit(0);
   }
-  if (current.trim() === wanted) {
-    console.log('About is up to date.');
+  if (isInSync(current, wanted)) {
+    console.log('About is up to date (verified against GitHub).');
     process.exit(0);
   }
   console.error('GitHub About is out of date.\n');
