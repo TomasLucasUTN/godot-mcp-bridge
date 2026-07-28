@@ -5,7 +5,9 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
-## [Unreleased]
+## [1.1.6] - 2026-07-28
+
+See [`release-notes/v1.1.6.md`](./release-notes/v1.1.6.md).
 
 Everything here was found by building a game with the tools rather than by
 reading them. Three of the four gaps reported after that session turned out to

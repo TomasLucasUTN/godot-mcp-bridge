@@ -198,25 +198,42 @@ func _set_node_properties(node: Node, properties: Dictionary) -> Array[String]:
 			_note_property_mismatch(node, prop_name, wanted, node.get(prop_name))
 	return unknown
 
-## Did the value that landed match what was asked for? Approximate for floats and
-## the vector types, which round-trip through the codec and would otherwise
-## report a mismatch for the last decimal place.
-func _values_match(actual: Variant, wanted: Variant) -> bool:
-	if typeof(actual) != typeof(wanted):
-		return false
-	match typeof(actual):
-		TYPE_FLOAT:
-			return is_equal_approx(actual, wanted)
-		TYPE_VECTOR2:
-			return (actual as Vector2).is_equal_approx(wanted)
-		TYPE_VECTOR3:
-			return (actual as Vector3).is_equal_approx(wanted)
-		TYPE_RECT2:
-			return (actual as Rect2).is_equal_approx(wanted)
-		TYPE_COLOR:
-			return (actual as Color).is_equal_approx(wanted)
-		_:
-			return actual == wanted
+## Did the value that landed match what was asked for?
+##
+## Lives in the base because more than one tool needs it. It was previously
+## defined on SceneTools alone, so anything else extending this class that
+## compared a written value got no implementation at all — and a second copy
+## written here would have re-broken the number case below, which is a bug this
+## project has already shipped once.
+func _values_match(a: Variant, b: Variant) -> bool:
+	if typeof(a) == typeof(b):
+		# Floating point: an exact == on values that round-tripped through the
+		# codec reports a mismatch for the last decimal place.
+		match typeof(a):
+			TYPE_FLOAT:
+				return is_equal_approx(a, b)
+			TYPE_VECTOR2:
+				return (a as Vector2).is_equal_approx(b)
+			TYPE_VECTOR3:
+				return (a as Vector3).is_equal_approx(b)
+			TYPE_RECT2:
+				return (a as Rect2).is_equal_approx(b)
+			TYPE_COLOR:
+				return (a as Color).is_equal_approx(b)
+			_:
+				return a == b
+
+	# Numbers must be compared numerically, not as text.
+	#
+	# JSON has one number type, so every integer an MCP client sends arrives as a
+	# float. Setting an int property with it works — Godot coerces — but the
+	# read-back returns an int, and a string fallback compares "1" against "1.0"
+	# and calls a perfectly good write a failure. That is why setting
+	# collision_layer/collision_mask once reported "set had no effect (type
+	# mismatch?)", and why a single-property call then saved nothing at all.
+	if (a is int or a is float) and (b is int or b is float):
+		return is_equal_approx(float(a), float(b))
+	return str(a) == str(b)
 
 func _note_property_mismatch(node: Node, property: String, wanted: Variant, actual: Variant) -> void:
 	_pending_warnings.append("'%s.%s' was set to %s but holds %s — Godot clamped or coerced it (a Control's minimum size, an enum range, a node that rejects the value)." % [

@@ -1063,6 +1063,16 @@ func _test_property_readback_reports_clamping() -> void:
 	if r.has("warnings"):
 		_check(str(r.get("warnings")).contains("size"), "and the warning names the property")
 
+	# An int property written with the float every JSON client sends must NOT be
+	# reported as a mismatch. This exact comparison shipped broken once already
+	# (1.1.5: collision_layer "set had no effect"), and writing a second copy of
+	# _values_match re-broke it — hence one implementation, in the base, and this
+	# test standing over it.
+	var ints: Dictionary = st.add_node({"scene_path": scene, "node_name": "Body",
+		"node_type": "CharacterBody2D", "parent_path": ".",
+		"properties": {"collision_layer": 4, "collision_mask": 1}})
+	_check(not ints.has("warnings"), "an int property written from JSON is not a mismatch")
+
 	# A value that lands exactly must stay silent, or the warning is noise.
 	var clean: Dictionary = st.add_node({"scene_path": scene, "node_name": "Plain",
 		"node_type": "Node2D", "parent_path": ".",

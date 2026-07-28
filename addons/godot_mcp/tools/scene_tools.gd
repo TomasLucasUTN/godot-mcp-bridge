@@ -62,21 +62,6 @@ const _SHAPE_ALIASES := {
 	"sphere": "SphereShape3D",
 }
 
-func _values_match(a, b) -> bool:
-	if typeof(a) == typeof(b):
-		return a == b
-	# Numbers must be compared numerically, not as text.
-	#
-	# JSON has one number type, so every integer an MCP client sends arrives as a
-	# float. Setting an int property with it works — Godot coerces — but the
-	# read-back returns an int, and the old string fallback compared "1" against
-	# "1.0" and called a perfectly good write a failure. That is why setting
-	# collision_layer/collision_mask reported "set had no effect (type
-	# mismatch?)", and why a single-property call then saved nothing at all.
-	if (a is int or a is float) and (b is int or b is float):
-		return is_equal_approx(float(a), float(b))
-	return str(a) == str(b)
-
 # =============================================================================
 # create_scene
 # =============================================================================

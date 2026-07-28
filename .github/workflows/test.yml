@@ -26,6 +26,15 @@ jobs:
       - run: npm run build
       - run: npm test
 
+      # The GitHub About carries the tool count, and it drifted to fifteen
+      # releases out of date because nothing checked it. Read-only, so the
+      # default token is enough; it self-skips where gh is unavailable.
+      - name: Check the GitHub About is in step with the tool count
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/sync-about.mjs --check
+
   gdscript:
     # The Node suite exercises the bridge and the tool registry, but every
     # GDScript handler — the half that actually mutates scenes — only runs
@@ -92,6 +101,12 @@ jobs:
       - name: Run GDScript handler tests
         run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/run_tests.gd
 
+      - name: Check send_input actually reaches Input
+        # Runs as a SCENE, not with -s: the Input singleton only advances its
+        # action state on real frames. send_input was once reported broken on
+        # the strength of a jump that never fired; this answers that in seconds.
+        run: ./godot --headless --path mcp-server/src/tests/fixtures/e2e-project res://tests/input_delivery.tscn
+
       # The live-scene half — scene open in the editor, tools mutating the real
       # node tree — is where this project's hardest invariants live (no clobber,
       # no partial write, undo actually registered). It only runs with a real
@@ -109,6 +124,11 @@ jobs:
         # that flag, so on a runner with no display it cannot open a window and
         # the runtime-activity tests would fail for an environmental reason.
         run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Check scene rendering produces a real image
+        # Under xvfb because --headless uses the dummy driver: the viewport
+        # produces no image at all, so this would pass by rendering nothing.
+        run: xvfb-run -a ./godot --path mcp-server/src/tests/fixtures/e2e-project -s res://tests/render_preview.gd
 
       - name: Run the live-scene e2e harness
         working-directory: mcp-server

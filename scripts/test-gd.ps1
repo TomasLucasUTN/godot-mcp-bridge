@@ -33,10 +33,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Scene rendering needs a real display: --headless uses the dummy driver and the
-# viewport produces no image at all. Skipped rather than failed where there is
-# no display (CI), since a skip is honest and a false pass is not.
-if ($env:CI -or $env:GODOT_MCP_SKIP_RENDER) {
-    Write-Host "Skipping render test (no display)."
+# viewport produces no image at all, so this runs windowed. CI runs the same
+# check under xvfb (see .github/workflows/test.yml).
+if ($env:GODOT_MCP_SKIP_RENDER) {
+    Write-Host "Skipping render test (GODOT_MCP_SKIP_RENDER set)."
 } else {
     & $Godot --path $fixture -s "res://tests/render_preview.gd"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
