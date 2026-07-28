@@ -713,6 +713,22 @@ export const projectTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'render_scene_preview',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Render a 2D scene to a PNG WITHOUT running the game — the cheap way to actually look at a scene. take_screenshot needs a live game (launch, runtime connection, remembering to stop it); this renders offscreen in the editor, auto-framing the scene's content, and leaves no editor state changed. Use it to check layout, sprite placement, and whether a level looks like you think it does. 2D only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene to render (res://path/to/scene.tscn)' },
+        save_to: { type: 'string', description: 'Where to write the PNG. Defaults to res://addons/godot_mcp/cache/previews/<scene>.png' },
+        width: { type: 'number', description: 'Output width in pixels. Default 1152.' },
+        height: { type: 'number', description: 'Output height in pixels. Default 648.' },
+        transparent: { type: 'boolean', description: 'Transparent background instead of the scene\'s own. Default false.' }
+      },
+      required: ['scene_path']
+    }
+  },
+  {
     name: 'restart_editor',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     description: "Restart the Godot editor. Needed for two things a rescan cannot fix: an AUTOLOAD added this session, and a brand-new class_name. Until the editor restarts, every script referencing them fails to compile — and a node whose script failed to compile loses its exported properties, so create_scene/add_node write defaults and still report ok. Symptom: you set a property, the call succeeds, and the value is wrong when you read it back. The bridge disconnects with the editor; poll get_godot_status until it reconnects (usually 20-40s).",

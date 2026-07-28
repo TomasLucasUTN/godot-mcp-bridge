@@ -205,6 +205,7 @@ func _init_tools() -> void:
 		&"stop_headless_peers": [_project_tools, &"stop_headless_peers"],
 		&"classdb_query": [_project_tools, &"classdb_query"],
 		&"rescan_filesystem": [_project_tools, &"rescan_filesystem"],
+		&"render_scene_preview": [_project_tools, &"render_scene_preview"],
 		&"restart_editor": [_project_tools, &"restart_editor"],
 		&"undo_last": [_project_tools, &"undo_last"],
 		&"redo_last": [_project_tools, &"redo_last"],
@@ -373,6 +374,7 @@ func set_mcp_client(client: Object) -> void:
 const _COROUTINE_TOOLS := {
 	"wait": true,
 	"run_scene": true,
+	"render_scene_preview": true,
 }
 
 ## Tools that write to the project (files, nodes, scenes, settings). Blocked
@@ -510,6 +512,8 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 				result = await node.wait(args)
 			"run_scene":
 				result = await node.run_scene(args)
+			"render_scene_preview":
+				result = await node.render_scene_preview(args)
 			_:
 				push_error("[MCP] Coroutine tool '%s' has no direct dispatch case." % tool_name)
 				result = {&"ok": false, &"error": "Coroutine tool '%s' missing dispatch case" % tool_name}

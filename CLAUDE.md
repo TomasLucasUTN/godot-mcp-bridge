@@ -1,7 +1,7 @@
 # godot-mcp-bridge — project guide
 
 Godot 4 MCP server: a GDScript editor addon (`addons/godot_mcp/`) talking over a
-WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 227 tools.
+WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 228 tools.
 Architecture is the converged standard for the space (Node stdio ↔ WS ↔ editor plugin).
 
 ## Two rules that keep the codebase healthy (apply these first)
@@ -45,7 +45,7 @@ truth — the registry test uses them to exempt those tools, so a new one that s
 them fails the build.
 
 **Toolsets are by intent, not by file.** `mcp-server/src/tools/index.ts` builds them:
-`CORE_TOOL_NAMES` (35 tools, the only set on by default) and `SEMANTIC_GROUPS`
+`CORE_TOOL_NAMES` (38 tools, the only set on by default) and `SEMANTIC_GROUPS`
 (runtime, scaffolding, analysis, editor, project_config, export, refactor) pick tools
 **by name**; anything unclaimed falls back to its source file's group. The builder
 throws if a tool ends up in no toolset, so an unreachable tool breaks the build instead

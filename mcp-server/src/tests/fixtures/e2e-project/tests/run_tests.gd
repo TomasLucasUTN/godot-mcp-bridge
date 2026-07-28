@@ -46,6 +46,7 @@ func _initialize() -> void:
 	_test_properties_apply_after_script_attaches()
 	_test_set_node_reference()
 	_test_validate_scripts_sweep()
+	_test_property_readback_reports_clamping()
 	_test_tilemap_cells()
 	_test_animation_authoring()
 	_test_script_rewrites()
@@ -1039,6 +1040,37 @@ func bad():
 	_check(not FileAccess.file_exists("res://addons/godot_mcp/tools/__mcp_validate_1.gd"),
 		"no throwaway validation file written to disk")
 	scr.free()
+
+
+# A property can exist, accept the assignment, and still hold something else:
+# Godot clamps and coerces without a word. The case that motivated this: a
+# TextureRect asked for size.y = 6.667 keeps 16, because a Control's minimum size
+# is its texture's. Building a level, that turned into grass strips three times
+# too tall, and nothing anywhere said so.
+func _test_property_readback_reports_clamping() -> void:
+	print("\n[property readback]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_readback.tscn"
+	_rm(scene)
+
+	# A Control whose minimum size will fight the requested one.
+	var r: Dictionary = st.create_scene({"scene_path": scene, "root_node_type": "Node2D",
+		"root_node_name": "Root",
+		"nodes": [{"name": "Panel", "type": "ColorRect",
+			"properties": {"custom_minimum_size": {"type": "Vector2", "x": 100, "y": 100},
+				"size": {"type": "Vector2", "x": 10, "y": 10}}}]})
+	_check(r.has("warnings"), "a clamped size comes back as a warning")
+	if r.has("warnings"):
+		_check(str(r.get("warnings")).contains("size"), "and the warning names the property")
+
+	# A value that lands exactly must stay silent, or the warning is noise.
+	var clean: Dictionary = st.add_node({"scene_path": scene, "node_name": "Plain",
+		"node_type": "Node2D", "parent_path": ".",
+		"properties": {"position": {"type": "Vector2", "x": 40, "y": 60}}})
+	_check(not clean.has("warnings"), "a value that lands exactly warns about nothing")
+
+	_rm(scene)
+	st.free()
 
 
 # The plural sweep. It shares _validate_one, so the false positives are already

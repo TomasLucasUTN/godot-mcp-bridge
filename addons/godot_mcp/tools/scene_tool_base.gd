@@ -185,8 +185,42 @@ func _set_node_properties(node: Node, properties: Dictionary) -> Array[String]:
 			unknown.append(prop_name)
 			continue
 		var hint: int = int(types.get(prop_name, -1))
-		node.set(prop_name, VariantCodec.parse_typed_value(properties[prop_name], hint))
+		var wanted: Variant = VariantCodec.parse_typed_value(properties[prop_name], hint)
+		node.set(prop_name, wanted)
+
+		# Read it back. A property can exist, accept the assignment without
+		# complaint, and still hold something else — Godot clamps and coerces
+		# silently. A TextureRect asked for size.y = 6.667 keeps 16, because a
+		# Control's minimum size is its texture's; the scene then looks wrong for
+		# reasons nothing reported. Cheap to check, and it is the only way the
+		# caller finds out.
+		if not _values_match(node.get(prop_name), wanted):
+			_note_property_mismatch(node, prop_name, wanted, node.get(prop_name))
 	return unknown
+
+## Did the value that landed match what was asked for? Approximate for floats and
+## the vector types, which round-trip through the codec and would otherwise
+## report a mismatch for the last decimal place.
+func _values_match(actual: Variant, wanted: Variant) -> bool:
+	if typeof(actual) != typeof(wanted):
+		return false
+	match typeof(actual):
+		TYPE_FLOAT:
+			return is_equal_approx(actual, wanted)
+		TYPE_VECTOR2:
+			return (actual as Vector2).is_equal_approx(wanted)
+		TYPE_VECTOR3:
+			return (actual as Vector3).is_equal_approx(wanted)
+		TYPE_RECT2:
+			return (actual as Rect2).is_equal_approx(wanted)
+		TYPE_COLOR:
+			return (actual as Color).is_equal_approx(wanted)
+		_:
+			return actual == wanted
+
+func _note_property_mismatch(node: Node, property: String, wanted: Variant, actual: Variant) -> void:
+	_pending_warnings.append("'%s.%s' was set to %s but holds %s — Godot clamped or coerced it (a Control's minimum size, an enum range, a node that rejects the value)." % [
+		node.name, property, str(wanted), str(actual)])
 
 ## Warnings collected while building nodes, drained into the tool's response.
 ##

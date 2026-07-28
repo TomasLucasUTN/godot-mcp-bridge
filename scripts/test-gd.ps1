@@ -32,5 +32,15 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $Godot --headless --path $fixture "res://tests/input_delivery.tscn"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Scene rendering needs a real display: --headless uses the dummy driver and the
+# viewport produces no image at all. Skipped rather than failed where there is
+# no display (CI), since a skip is honest and a false pass is not.
+if ($env:CI -or $env:GODOT_MCP_SKIP_RENDER) {
+    Write-Host "Skipping render test (no display)."
+} else {
+    & $Godot --path $fixture -s "res://tests/render_preview.gd"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 & $Godot --headless --path $fixture -s "res://tests/run_tests.gd"
 exit $LASTEXITCODE

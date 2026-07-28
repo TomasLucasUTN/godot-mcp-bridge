@@ -56,6 +56,7 @@ const CORE_TOOL_NAMES: string[] = [
   // Run and observe
   'run_scene', 'stop_scene', 'is_playing', 'get_runtime_log', 'take_screenshot',
   'get_errors', 'get_console_log', 'rescan_filesystem', 'restart_editor',
+  'render_scene_preview',
   // Cross-cutting
   'batch_execute', 'find_nodes_by_type', 'get_scene_dependencies',
 ];
