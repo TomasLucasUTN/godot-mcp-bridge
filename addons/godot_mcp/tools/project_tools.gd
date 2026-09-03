@@ -39,6 +39,10 @@ func set_mcp_client(client: Object) -> void:
 # uptime and detect "started but immediately crashed" cases.
 var _last_run_scene_started_at_ms: int = 0
 var _last_run_scene_target: String = ""
+## PID of a game launched with attach_debugger=false, so stop_scene can end it.
+## EditorInterface knows nothing about that process — it is not "playing" as far
+## as the editor is concerned.
+var _detached_pid: int = -1
 
 # Cached reference to the editor Output panel's RichTextLabel.
 var _editor_log_rtl: RichTextLabel = null
@@ -1286,6 +1290,14 @@ func run_scene(args: Dictionary) -> Dictionary:
 	var block_until_started: bool = bool(args.get(&"block_until_started", true))
 	var wait_for_runtime: bool = bool(args.get(&"wait_for_runtime", false))
 	var debug_collisions: bool = bool(args.get(&"debug_collisions", false))
+	# Detached: run the game as its own process instead of through the editor's
+	# Play. The editor's Play always attaches the remote debugger, and a
+	# debugger-attached process HALTS on any GDScript runtime error — including
+	# one inside a game_eval snippet — which reads to the bridge as a dead
+	# connection and costs a stop/run cycle per typo (notes/BACKLOG.md 5.2).
+	# Measured detached: the same bad snippet answers in 107ms and the next call
+	# still works.
+	var attach_debugger: bool = bool(args.get(&"attach_debugger", true))
 	if debug_collisions:
 		DirAccess.make_dir_recursive_absolute(_DEBUG_COLLISIONS_MARKER.get_base_dir())
 		var f := FileAccess.open(_DEBUG_COLLISIONS_MARKER, FileAccess.WRITE)
@@ -1306,6 +1318,11 @@ func run_scene(args: Dictionary) -> Dictionary:
 
 	if ei.is_playing_scene():
 		return {&"ok": false, &"error": "A scene is already running. Call stop_scene first."}
+	if _detached_pid != -1 and OS.is_process_running(_detached_pid):
+		return {&"ok": false, &"error": "A detached game (pid %d) is already running. Call stop_scene first." % _detached_pid}
+
+	if not attach_debugger:
+		return await _run_scene_detached(scene, wait_for_runtime, startup_timeout_ms, debug_collisions)
 
 	# Determine which scene file will run, so we can compute /root/<RootName>
 	# for the agent's downstream query_runtime_node calls.
@@ -1393,6 +1410,21 @@ func _peek_scene_root_name(scene_path: String) -> String:
 	return str(st.get_node_name(0))
 
 func stop_scene(_args: Dictionary) -> Dictionary:
+	# The detached case comes FIRST, before the editor-plugin guard: ending a
+	# process we started ourselves needs no editor, and requiring one made a
+	# detached game unstoppable in exactly the situations where it is most
+	# likely to be left running.
+	#
+	# A detached game is not "playing" as far as the editor is concerned, so it
+	# has to be ended by pid or it outlives the session in the background.
+	if _detached_pid != -1:
+		var pid := _detached_pid
+		_detached_pid = -1
+		if OS.is_process_running(pid):
+			OS.kill(pid)
+			return {&"ok": true, &"detached": true, &"pid": pid, &"message": "Detached game (pid %d) stopped." % pid}
+		return {&"ok": true, &"detached": true, &"pid": pid, &"message": "Detached game (pid %d) had already exited." % pid}
+
 	if not _editor_plugin:
 		return {&"ok": false, &"error": "Editor plugin not available"}
 	var ei := _editor_plugin.get_editor_interface()
@@ -1400,6 +1432,67 @@ func stop_scene(_args: Dictionary) -> Dictionary:
 		return {&"ok": true, &"message": "No scene is currently running"}
 	ei.stop_playing_scene()
 	return {&"ok": true, &"message": "Scene stopped"}
+
+
+## Launch the game as a separate process, with no debugger attached.
+##
+## What this buys, and what it costs, both measured rather than assumed:
+##   + a runtime error inside game_eval comes back as a result instead of
+##     halting the process and timing the call out (5.2)
+##   + the editor is not driving the game, so its UI stays out of the way
+##   - no editor debugger: the debug_* tools have nothing to attach to, and the
+##     Debugger > Errors panel stays empty, so get_errors loses its runtime
+##     source. get_runtime_log and get_console_log still work.
+##   - is_playing() reports false: the editor genuinely is not playing anything.
+func _run_scene_detached(scene: String, wait_for_runtime: bool, startup_timeout_ms: int, debug_collisions: bool) -> Dictionary:
+	var target := scene
+	if target.is_empty() or target == "current":
+		var ei := _editor_plugin.get_editor_interface()
+		if target == "current":
+			var edited := ei.get_edited_scene_root()
+			target = edited.scene_file_path if edited else ""
+		if target.is_empty():
+			target = str(ProjectSettings.get_setting("application/run/main_scene", ""))
+	if target.is_empty():
+		return {&"ok": false, &"error": "No scene to run: pass 'scene', open one, or set a main scene."}
+
+	if debug_collisions:
+		DirAccess.make_dir_recursive_absolute(_DEBUG_COLLISIONS_MARKER.get_base_dir())
+		var f := FileAccess.open(_DEBUG_COLLISIONS_MARKER, FileAccess.WRITE)
+		if f:
+			f.store_string("1")
+
+	var exe := OS.get_executable_path()
+	var project_dir := ProjectSettings.globalize_path("res://")
+	var pid := OS.create_process(exe, ["--path", project_dir, target])
+	if pid <= 0:
+		return {&"ok": false, &"error": "Could not start a detached Godot process (create_process returned %d)." % pid}
+
+	_detached_pid = pid
+	_last_run_scene_target = target
+	_last_run_scene_started_at_ms = Time.get_ticks_msec()
+
+	var runtime_connected := _runtime_is_connected()
+	var waited_ms := 0
+	if wait_for_runtime and not runtime_connected:
+		var t0 := Time.get_ticks_msec()
+		while not runtime_connected and (Time.get_ticks_msec() - t0) < startup_timeout_ms:
+			await _yield_ms(100)
+			runtime_connected = _runtime_is_connected()
+		waited_ms = Time.get_ticks_msec() - t0
+
+	var root_node_name: String = _peek_scene_root_name(target)
+	return {
+		&"ok": true,
+		&"detached": true,
+		&"pid": pid,
+		&"started": true,
+		&"scene_path": target,
+		&"runtime_connected": runtime_connected,
+		&"wait_for_runtime_ms": waited_ms,
+		&"runtime_root": "/root/%s" % root_node_name if not root_node_name.is_empty() else "",
+		&"message": "Started detached (pid %d), no debugger attached. game_eval survives a runtime error here; in exchange the debug_* tools and the Debugger > Errors source of get_errors are unavailable, and is_playing() reports false. stop_scene ends it." % pid,
+	}
 
 ## Backward-compatible thin wrapper around get_runtime_status. Keep using this
 ## if you only need the boolean. For richer info (uptime, runtime helper status,

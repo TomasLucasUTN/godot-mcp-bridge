@@ -283,6 +283,10 @@ export const projectTools: ToolDefinition[] = [
           type: 'number',
           description: 'Max time in ms to wait for the above signals. Default: 20000 (MCPRuntime connect time varies ~11-20s with system load). If wait_for_runtime still reports false, poll get_runtime_status shortly after — the connection is often about to land, not actually broken.'
         },
+        attach_debugger: {
+          type: 'boolean',
+          description: "Default true, which is the editor's own Play. Set false to run the game as its own process with NO debugger attached, which changes one thing that matters: a GDScript runtime error inside a game_eval snippet comes back as a result instead of halting the process (a debugger-attached game stops dead on any runtime error, which reads as a lost connection and costs a stop/run cycle per typo). Measured detached: the same bad snippet answers in 107ms and the next call still works. The cost, stated plainly: no debug_* stepping, get_errors loses its Debugger>Errors source, and is_playing() reports false because the editor genuinely is not playing anything. stop_scene still ends it."
+        },
         debug_collisions: {
           type: 'boolean',
           description: 'Turn on SceneTree.debug_collisions_hint for this run, so CollisionShape2D/3D outlines are drawn — take_screenshot / render_scene_preview will then show them. Has to be set before this call, not after: flipping it mid-session is documented as unreliable, so this only takes effect on the run it is passed to. Default: false.'

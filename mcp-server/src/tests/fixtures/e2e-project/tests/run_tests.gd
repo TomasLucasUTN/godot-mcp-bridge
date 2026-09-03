@@ -27,6 +27,7 @@ func _initialize() -> void:
 	_test_every_advertised_tool_is_dispatchable()
 	_test_tools_do_not_claim_work_they_did_not_do()
 	await _test_dry_run_writes_nothing()
+	_test_detached_pid_bookkeeping()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -360,6 +361,30 @@ func _test_dry_run_writes_nothing() -> void:
 	ex.queue_free()
 	st.free()
 	_rm(scene)
+
+# run_scene(attach_debugger=false) runs the game as its own process, which the
+# editor knows nothing about: it is not "playing", so stop_scene has to end it
+# by pid or it outlives the session in the background. The process spawning
+# itself is not testable headlessly; the bookkeeping that leaks a game if it is
+# wrong is.
+func _test_detached_pid_bookkeeping() -> void:
+	print("
+[detached pid]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+	root.add_child(pt)
+
+	_check(pt._detached_pid == -1, "no detached game is tracked to begin with")
+
+	# A pid that is certainly not running: stop_scene must report it and, above
+	# all, forget it. Leaving it set would make the next run_scene refuse with
+	# "a detached game is already running" forever.
+	pt._detached_pid = 999999
+	var res = pt.stop_scene({})
+	_check(res.get("ok", false), "stop_scene answers ok for a game that already exited")
+	_check(res.get("detached", false) == true, "and says it was the detached one")
+	_check(pt._detached_pid == -1, "and stops tracking it, so the next launch is not blocked")
+
+	pt.free()
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two
