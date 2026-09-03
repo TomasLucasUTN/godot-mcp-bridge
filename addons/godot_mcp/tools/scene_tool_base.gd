@@ -51,6 +51,12 @@ func _ensure_res_path(path: String) -> String:
 ## tree (ideally via _get_undo_redo) is undo-safe and does NOT clobber unsaved
 ## changes — unlike the disk load→save path, which overwrites whatever wasn't saved.
 func _edited_root_if_open(scene_path: String) -> Node:
+	# A preview must not touch the open scene at all: editing the live tree
+	# marks it unsaved and pushes an undo entry, which is a change the caller
+	# did not ask for. Dry runs therefore always take the disk path, where the
+	# work happens on a throwaway copy.
+	if _dry_run:
+		return null
 	if not _editor_plugin:
 		return null
 	var edited = _editor_plugin.get_editor_interface().get_edited_scene_root()
@@ -97,10 +103,28 @@ func _instantiate_packed_scene_for_edit(packed: PackedScene, as_instance: bool =
 
 ## Pack and save a disk-loaded scene root, then free it. Returns {} on success or
 ## an error dict. NEVER call this on a live edited root — it frees the node.
+## Set by the ToolExecutor for the duration of one call when the caller passed
+## dry_run. Lives here rather than in each tool because every scene mutation in
+## this addon funnels through the two helpers below: honour it once and every
+## tool that edits a scene previews correctly, including ones written later.
+var _dry_run := false
+
+## True when the current call previewed instead of writing. The executor reads
+## it to label the answer, so a tool cannot forget to say it did nothing.
+var _dry_run_skipped_write := false
+
+
 func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
 	if scene_path.begins_with("res://__mcp_rejected_path__"):
 		scene_root.queue_free()
 		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if _dry_run:
+		# The mutation already happened in memory, on a copy loaded from disk;
+		# throwing it away here is what makes the preview free. The scene file
+		# is never opened for writing, so its bytes cannot change.
+		_dry_run_skipped_write = true
+		scene_root.queue_free()
+		return {}
 	var packed = PackedScene.new()
 	var pack_result = packed.pack(scene_root)
 	if pack_result != OK:
@@ -296,6 +320,13 @@ func _acquire_scene(scene_path: String) -> Array:
 ## marker and knows to save; the mutation already landed on the editor's tree and
 ## persists on save, unclobbered. Returns {} on success / error dict.
 func _finish_scene_edit(root: Node, scene_path: String, is_live: bool) -> Dictionary:
+	if _dry_run and is_live:
+		# Should not be reachable: _edited_root_if_open refuses to hand out the
+		# live root during a dry run, so a live edit cannot have started. Kept
+		# because "should not" is not "cannot", and marking a scene unsaved is
+		# exactly the side effect a preview must not have.
+		_dry_run_skipped_write = true
+		return {}
 	if is_live:
 		if _editor_plugin:
 			_editor_plugin.get_editor_interface().mark_scene_as_unsaved()

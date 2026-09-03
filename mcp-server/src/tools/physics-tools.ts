@@ -21,7 +21,8 @@ export const physicsTools: ToolDefinition[] = [
           type: 'object',
           description: 'Ray target relative to the raycast origin: {x,y} for 2D or {x,y,z} for 3D'
         },
-        enabled: { type: 'boolean', description: 'Whether the raycast is enabled (default: true)' }
+        enabled: { type: 'boolean', description: 'Whether the raycast is enabled (default: true)' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }
@@ -40,7 +41,8 @@ export const physicsTools: ToolDefinition[] = [
         size: {
           description: 'Shape size: {x,y} for rectangle, a number (radius) for circle/sphere, {x,y,z} for box'
         },
-        node_name: { type: 'string', description: 'Name for the new CollisionShape node (default: "CollisionShape")' }
+        node_name: { type: 'string', description: 'Name for the new CollisionShape node (default: "CollisionShape")' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'shape_type']
     }
@@ -55,7 +57,8 @@ export const physicsTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the physics body/area node' },
         collision_layer: { description: 'Raw bitmask int, or array of 1-based layer indices (1..32) / layer names' },
-        collision_mask: { description: 'Raw bitmask int, or array of 1-based layer indices (1..32) / layer names' }
+        collision_mask: { description: 'Raw bitmask int, or array of 1-based layer indices (1..32) / layer names' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }

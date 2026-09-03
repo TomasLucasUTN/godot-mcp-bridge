@@ -19,7 +19,8 @@ export const scene3dTools: ToolDefinition[] = [
         node_name: { type: 'string', description: 'Name for the new node (default: "MeshInstance3D")' },
         size: {
           description: 'Mesh size, shape depends on mesh_type: box {x,y,z}; sphere a number (radius); cylinder/capsule {x: radius, y: height} or a number (radius); plane {x,y}; torus {x: inner_radius, y: outer_radius} or a number (outer_radius). Omit for Godot defaults.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path', 'mesh_type']
     }
@@ -34,7 +35,8 @@ export const scene3dTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file' },
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
         preset: { type: 'string', enum: ['sun', 'indoor', 'dramatic'], description: 'Lighting preset.' },
-        node_name: { type: 'string', description: 'Name for the new node (default: "DirectionalLight3D"/"OmniLight3D")' }
+        node_name: { type: 'string', description: 'Name for the new node (default: "DirectionalLight3D"/"OmniLight3D")' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path', 'preset']
     }
@@ -52,7 +54,8 @@ export const scene3dTools: ToolDefinition[] = [
         metallic: { type: 'number', description: 'Metallic factor (0..1)' },
         roughness: { type: 'number', description: 'Roughness factor (0..1)' },
         emission_color: { type: 'object', description: 'Emission color {r,g,b,a}; setting this enables emission' },
-        emission_energy: { type: 'number', description: 'Emission energy multiplier; setting this enables emission' }
+        emission_energy: { type: 'number', description: 'Emission energy multiplier; setting this enables emission' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }
@@ -69,7 +72,8 @@ export const scene3dTools: ToolDefinition[] = [
         sky_horizon_color: { type: 'object', description: 'Sky horizon color {r,g,b,a}' },
         fog_enabled: { type: 'boolean', description: 'Enable fog' },
         glow_enabled: { type: 'boolean', description: 'Enable glow' },
-        ssao_enabled: { type: 'boolean', description: 'Enable SSAO' }
+        ssao_enabled: { type: 'boolean', description: 'Enable SSAO' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path']
     }
@@ -87,7 +91,8 @@ export const scene3dTools: ToolDefinition[] = [
         projection: { type: 'string', enum: ['perspective', 'orthogonal'], description: 'Default: "perspective".' },
         fov: { type: 'number', description: 'Field of view in degrees' },
         near: { type: 'number', description: 'Near clip distance' },
-        far: { type: 'number', description: 'Far clip distance' }
+        far: { type: 'number', description: 'Far clip distance' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }
@@ -117,7 +122,8 @@ export const scene3dTools: ToolDefinition[] = [
         bone_name: { type: 'string', description: 'Name for the new bone.' },
         parent_bone: { type: 'string', description: '3D: the parent bone NAME. 2D: a node path or Bone2D name; omit to attach directly under the skeleton.' },
         rest: { description: '3D: a Transform3D. 2D: a Transform2D, or a {x,y} position for the common case.' },
-        length: { type: 'number', description: '2D only: bone length in pixels. Setting it disables autocalculation.' }
+        length: { type: 'number', description: '2D only: bone length in pixels. Setting it disables autocalculation.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'bone_name']
     }
@@ -134,7 +140,8 @@ export const scene3dTools: ToolDefinition[] = [
         bone_name: { type: 'string', description: 'Bone to pose.' },
         position: { description: '3D: {x,y,z}. 2D: {x,y}.' },
         rotation: { description: '3D: {x,y,z} euler radians or a quaternion. 2D: a number (radians).' },
-        scale: { description: '3D: {x,y,z}. 2D: {x,y}.' }
+        scale: { description: '3D: {x,y,z}. 2D: {x,y}.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'bone_name']
     }
@@ -150,7 +157,8 @@ export const scene3dTools: ToolDefinition[] = [
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
         node_name: { type: 'string', description: 'Name for the new node (default: "GridMap")' },
         mesh_library_path: { type: 'string', description: 'res:// path to a MeshLibrary resource to assign' },
-        cell_size: { type: 'object', description: 'Cell size {x,y,z}' }
+        cell_size: { type: 'object', description: 'Cell size {x,y,z}' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }

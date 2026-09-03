@@ -24,7 +24,8 @@ export const netcodeTools: ToolDefinition[] = [
           items: { type: 'string' },
           description: 'res:// paths of scenes this spawner may replicate. Each is verified to exist before anything is written.'
         },
-        spawn_limit: { type: 'number', description: 'Max concurrent spawned instances. Omit or 0 for unlimited.' }
+        spawn_limit: { type: 'number', description: 'Max concurrent spawned instances. Omit or 0 for unlimited.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'spawn_path']
     }
@@ -44,7 +45,8 @@ export const netcodeTools: ToolDefinition[] = [
           type: 'array',
           description: 'Properties to replicate. Each entry is either a string (".:position") or an object {path, spawn?, sync?} — "spawn" sends the value once at spawn time, "sync" keeps sending it. Both default to true.'
         },
-        replication_interval: { type: 'number', description: 'Seconds between syncs. Omit for every frame (0).' }
+        replication_interval: { type: 'number', description: 'Seconds between syncs. Omit for every frame (0).' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'properties']
     }

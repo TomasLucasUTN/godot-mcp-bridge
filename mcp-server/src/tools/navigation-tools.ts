@@ -16,7 +16,8 @@ export const navigationTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file' },
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
         dimension: { type: 'string', enum: ['2D', '3D'], description: 'Default: "2D".' },
-        node_name: { type: 'string', description: 'Name for the new node (default: "NavigationRegion2D"/"NavigationRegion3D")' }
+        node_name: { type: 'string', description: 'Name for the new node (default: "NavigationRegion2D"/"NavigationRegion3D")' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }
@@ -34,7 +35,8 @@ export const navigationTools: ToolDefinition[] = [
           type: 'array',
           description: '2D only. Walkable boundary as an array of at least 3 {x,y} points in the region\'s local space. Required to get a non-empty bake unless the NavigationPolygon already has an outline from another source (e.g. hand-drawn in the editor).',
           items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] }
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }
@@ -51,7 +53,8 @@ export const navigationTools: ToolDefinition[] = [
         dimension: { type: 'string', enum: ['2D', '3D'], description: 'Default: "2D".' },
         node_name: { type: 'string', description: 'Name for the new node (default: "NavigationAgent2D"/"NavigationAgent3D")' },
         radius: { type: 'number', description: 'Agent radius' },
-        max_speed: { type: 'number', description: 'Agent max speed' }
+        max_speed: { type: 'number', description: 'Agent max speed' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }
@@ -65,7 +68,8 @@ export const navigationTools: ToolDefinition[] = [
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the node' },
-        layers: { description: 'Raw bitmask int, or array of 1-based layer indices (1..32)' }
+        layers: { description: 'Raw bitmask int, or array of 1-based layer indices (1..32)' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'layers']
     }

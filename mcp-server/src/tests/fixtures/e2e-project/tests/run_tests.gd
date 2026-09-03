@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_analyze_2d_layout()
 	_test_every_advertised_tool_is_dispatchable()
 	_test_tools_do_not_claim_work_they_did_not_do()
+	await _test_dry_run_writes_nothing()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -284,6 +285,81 @@ func _test_set_main_scene() -> void:
 	ProjectSettings.save()
 	_rm(scene)
 	pt.free()
+
+# A preview that writes is not a preview. dry_run is honoured centrally in
+# SceneToolBase rather than in each tool, so this checks the guarantee where it
+# actually matters: the file's bytes.
+#
+# The last case is the one that makes the rest mean anything — the same tool
+# without dry_run MUST change the hash. A test that cannot detect a write would
+# pass just as happily against a save path that was silently broken.
+func _test_dry_run_writes_nothing() -> void:
+	print("
+[dry run]")
+	var scene := "res://__gdtest_dryrun.tscn"
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	root.add_child(st)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Child", "node_type": "Node2D", "parent_path": "."})
+
+	# preload, not load: by this point in the run other tests have driven the
+	# resource cache hard enough that a runtime load of this script has come
+	# back as an uninstantiable GDScript. preload resolves at parse time.
+	var ex = preload("res://addons/godot_mcp/tool_executor.gd").new()
+	root.add_child(ex)
+	ex._init_tools()
+
+	var before := FileAccess.get_md5(scene)
+	_check(before != "", "the scene to preview against exists")
+
+	var cases := [
+		["add_node", {"scene_path": scene, "node_name": "Ghost", "node_type": "Sprite2D", "parent_path": "."}],
+		["remove_node", {"scene_path": scene, "node_path": "Child"}],
+		["rename_node", {"scene_path": scene, "node_path": "Child", "new_name": "Renamed"}],
+		["duplicate_node", {"scene_path": scene, "node_path": "Child"}],
+		["modify_node_property", {"scene_path": scene, "node_path": "Child", "property_name": "position", "value": {"type": "Vector2", "x": 99, "y": 99}}],
+		["set_node_properties", {"scene_path": scene, "node_path": "Child", "properties": {"visible": false}}],
+		["set_node_groups", {"scene_path": scene, "node_path": "Child", "groups": ["ghosts"]}],
+	]
+
+	for case in cases:
+		var name: String = str(case[0])
+		# Rebuild the scene per case: these are real edits, and remove_node
+		# would otherwise delete the node the next case needs.
+		_rm(scene)
+		st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+		st.add_node({"scene_path": scene, "node_name": "Child", "node_type": "Node2D", "parent_path": "."})
+
+		var args: Dictionary = (case[1] as Dictionary).duplicate(true)
+		args["dry_run"] = true
+		var hash_before := FileAccess.get_md5(scene)
+		var preview = await ex.execute_tool(name, args)
+		_check(FileAccess.get_md5(scene) == hash_before, "%s dry run leaves the file byte-for-byte unchanged" % name)
+		_check(preview.get("ok", false), "%s dry run answers ok" % name)
+		_check(preview.get("dry_run", false) == true, "%s dry run says so" % name)
+		_check(preview.get("written", true) == false, "%s dry run reports nothing written" % name)
+
+		# And the same call for real still works, so the preview did not just
+		# fail its way to leaving the file alone.
+		var real = await ex.execute_tool(name, (case[1] as Dictionary).duplicate(true))
+		_check(real.get("ok", false), "%s still applies when not previewing" % name)
+
+	# Every preview above ran against a file that keeps changing (the non-preview
+	# calls are real edits), so compare a preview against the hash right before
+	# it rather than against the start.
+	var settled := FileAccess.get_md5(scene)
+	var preview_only = await ex.execute_tool("add_node", {"scene_path": scene, "node_name": "NeverWritten", "node_type": "Node2D", "parent_path": ".", "dry_run": true})
+	_check(preview_only.get("ok", false), "a preview on a settled file answers ok")
+	_check(FileAccess.get_md5(scene) == settled, "and the scene file is byte-for-byte unchanged")
+
+	# The control: the identical call without dry_run must change the file, or
+	# this whole test proves nothing.
+	await ex.execute_tool("add_node", {"scene_path": scene, "node_name": "NeverWritten", "node_type": "Node2D", "parent_path": "."})
+	_check(FileAccess.get_md5(scene) != settled, "the same call without dry_run does change it")
+
+	ex.queue_free()
+	st.free()
+	_rm(scene)
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two

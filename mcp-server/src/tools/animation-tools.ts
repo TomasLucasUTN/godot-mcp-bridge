@@ -30,7 +30,8 @@ export const animationTools: ToolDefinition[] = [
         node_path: { type: 'string', description: 'Path to the AnimationPlayer node' },
         animation_name: { type: 'string', description: 'Name for the new animation' },
         length: { type: 'number', description: 'Animation length in seconds (default: 1.0)' },
-        loop: { type: 'boolean', description: 'Whether the animation loops (default: false)' }
+        loop: { type: 'boolean', description: 'Whether the animation loops (default: false)' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'animation_name']
     }
@@ -47,7 +48,8 @@ export const animationTools: ToolDefinition[] = [
         animation_name: { type: 'string', description: 'Animation to add the track to' },
         track_type: { type: 'string', enum: ['value', 'position', 'rotation', 'method'], description: 'One of: "value", "position", "rotation", "method"' },
         track_node_path: { type: 'string', description: 'Node path (relative to the AnimationPlayer\'s root node) the track animates' },
-        property: { type: 'string', description: 'Property name (required for track_type "value"), e.g. "modulate" or "position:x"' }
+        property: { type: 'string', description: 'Property name (required for track_type "value"), e.g. "modulate" or "position:x"' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'animation_name', 'track_type', 'track_node_path']
     }
@@ -68,7 +70,8 @@ export const animationTools: ToolDefinition[] = [
         vframes: { type: 'number', description: 'Rows in the sheet (default 1).' },
         frames: { description: 'Frame count (uses 0..n-1) or an explicit array of sheet indices, e.g. [4,5,6,7] for a run cycle inside a shared sheet. Defaults to every frame in the sheet.' },
         fps: { type: 'number', description: 'Frames per second (default 10). Sets the animation length.' },
-        loop: { type: 'boolean', description: 'Loop the animation (default true).' }
+        loop: { type: 'boolean', description: 'Loop the animation (default true).' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'sprite_path', 'animation_name']
     }
@@ -102,7 +105,8 @@ export const animationTools: ToolDefinition[] = [
         animation_name: { type: 'string', description: 'Animation containing the track' },
         track_index: { type: 'number', description: 'Index of the track (from get_animation_info)' },
         time: { type: 'number', description: 'Keyframe time in seconds' },
-        value: { description: 'Keyframe value. Shape depends on track type; see description above.' }
+        value: { description: 'Keyframe value. Shape depends on track type; see description above.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'animation_name', 'track_index', 'time', 'value']
     }
@@ -130,7 +134,8 @@ export const animationTools: ToolDefinition[] = [
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the AnimationPlayer node' },
-        animation_name: { type: 'string', description: 'Animation to remove' }
+        animation_name: { type: 'string', description: 'Animation to remove' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'animation_name']
     }

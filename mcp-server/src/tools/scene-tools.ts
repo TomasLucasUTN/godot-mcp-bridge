@@ -190,7 +190,8 @@ export const sceneTools: ToolDefinition[] = [
         new_name: {
           type: 'string',
           description: 'New name for the node'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'new_name']
     }
@@ -217,7 +218,8 @@ export const sceneTools: ToolDefinition[] = [
         sibling_index: {
           type: 'number',
           description: 'Optional position among siblings (0 = first child). Omit or -1 to append.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'new_parent_path']
     }
@@ -268,7 +270,8 @@ export const sceneTools: ToolDefinition[] = [
         keep_offsets: {
           type: 'boolean',
           description: 'Keep the current offsets instead of resetting them to match the preset (default: false)'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'preset']
     }
@@ -291,7 +294,8 @@ export const sceneTools: ToolDefinition[] = [
         script_path: {
           type: 'string',
           description: 'Path to the script file (res://path/to/script.gd)'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'script_path']
     }
@@ -310,7 +314,8 @@ export const sceneTools: ToolDefinition[] = [
         node_path: {
           type: 'string',
           description: 'Path to the node (. for root)'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }
@@ -337,7 +342,8 @@ export const sceneTools: ToolDefinition[] = [
         shape_params: {
           type: 'object',
           description: 'Shape parameters: {radius: 32} for circles, {size: {x: 64, y: 64}} for rectangles, etc.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'shape_type']
     }
@@ -365,7 +371,8 @@ export const sceneTools: ToolDefinition[] = [
         texture_params: {
           type: 'object',
           description: 'Texture parameters. FromPath / ImageTexture / NewImageTexture: {path: "res://assets/sprite.png"}. PlaceholderTexture2D: {size: {x: 64, y: 64}}. GradientTexture2D / NoiseTexture2D: {width, height}.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'texture_type']
     }
@@ -396,7 +403,8 @@ export const sceneTools: ToolDefinition[] = [
         properties: {
           type: 'object',
           description: 'Optional property overrides on the instance root (e.g., {position: {type: "Vector3", x: 5, y: 0, z: 10}})'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'instance_path']
     }
@@ -411,7 +419,8 @@ export const sceneTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
         node_path: { type: 'string', description: 'Node that HOLDS the property (. for root, or a relative path)' },
         property: { type: 'string', description: 'Name of the exported property to set, e.g. "initial_state" or "health"' },
-        target_path: { type: 'string', description: 'Node it should point AT, relative to the scene root, e.g. "StateMachine/Idle"' }
+        target_path: { type: 'string', description: 'Node it should point AT, relative to the scene root, e.g. "StateMachine/Idle"' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'node_path', 'property', 'target_path']
     }
@@ -438,7 +447,8 @@ export const sceneTools: ToolDefinition[] = [
         mesh_params: {
           type: 'object',
           description: 'BoxMesh: {size:{x,y,z}}. SphereMesh: {radius,height,radial_segments,rings}. CylinderMesh: {top_radius,bottom_radius,height}. CapsuleMesh: {radius,height}. PlaneMesh: {size:{x,y}}. PrismMesh: {left_to_right,size:{x,y,z}}. TorusMesh: {inner_radius,outer_radius,rings}. QuadMesh: {size:{x,y}}. TextMesh: {text,font_size,depth}. file: {path:"res://mesh.tres"}'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'mesh_type']
     }
@@ -469,7 +479,8 @@ export const sceneTools: ToolDefinition[] = [
         surface_index: {
           type: 'number',
           description: 'For MeshInstance3D only: surface index for per-surface override. Omit for material_override on all surfaces.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'material_type']
     }
@@ -558,7 +569,8 @@ export const sceneTools: ToolDefinition[] = [
         space: {
           type: 'string', enum: ['local', 'global'],
           description: 'Coordinate space: "local" or "global" (default: "global")'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'grid_size']
     }
@@ -599,6 +611,7 @@ export const sceneTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
         node_path: { type: 'string', description: 'Path to the node (. for root)' },
         groups: { type: 'array', items: { type: 'string' }, description: 'List of group names to apply' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'groups']
     }
@@ -640,7 +653,8 @@ export const sceneTools: ToolDefinition[] = [
         node_path: { type: 'string', description: 'Path to the node owning the resource' },
         resource_path: { type: 'string', description: 'Path from node to the target resource via property names. Examples: "shape", "material", "material/next_pass"' },
         property_name: { type: 'string', description: 'Property on the target resource to set (e.g. "radius", "albedo_color")' },
-        value: { description: 'New value (same shape as modify_node_property.value)' }
+        value: { description: 'New value (same shape as modify_node_property.value)' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'resource_path', 'property_name', 'value']
     }
@@ -655,7 +669,8 @@ export const sceneTools: ToolDefinition[] = [
         scene_path: { type: 'string' },
         node_path: { type: 'string' },
         resource_path: { type: 'string', description: 'Path from node to the resource (e.g. "shape", "material")' },
-        save_to: { type: 'string', description: 'Destination path (res://.../foo.tres)' }
+        save_to: { type: 'string', description: 'Destination path (res://.../foo.tres)' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'resource_path', 'save_to']
     }
@@ -702,7 +717,8 @@ export const sceneTools: ToolDefinition[] = [
         signal: { type: 'string', description: 'Signal name on the emitting node' },
         to_node: { type: 'string', description: 'Path to the receiving node' },
         method: { type: 'string', description: 'Method name on the receiving node\'s script' },
-        flags: { type: 'number', description: 'Connection flags (CONNECT_DEFERRED=1, CONNECT_PERSIST=2, CONNECT_ONE_SHOT=4). Default 0.' }
+        flags: { type: 'number', description: 'Connection flags (CONNECT_DEFERRED=1, CONNECT_PERSIST=2, CONNECT_ONE_SHOT=4). Default 0.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'from_node', 'signal', 'to_node', 'method']
     }
@@ -787,7 +803,8 @@ export const sceneTools: ToolDefinition[] = [
         from_node: { type: 'string' },
         signal: { type: 'string' },
         to_node: { type: 'string' },
-        method: { type: 'string' }
+        method: { type: 'string' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'from_node', 'signal', 'to_node', 'method']
     }
@@ -805,7 +822,8 @@ export const sceneTools: ToolDefinition[] = [
           description: 'Ordered edits. Each is an object with an "op" field and that op\'s args.',
           items: { type: 'object', description: '{ op: "add_node"|"set_properties"|"remove_node"|"rename_node"|"move_node", ...args }' }
         },
-        stop_on_error: { type: 'boolean', description: 'Discard the whole batch (save nothing) on the first failing op. Default true.' }
+        stop_on_error: { type: 'boolean', description: 'Discard the whole batch (save nothing) on the first failing op. Default true.' },
+        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
       },
       required: ['scene_path', 'operations']
     }
