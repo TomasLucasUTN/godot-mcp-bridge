@@ -22,6 +22,7 @@ func _initialize() -> void:
 	_test_batch_scene_edit()
 	_test_create_csharp_script()
 	_test_set_main_scene()
+	_test_debugger_error_tree_identification()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -279,6 +280,42 @@ func _test_set_main_scene() -> void:
 	ProjectSettings.set_setting("application/run/main_scene", original)
 	ProjectSettings.save()
 	_rm(scene)
+	pt.free()
+
+# get_errors used to pick the Debugger > Errors tree by ancestor name and, when
+# that missed, took whichever Tree came first under the debugger — the profiler's
+# or the monitors' would do — then cached it forever, so error_count stayed 0
+# with a panel full of errors (issue #4). Rows Godot builds in that panel carry
+# _is_error / _is_warning meta; nothing else in the debugger does. This proves
+# the identifier tells the two apart.
+func _test_debugger_error_tree_identification() -> void:
+	print("\n[debugger error tree]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+
+	var errors_tree := Tree.new()
+	var errors_root := errors_tree.create_item()
+	var err_row := errors_tree.create_item(errors_root)
+	err_row.set_meta(&"_is_error", true)
+	var warn_row := errors_tree.create_item(errors_root)
+	warn_row.set_meta(&"_is_warning", true)
+	# A stack-trace child, which is not a top-level entry and must not be counted.
+	errors_tree.create_item(err_row)
+
+	var other_tree := Tree.new()
+	var other_root := other_tree.create_item()
+	other_tree.create_item(other_root)
+	other_tree.create_item(other_root)
+	other_tree.create_item(other_root)
+
+	var empty_tree := Tree.new()
+
+	_check(pt._tree_error_rows(errors_tree) == 2, "counts the two meta-stamped rows, not the stack child")
+	_check(pt._tree_error_rows(other_tree) == 0, "a debugger tree with more rows but no meta scores 0")
+	_check(pt._tree_error_rows(empty_tree) == 0, "a tree with no root scores 0")
+
+	errors_tree.free()
+	other_tree.free()
+	empty_tree.free()
 	pt.free()
 
 # read_scene max_depth caps recursion; a depth-limited node reports children_truncated.

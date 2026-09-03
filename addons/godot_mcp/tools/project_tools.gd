@@ -895,8 +895,16 @@ func get_errors(args: Dictionary) -> Dictionary:
 
 	var start := maxi(0, all_errors.size() - max_errors)
 	var errors := all_errors.slice(start)
-	return {&"ok": true, &"errors": errors, &"error_count": errors.size(),
+	var out := {&"ok": true, &"errors": errors, &"error_count": errors.size(),
 		&"summary": "%d error(s) found" % errors.size()}
+	# Say what the Debugger > Errors read actually saw whenever it contributed
+	# nothing. "0 errors" and "could not find the panel" are different answers
+	# and used to look identical from the outside (issue #4).
+	if dbg_errors.is_empty():
+		out[&"debugger_panel"] = _error_tree_diag if not _error_tree_diag.is_empty() else {
+			&"matched_by": "not searched (no editor plugin)",
+		}
+	return out
 
 func _extract_file_line(text: String) -> Dictionary:
 	var idx := text.find("res://")
@@ -992,32 +1000,86 @@ func _read_debugger_errors(include_warnings: bool) -> Array:
 
 	return errors
 
+## How many debugger trees the last lookup saw, and which one it took. Reported
+## in get_errors' payload so a "returns 0" report answers itself instead of
+## needing a session to reproduce (issue #4).
+var _error_tree_diag: Dictionary = {}
+
+## Find the Debugger > Errors tree.
+##
+## Identified by CONTENT, not by node name. The old version walked up from each
+## Tree looking for "Error" in an ancestor's name and, failing that, took
+## `candidates[0]` — whichever Tree happened to come first under the debugger,
+## which could be the profiler's, the monitors' or the stack list. It then
+## cached that choice permanently, so one wrong pick meant `error_count: 0`
+## forever with a panel full of errors. Godot stamps `_is_error` / `_is_warning`
+## on the rows it builds in this panel (script_editor_debugger.cpp), which is
+## the same meta `_severity_for_error_item` already trusts for severity — so a
+## tree holding rows with that meta IS the errors tree, in any editor language
+## and any dock layout.
+##
+## There can also be more than one ScriptEditorDebugger: Godot makes one per
+## debug session tab, so the first one found may be a stale tab while the
+## errors are in another.
 func _get_debugger_error_tree() -> Tree:
-	if is_instance_valid(_debugger_error_tree):
+	# Re-validate rather than trust the cache: a cached tree can be freed with
+	# its tab, and one cached while empty may not be the errors tree at all.
+	if is_instance_valid(_debugger_error_tree) and _tree_error_rows(_debugger_error_tree) > 0:
 		return _debugger_error_tree
 	if not _editor_plugin:
 		return null
 	var base := _editor_plugin.get_editor_interface().get_base_control()
-	var debugger := _find_node_by_class(base, "ScriptEditorDebugger")
-	if not debugger:
+
+	var debuggers: Array[Node] = []
+	_collect_by_class(base, "ScriptEditorDebugger", debuggers)
+	var candidates: Array[Tree] = []
+	for debugger in debuggers:
+		_collect_trees(debugger, candidates)
+
+	var best: Tree = null
+	var best_rows := 0
+	for tree: Tree in candidates:
+		var rows := _tree_error_rows(tree)
+		if rows > best_rows:
+			best = tree
+			best_rows = rows
+
+	_error_tree_diag = {
+		&"debugger_nodes": debuggers.size(),
+		&"trees_examined": candidates.size(),
+		&"rows_in_chosen_tree": best_rows,
+		&"matched_by": "error/warning row meta" if best != null else "nothing matched",
+	}
+
+	# No tree has error rows: either nothing has errored yet, or the panel was
+	# cleared. Both mean "no errors", and answering that is correct — guessing a
+	# tree is what produced the wrong answer before.
+	if best == null:
+		_debugger_error_tree = null
 		return null
-	var tree := _find_error_tree(debugger)
-	if tree:
-		_debugger_error_tree = tree
+
+	_debugger_error_tree = best
 	return _debugger_error_tree
 
-func _find_error_tree(node: Node) -> Tree:
-	var candidates: Array[Tree] = []
-	_collect_trees(node, candidates)
-	for tree: Tree in candidates:
-		var p := tree.get_parent()
-		while p and p != node:
-			if "Error" in p.name or "error" in p.name:
-				return tree
-			p = p.get_parent()
-	if not candidates.is_empty():
-		return candidates[0]
-	return null
+## Number of top-level rows Godot built as an error/warning entry. Zero for any
+## other Tree in the debugger, which is what makes this a reliable identifier.
+func _tree_error_rows(tree: Tree) -> int:
+	var root := tree.get_root()
+	if root == null:
+		return 0
+	var n := 0
+	var item := root.get_first_child()
+	while item:
+		if item.has_meta(&"_is_error") or item.has_meta(&"_is_warning"):
+			n += 1
+		item = item.get_next()
+	return n
+
+func _collect_by_class(node: Node, cls_name: String, out: Array[Node]) -> void:
+	if node.get_class() == cls_name:
+		out.append(node)
+	for child: Node in node.get_children():
+		_collect_by_class(child, cls_name, out)
 
 func _collect_trees(node: Node, out: Array[Tree]) -> void:
 	if node is Tree:
