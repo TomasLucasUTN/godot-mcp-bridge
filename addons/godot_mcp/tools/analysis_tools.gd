@@ -630,6 +630,257 @@ func _load_image(path: String) -> Image:
 	return null
 
 # =============================================================================
+# analyze_2d_layout — where things actually sit, not what the numbers say
+# =============================================================================
+## Every bug this answers was found by hand, expensively, while building a game
+## with these tools, and none of them was visible from a property read:
+##
+##  - Decoration planted 6-8 px above the ground, because a per-piece `dy` for
+##    "variation" was applied to a y computed from the sprite's height.
+##  - Decoration planted over a hole in the floor, standing on nothing.
+##  - Decoration whose silhouette ran into a floating platform, so the pair read
+##    as one chunk hovering in mid-air.
+##  - A gap in the floor nobody had checked a jump could clear.
+##
+## They are geometry questions, and geometry is what an agent reading a .tscn
+## cannot see. This resolves world transforms and shape extents once and answers
+## all four.
+##
+## HEURISTIC, and labelled as such in the payload: "resting on the floor" is
+## `bottom within tolerance of the surface below`, and a sprite with no collider
+## is treated as decoration. Both are conventions, not engine truths — the
+## numbers reported alongside each finding are the evidence; the verdict is a
+## suggestion.
+func analyze_2d_layout(args: Dictionary) -> Dictionary:
+	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
+	var loaded := _load_scene(scene_path)
+	var root: Node = loaded[0]
+	if root == null:
+		return loaded[1]
+
+	# 2 px of overlap into the ground is how art is normally seated, so it is the
+	# default tolerance for "resting" in both directions.
+	var tolerance: float = float(args.get(&"tolerance_px", 2.0))
+	var max_items: int = clampi(int(args.get(&"max_items", 40)), 1, 500)
+
+	var solids: Array = []      # {path, rect} for collision shapes
+	var decor: Array = []       # {path, type, rect} for textured nodes with no collider
+	_collect_2d(root, root, solids, decor)
+
+	if solids.is_empty() and decor.is_empty():
+		root.queue_free()
+		return {&"ok": true, &"scene_path": scene_path, &"note": "No 2D geometry found in this scene.",
+			&"floating": [], &"over_nothing": [], &"overlaps": [], &"floor_gaps": []}
+
+	var floating: Array = []
+	var over_nothing: Array = []
+	var overlaps: Array = []
+
+	for d in decor:
+		var rect: Rect2 = d[&"rect"]
+		var bottom: float = rect.position.y + rect.size.y
+		var surface := INF
+		for s in solids:
+			var srect: Rect2 = s[&"rect"]
+			# Only what is actually underneath this piece, horizontally.
+			if srect.position.x >= rect.position.x + rect.size.x or srect.position.x + srect.size.x <= rect.position.x:
+				continue
+			# ... and below its base, so a platform above it is not "the floor".
+			if srect.position.y + tolerance < bottom:
+				continue
+			surface = minf(surface, srect.position.y)
+
+		if is_inf(surface):
+			over_nothing.append({&"path": d[&"path"], &"type": d[&"type"],
+				&"bottom_y": bottom, &"note": "Nothing solid under this piece's footprint."})
+		elif surface - bottom > tolerance:
+			floating.append({&"path": d[&"path"], &"type": d[&"type"],
+				&"bottom_y": bottom, &"surface_y": surface,
+				&"gap_px": snappedf(surface - bottom, 0.01)})
+
+		# A piece whose silhouette runs INTO a solid (deeper than seating
+		# tolerance) fuses with it visually. Checked separately from floating:
+		# the same piece can be neither, either or both.
+		#
+		# Static geometry only, for the same reason floor gaps are: a player or
+		# an enemy standing in front of a tree is where they happen to be this
+		# frame, not a layout defect. Against a real level those were 6 of the
+		# 10 reports and every one of them was noise.
+		for s in solids:
+			var scls: String = str(s.get(&"body_class", ""))
+			if scls != "StaticBody2D" and scls != "AnimatableBody2D":
+				continue
+			var srect: Rect2 = s[&"rect"]
+			var hit := rect.intersection(srect)
+			if hit.size.x > tolerance and hit.size.y > tolerance:
+				overlaps.append({&"decoration": d[&"path"], &"solid": s[&"path"],
+					&"overlap_px": {&"w": snappedf(hit.size.x, 0.01), &"h": snappedf(hit.size.y, 0.01)}})
+
+	return _finish_layout_report(root, scene_path, solids, decor, floating, over_nothing, overlaps, tolerance, max_items)
+
+
+## Merge the solid footprints along x and report the holes between them — the
+## gaps a player has to cross. Reported with their width so a jump arc can be
+## checked against a number instead of a screenshot.
+func _floor_gaps(solids: Array) -> Array:
+	var spans: Array = []
+	for s in solids:
+		var r: Rect2 = s[&"rect"]
+		# Floor-ish: wider than tall. A wall contributes no crossable gap.
+		if r.size.x < r.size.y:
+			continue
+		# Static ground only. A CharacterBody2D standing over a hole is a player,
+		# not a floor, and counting it would erase the gap it is standing over.
+		var cls: String = str(s.get(&"body_class", ""))
+		if cls != "StaticBody2D" and cls != "AnimatableBody2D":
+			continue
+		spans.append([r.position.x, r.position.x + r.size.x])
+	if spans.size() < 2:
+		return []
+	spans.sort_custom(func(a, b): return a[0] < b[0])
+
+	var gaps: Array = []
+	var reach: float = spans[0][1]
+	for i in range(1, spans.size()):
+		var start: float = spans[i][0]
+		if start > reach:
+			gaps.append({&"from_x": snappedf(reach, 0.01), &"to_x": snappedf(start, 0.01),
+				&"width_px": snappedf(start - reach, 0.01)})
+		reach = maxf(reach, spans[i][1])
+	return gaps
+
+
+func _finish_layout_report(root: Node, scene_path: String, solids: Array, decor: Array,
+		floating: Array, over_nothing: Array, overlaps: Array,
+		tolerance: float, max_items: int) -> Dictionary:
+	var gaps := _floor_gaps(solids)
+	root.queue_free()
+
+	var findings := floating.size() + over_nothing.size() + overlaps.size()
+	return {
+		&"ok": true,
+		&"scene_path": scene_path,
+		&"solids_checked": solids.size(),
+		&"decorations_checked": decor.size(),
+		&"tolerance_px": tolerance,
+		&"floating": floating.slice(0, max_items),
+		&"over_nothing": over_nothing.slice(0, max_items),
+		&"overlaps": overlaps.slice(0, max_items),
+		&"floor_gaps": gaps.slice(0, max_items),
+		&"summary": "%d finding(s): %d floating, %d over nothing, %d fused into a solid; %d floor gap(s)." % [
+			findings, floating.size(), over_nothing.size(), overlaps.size(), gaps.size()],
+		&"method": "World-space AABBs from CollisionShape2D extents and texture sizes. 'Resting' means the piece's base is within tolerance_px of the surface under it — a convention, not an engine rule, so read the numbers, not just the verdict.",
+	}
+
+
+## Walk the scene once, splitting 2D nodes into things that collide and things
+## that are only drawn. A textured node under a physics body is part of that
+## body, not decoration standing on it.
+func _collect_2d(node: Node, root: Node, solids: Array, decor: Array) -> void:
+	if node is CollisionShape2D and node.shape != null:
+		var cs := node as CollisionShape2D
+		var extents := _shape_extents(cs.shape)
+		# Only a PhysicsBody2D is something a piece can stand on or fuse into.
+		# Run against a real level, counting Area2D shapes made every finding
+		# noise: the room-bounds Area2D spanning the whole level "filled" both
+		# floor gaps and "fused" with all 25 decorations, and the player's
+		# hurtbox and attack hitbox did the same. A trigger volume is not ground.
+		if extents != Vector2.ZERO and _collider_ancestor(node, root) is PhysicsBody2D:
+			var centre := cs.get_global_transform().origin
+			var scale := cs.get_global_transform().get_scale()
+			var size := Vector2(extents.x * 2.0 * absf(scale.x), extents.y * 2.0 * absf(scale.y))
+			# Both paths: the shape is where the geometry is, the body is what a
+			# human calls the thing ("Platform", not "Platform/Shape").
+			var body := _collider_ancestor(node, root)
+			solids.append({
+				&"path": String(root.get_path_to(body)) if body != null else String(root.get_path_to(node)),
+				&"shape_path": String(root.get_path_to(node)),
+				&"body_class": body.get_class() if body != null else "",
+				&"rect": Rect2(centre - size * 0.5, size),
+			})
+	elif node is Sprite2D or node is TextureRect:
+		# A parallax layer does not live in world space — it scrolls at its own
+		# rate and is never standing on anything, so measuring it against the
+		# floor is meaningless. Excluded rather than reported as six findings.
+		if not _has_collider_ancestor(node, root) and not _in_parallax(node, root):
+			var rect := _drawn_rect(node)
+			if rect.size.x > 0.0 and rect.size.y > 0.0:
+				decor.append({
+					&"path": String(root.get_path_to(node)),
+					&"type": node.get_class(),
+					&"rect": rect,
+				})
+
+	for child in node.get_children():
+		_collect_2d(child, root, solids, decor)
+
+
+func _has_collider_ancestor(node: Node, root: Node) -> bool:
+	return _collider_ancestor(node, root) != null
+
+
+## Is this node drawn by a parallax layer rather than placed in the world?
+func _in_parallax(node: Node, root: Node) -> bool:
+	var p := node.get_parent()
+	while p != null and p != root.get_parent():
+		var cls := p.get_class()
+		if cls == "ParallaxLayer" or cls == "Parallax2D" or cls == "ParallaxBackground":
+			return true
+		p = p.get_parent()
+	return false
+
+
+## Nearest CollisionObject2D above this node, or null. Doubles as the "is this
+## node part of a body" test.
+func _collider_ancestor(node: Node, root: Node) -> Node:
+	var p := node.get_parent()
+	while p != null and p != root.get_parent():
+		if p is CollisionObject2D:
+			return p
+		p = p.get_parent()
+	return null
+
+
+## Half-extents of the shapes a 2D game actually uses. An unsupported shape
+## contributes nothing rather than a guessed box.
+func _shape_extents(shape: Shape2D) -> Vector2:
+	if shape is RectangleShape2D:
+		return (shape as RectangleShape2D).size * 0.5
+	if shape is CircleShape2D:
+		var r := (shape as CircleShape2D).radius
+		return Vector2(r, r)
+	if shape is CapsuleShape2D:
+		var cap := shape as CapsuleShape2D
+		return Vector2(cap.radius, cap.height * 0.5)
+	return Vector2.ZERO
+
+
+## World-space rect of a drawn node, honouring `centered` and region_rect —
+## the two that decide where a sprite's BASE is, which is the whole question.
+func _drawn_rect(node: Node) -> Rect2:
+	var xform := (node as Node2D).get_global_transform() if node is Node2D else Transform2D(0.0, (node as Control).global_position)
+	var size := Vector2.ZERO
+	var offset := Vector2.ZERO
+
+	if node is Sprite2D:
+		var sp := node as Sprite2D
+		if sp.texture == null:
+			return Rect2()
+		size = sp.region_rect.size if sp.region_enabled else Vector2(sp.texture.get_size())
+		if sp.hframes > 1 or sp.vframes > 1:
+			size = Vector2(size.x / float(maxi(sp.hframes, 1)), size.y / float(maxi(sp.vframes, 1)))
+		offset = sp.offset - (size * 0.5 if sp.centered else Vector2.ZERO)
+	elif node is TextureRect:
+		var tr := node as TextureRect
+		size = tr.size
+
+	var scale := xform.get_scale()
+	var world_size := Vector2(size.x * absf(scale.x), size.y * absf(scale.y))
+	var top_left := xform.origin + Vector2(offset.x * scale.x, offset.y * scale.y)
+	return Rect2(top_left, world_size)
+
+
+# =============================================================================
 # texture_info — content bbox of a texture, without a Python round trip
 # =============================================================================
 ## Alpha threshold below which a pixel counts as background, not content.

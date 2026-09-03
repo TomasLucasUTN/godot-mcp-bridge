@@ -98,6 +98,20 @@ export const analysisTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'analyze_2d_layout',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Where a 2D scene's pieces actually sit, in world space — the questions a property read cannot answer. Reports decoration floating above the surface under it (with the gap in px), decoration standing over a hole in the floor, decoration whose silhouette runs into a solid so the two read as one hovering chunk, and every gap in the floor with its width so a jump arc can be checked against a number. Resolves world transforms, CollisionShape2D extents, sprite `centered`/`offset`/`region_rect` and hframes, so it sees what the screen shows rather than what the .tscn says. 'Resting' is a tolerance convention, not an engine rule: every finding carries the numbers it was judged on.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene_path: { type: 'string', description: 'Scene to analyse (res://path/to/scene.tscn)' },
+        tolerance_px: { type: 'number', description: 'How far a base may sit from the surface under it and still count as resting on it. Default 2 — art is normally seated a pixel or two into the ground.' },
+        max_items: { type: 'number', description: 'Cap per finding list (default 40, max 500).' }
+      },
+      required: ['scene_path']
+    }
+  },
+  {
     name: 'texture_info',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description: 'Size and content alpha bbox of a texture, computed in-engine — no PIL round trip needed for sprite alignment work (standing height, feet position, crop centring). With `hframes`, splits the image into that many equal-width columns and returns bbox per frame. Also flags `has_internal_gap`: true when a row inside the content bbox is fully transparent, which a plain bbox cannot detect — it means the crop contains two disconnected art pieces, not one (this is how three world-tileset PNGs shipped broken in this project: bush/rock/grass_tuft each had a real gap that getbbox()-only verification missed).',

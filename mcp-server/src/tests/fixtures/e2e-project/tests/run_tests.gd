@@ -23,6 +23,7 @@ func _initialize() -> void:
 	_test_create_csharp_script()
 	_test_set_main_scene()
 	_test_debugger_error_tree_identification()
+	_test_analyze_2d_layout()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -281,6 +282,100 @@ func _test_set_main_scene() -> void:
 	ProjectSettings.save()
 	_rm(scene)
 	pt.free()
+
+# analyze_2d_layout answers geometry questions that cost a whole session by hand:
+# decoration hanging in the air, decoration standing over a hole, decoration
+# fused into a platform, and how wide the floor gaps are. Built with exact
+# numbers so each verdict can be checked against the arithmetic rather than
+# eyeballed.
+#
+#   floor A  x 0..200   top y=100      floor B  x 300..400  top y=100
+#   platform x 120..180 top y=46
+#   grounded  x 10..42   base y=100  (resting)
+#   floating  x 50..82   base y=92   (8px of air)
+#   over gap  x 230..262 base y=100  (nothing under it)
+#   fused     x 130..162 y 30..62    (runs 32x8 into the platform)
+func _test_analyze_2d_layout() -> void:
+	print("\n[analyze_2d_layout]")
+	var scene_path := "res://__gdtest_layout.tscn"
+
+	var root := Node2D.new()
+	root.name = "Layout"
+
+	_add_solid(root, "FloorA", Vector2(100, 110), Vector2(200, 20))
+	_add_solid(root, "FloorB", Vector2(350, 110), Vector2(100, 20))
+	_add_solid(root, "Platform", Vector2(150, 50), Vector2(60, 8))
+	_add_decor(root, "Grounded", Vector2(10, 68))
+	_add_decor(root, "Floating", Vector2(50, 60))
+	_add_decor(root, "OverGap", Vector2(230, 68))
+	_add_decor(root, "Fused", Vector2(130, 30))
+
+	var packed := PackedScene.new()
+	packed.pack(root)
+	ResourceSaver.save(packed, scene_path)
+	root.free()
+
+	var at = preload("res://addons/godot_mcp/tools/analysis_tools.gd").new()
+	var r = at.analyze_2d_layout({"scene_path": scene_path})
+	_check(r.get("ok", false), "analyze_2d_layout ok")
+	_check(int(r.get("solids_checked", 0)) == 3, "found the three collision shapes")
+	_check(int(r.get("decorations_checked", 0)) == 4, "found the four drawn nodes")
+
+	var floating_paths := _paths_in(r.get("floating", []), "path")
+	_check("Floating" in floating_paths, "reports the piece sitting 8px above the floor")
+	_check(not ("Grounded" in floating_paths), "does not report the piece resting on it")
+	for entry in r.get("floating", []):
+		if str(entry.get("path", "")) == "Floating":
+			_check(absf(float(entry.get("gap_px", 0.0)) - 8.0) < 0.01, "and reports the gap as 8px")
+
+	var nothing_paths := _paths_in(r.get("over_nothing", []), "path")
+	_check("OverGap" in nothing_paths, "reports the piece standing over the hole")
+	_check(not ("Grounded" in nothing_paths), "and not one standing on real floor")
+
+	var fused := false
+	for entry in r.get("overlaps", []):
+		if str(entry.get("decoration", "")) == "Fused" and str(entry.get("solid", "")) == "Platform":
+			fused = true
+	_check(fused, "reports the piece whose silhouette runs into the platform")
+
+	var gaps: Array = r.get("floor_gaps", [])
+	_check(gaps.size() == 1, "reports exactly one floor gap")
+	if gaps.size() == 1:
+		_check(absf(float(gaps[0].get("width_px", 0.0)) - 100.0) < 0.01, "and measures it at 100px")
+
+	at.free()
+	_rm(scene_path)
+
+func _add_solid(root: Node2D, node_name: String, centre: Vector2, size: Vector2) -> void:
+	var body := StaticBody2D.new()
+	body.name = node_name
+	root.add_child(body)
+	body.owner = root
+	var cs := CollisionShape2D.new()
+	cs.name = "Shape"
+	var shape := RectangleShape2D.new()
+	shape.size = size
+	cs.shape = shape
+	cs.position = centre
+	body.add_child(cs)
+	cs.owner = root
+
+func _add_decor(root: Node2D, node_name: String, top_left: Vector2) -> void:
+	var sprite := Sprite2D.new()
+	sprite.name = node_name
+	var tex := PlaceholderTexture2D.new()
+	tex.size = Vector2(32, 32)
+	sprite.texture = tex
+	sprite.centered = false
+	sprite.position = top_left
+	root.add_child(sprite)
+	sprite.owner = root
+
+func _paths_in(entries: Array, key: String) -> Array:
+	var out: Array = []
+	for e in entries:
+		out.append(str(e.get(key, "")))
+	return out
 
 # get_errors used to pick the Debugger > Errors tree by ancestor name and, when
 # that missed, took whichever Tree came first under the debugger — the profiler's
