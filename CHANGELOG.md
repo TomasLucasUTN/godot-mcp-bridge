@@ -5,6 +5,24 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.1.7] - 2026-09-03
+
+See [`release-notes/v1.1.7.md`](./release-notes/v1.1.7.md).
+
+Two bugs wearing the same disguise: a tool slower than two ping cycles looked
+like a dead editor, so the bridge terminated a healthy one mid-answer and
+called it "Godot disconnected". `get_project_statistics` was the tool doing it
+— 120,685 ms on a 24,649-file project, now 2,012 ms answered from disk in the
+server. The watchdog now waits for in-flight calls, and anything over 10s
+reports how long it held the editor's main thread.
+
+Also: `get_errors` returning 0 with a full panel (#4, it was picking the wrong
+Tree and caching it), validation no longer leaves `__mcp_snippet_*.gd` in your
+addons folder, and five new capabilities — `analyze_2d_layout`, `texture_info`,
+`find_tools`, `monitor_properties({setup_code})`, and collision-shape rendering
+on `run_scene` / `render_scene_preview`. The scene tree now also ships as an MCP
+App, and `diagnose_connection` catches an addon older than the server.
+
 ## [1.1.6] - 2026-07-28
 
 See [`release-notes/v1.1.6.md`](./release-notes/v1.1.6.md).

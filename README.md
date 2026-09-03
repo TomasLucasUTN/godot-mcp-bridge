@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![228 tools](https://img.shields.io/badge/tools-228-brightgreen)](#-what-can-it-do)
+[![230 tools](https://img.shields.io/badge/tools-230-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 228 tools that were
+server, live-tree edits that never clobber your unsaved work, and 230 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -210,14 +210,15 @@ re-run it:
 
 | | tools | ~tokens |
 |---|---:|---:|
-| **`core`** — what loads by default | 35 | **7,540** |
-| Everything, every toolset on | 228 | 45,132 |
+| **`core`** — what loads by default | 38 | **8,665** |
+| Everything, every toolset on | 230 | 47,211 |
 
-So the default surface is **16.7% of the full one**, and turning everything on
-costs roughly **37,600 extra tokens on every request**. That is the reason the
+So the default surface is **18.4% of the full one**, and turning everything on
+costs roughly **38,500 extra tokens on every request**. That is the reason the
 default is small and the rest is opt-in per toolset (or preset once via
-`GODOT_MCP_TOOLSETS`), rather than a judgement that the other 190 tools do not
-matter.
+`GODOT_MCP_TOOLSETS`), rather than a judgement that the other 192 tools do not
+matter. `find_tools` searches all 230 by what you want to do, so a tool being
+unloaded never means it is unfindable.
 
 The estimate is chars ÷ 4, which is close enough to compare sets and honest about
 being an estimate. The most expensive definitions inside `core` are
@@ -233,7 +234,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 228 (38 loaded by default) | 155 | 42 | ~14 |
+| Tools | 230 (38 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -392,7 +393,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 228 Tools, 38 Loaded by Default
+### 230 Tools, 38 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -455,7 +456,7 @@ Run `map_project` and get a browser-based explorer at `localhost:6510`:
 │  AI Client  │◄────────────────►│  MCP Server  │◄─────────────►│ Godot Editor │
 │  (Claude,   │                  │  (Node.js)   │   port 6505   │  (Plugin)    │
 │   Cursor)   │                  │              │               │              │
-└─────────────┘                  │  Visualizer  │               │  228 tool    │
+└─────────────┘                  │  Visualizer  │               │  230 tool    │
                                  │  HTTP :6510  │               │  handlers    │
                                  └──────┬───────┘               └──────────────┘
                                         │

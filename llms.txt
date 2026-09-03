@@ -31,6 +31,19 @@ reading the source of 12 competing servers, not their marketing:
    through a shadow-workspace clone, without freezing the editor, and
    `get_export_status` polls it.
 
+3. **It answers geometry questions, not just property reads.** `analyze_2d_layout`
+   resolves world transforms and shape extents to report decoration floating
+   above the ground, decoration standing over a hole, sprites fused into a
+   platform, and every floor gap with its width — the class of bug that is
+   numerically plausible and visually broken. `texture_info` reports a texture's
+   content bbox and flags a crop containing two disconnected pieces, which a
+   plain bounding box cannot see.
+
+4. **The scene tree renders as an MCP App** (SEP-1865) in hosts that support the
+   extension: a collapsible panel instead of indented text, where clicking a node
+   tells the model what the developer is pointing at. Hosts without it get the
+   same text answer as before.
+
 Also uncommon: live-tree editing so an open scene with unsaved changes is never
 clobbered (edits go through the editor's own undo history, Ctrl+Z works), a real
 step-debugger over Godot's built-in Debug Adapter, scope-aware rename and
@@ -39,11 +52,19 @@ and a GUT test runner.
 
 ## Verification status
 
-All 225 tools have been exercised by hand against a running Godot 4.7
-editor in July 2026. That pass found and fixed four real bugs: collision presets
+225 of the 230 tools were exercised by hand against a running Godot 4.7 editor
+in July 2026. That pass found and fixed four real bugs: collision presets
 silently saving an empty bitmask when given layer names, a live-scene write that
 left partial mutations after reporting failure, a 2D navmesh bake that always
 produced an empty result, and an export status poll that hung until timeout.
+The five added since (texture_info, analyze_2d_layout, find_tools, and the
+setup_code / debug_collisions arguments) were verified differently and the
+difference is worth stating: each has unit tests plus one run against real
+data — analyze_2d_layout reported the game level's two floor gaps at exactly
+the widths its generator intended, texture_info flagged the known-bad sprite
+crop and cleared the known-good one. The scene-tree MCP App has not been
+watched rendering in a host.
+
 Claims in this file are things that were run, not things that were intended.
 
 Known limits, stated plainly: local-only (no remote), one Godot instance at a
@@ -63,12 +84,14 @@ debugger. A standard (non-.NET) Godot build cannot use C# at all.
 
 ## Tool surface
 
-225 tools. Only `core` (35) loads by default — a large always-on tool list makes
-agents wander and burns context. The rest are grouped by intent and enabled on
-demand with `enable_toolset({name})`; `list_toolsets` shows every group and its
-contents.
+230 tools, measured at 47,211 tokens of schema if every one were loaded. Only
+`core` (38, 8,665 tokens) loads by default — a large always-on tool list makes
+agents wander and burns context on every single request. The rest are grouped by
+intent and enabled on demand with `enable_toolset({name})`. `find_tools({query})`
+searches all 230 by what you want to do, loaded or not, so a small default never
+means a capability is unfindable; `list_toolsets` browses by group instead.
 
-- core (35): read/edit scenes and nodes, scripts, run the game, read errors
+- core (38): read/edit scenes and nodes, scripts, run the game, read errors
 - runtime (25): drive the running game — input, `game_eval`, live node access,
   signal awaiting, input record/replay, headless multiplayer peers
 - code_intel (8): Godot's language server — scope-aware definition, references
