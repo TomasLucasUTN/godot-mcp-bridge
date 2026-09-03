@@ -28,6 +28,7 @@ func _initialize() -> void:
 	_test_tools_do_not_claim_work_they_did_not_do()
 	await _test_dry_run_writes_nothing()
 	_test_detached_pid_bookkeeping()
+	_test_path_guard_holds_against_traversal()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -385,6 +386,78 @@ func _test_detached_pid_bookkeeping() -> void:
 	_check(pt._detached_pid == -1, "and stops tracking it, so the next launch is not blocked")
 
 	pt.free()
+
+# PathGuard is the only thing between a tool argument and the user's disk, and
+# every filesystem tool in this addon routes through it. The failure mode is
+# silent: a weakened guard does not throw, it just starts returning ok for a
+# path that resolves somewhere it should not.
+#
+# So this asserts the property rather than the messages: whatever comes back
+# ok must globalize to somewhere inside the project or user://. 26 inputs,
+# run 2026-09-03, zero escapes.
+func _test_path_guard_holds_against_traversal() -> void:
+	print("
+[path guard]")
+	var PG = load("res://addons/godot_mcp/utils/path_guard.gd")
+	var project_abs := ProjectSettings.globalize_path("res://").simplify_path()
+	var user_abs := ProjectSettings.globalize_path("user://").simplify_path()
+	var bs := char(92)
+
+	var must_reject := [
+		"res://../../../Windows/System32/drivers/etc/hosts",
+		"res://..",
+		"res://../",
+		"res://a/../../b",
+		"res://a/../..",
+		"res://./../secret.txt",
+		"../outside.txt",
+		".." + bs + "outside.txt",
+		"res://a//../../b",
+		"res://a/./../../b",
+		"res://....//....//x",
+		"res://sub/../../../..",
+		"   res://../x   ",
+		"res://a/b/../../../c",
+		"res://" + bs + ".." + bs + "x",
+		"",
+	]
+	var rejected := 0
+	for path in must_reject:
+		if not PG.sanitize(path).get("ok", false):
+			rejected += 1
+	_check(rejected == must_reject.size(), "every traversal attempt is refused (%d/%d)" % [rejected, must_reject.size()])
+
+	# These are accepted, and must be: they are odd but they land inside the
+	# project. What matters is where they RESOLVE, not how strange they look —
+	# an absolute Windows path becomes a nonsense filename under res://, not a
+	# door out.
+	var accepted_but_contained := [
+		"res://foo/..%2f..%2fbar",
+		"res://foo/%2e%2e/%2e%2e/bar",
+		"res:/../x",
+		"res:" + bs + ".." + bs + "x",
+		"user://../../etc/passwd",
+		"C:/Windows/System32/config",
+		"C:" + bs + "Windows" + bs + "System32",
+		bs + bs + "server" + bs + "share",
+		"//server/share/x",
+		"/etc/passwd",
+		"file:///C:/Windows/x",
+	]
+	var escaped: Array = []
+	for path in accepted_but_contained:
+		var r = PG.sanitize(path)
+		if not r.get("ok", false):
+			continue
+		var abs := ProjectSettings.globalize_path(str(r["path"])).simplify_path()
+		if not (abs.begins_with(project_abs) or abs.begins_with(user_abs)):
+			escaped.append("%s -> %s" % [path, abs])
+	_check(escaped.is_empty(), "nothing accepted resolves outside the sandbox: %s" % str(escaped))
+
+	# URL encoding is deliberately NOT decoded: decoding it would turn %2e%2e
+	# back into "..", which is the traversal this guard exists to stop.
+	var enc = PG.sanitize("res://foo/%2e%2e/bar")
+	_check(enc.get("ok", false) and "%2e%2e" in str(enc.get("path", "")), "percent-encoding is left as a literal name, not decoded into ..")
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two
