@@ -240,7 +240,8 @@ export const sceneTools: ToolDefinition[] = [
         new_name: {
           type: 'string',
           description: 'Optional name for the duplicate. Defaults to the original name with an incrementing number suffix.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview what would be duplicated without writing anything. Default false. The handler has always supported this; it was missing from the schema, so the unknown-argument guard rejected it.' }
       },
       required: ['scene_path', 'node_path']
     }

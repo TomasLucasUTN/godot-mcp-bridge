@@ -16,6 +16,10 @@ export const fileTools: ToolDefinition[] = [
         root: {
           type: 'string',
           description: 'Starting path like res://addons/ai_assistant or res://'
+        },
+        include_hidden: {
+          type: 'boolean',
+          description: 'Include dot-entries. Default false. Supported by the handler all along; it was missing from this schema, so the unknown-argument guard rejected anyone who passed it.'
         }
       },
       required: ['root']
@@ -36,6 +40,10 @@ export const fileTools: ToolDefinition[] = [
           type: 'number',
           description: '1-based inclusive start line (optional)'
         },
+        max_bytes: {
+          type: 'number',
+          description: 'Stop after this many bytes. Use it on a large file rather than pulling the whole thing into context. Supported by the handler all along; it was missing from this schema.'
+        },
         end_line: {
           type: 'number',
           description: 'Inclusive end line; 0 or missing means to end of file (optional)'
@@ -47,7 +55,7 @@ export const fileTools: ToolDefinition[] = [
   {
     name: 'search_project',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Search the Godot project for a substring and return file hits with line numbers. Useful for finding usages of functions, variables, or any text pattern.',
+    description: "Search the Godot project for a substring and return file hits with line numbers. Useful for finding usages of functions, variables, or any text pattern. Returns at most max_results matches (default 50) and each matched line is cut at 200 characters, because the answer goes into the model's context: a common query at the old default of 200 measured 31,145 characters. When it stops early it says `truncated: true` and reports `returned` rather than a total it did not finish counting.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -58,6 +66,14 @@ export const fileTools: ToolDefinition[] = [
         glob: {
           type: 'string',
           description: 'Optional glob filter like **/*.gd to search only GDScript files'
+        },
+        max_results: {
+          type: 'number',
+          description: 'Stop after this many matches (default 50). The handler has always supported it; it was missing from this schema, so the unknown-argument guard rejected anyone who tried.'
+        },
+        case_sensitive: {
+          type: 'boolean',
+          description: 'Match case exactly. Default false.'
         }
       },
       required: ['query']

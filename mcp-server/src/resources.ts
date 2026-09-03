@@ -267,6 +267,11 @@ the same rule the addon's tools follow.
     mimeType: 'text/markdown',
     text: `# Quick tool index by goal
 
+## Cannot find the tool
+- Search all 230 by what you want to do, loaded or not: \`find_tools({query})\`.
+  Only \`core\` (38) is loaded by default; the answer says which toolset to
+  turn on with \`enable_toolset\`.
+
 ## Editing files / scripts
 - Edit a small chunk of GDScript: \`edit_script\`
 - Validate it parses: \`validate_script\`
@@ -296,7 +301,9 @@ the same rule the addon's tools follow.
 - Output / errors: \`get_console_log\`, \`get_errors\`, \`clear_console_log\`
 - Filesystem: \`rescan_filesystem\`, \`list_dir\`, \`read_file\`, \`search_project\`
 - Open in editor: \`open_in_godot\`
-- Look at a scene WITHOUT running it: \`render_scene_preview\` (renders to PNG offscreen, auto-framed)
+- Look at a scene WITHOUT running it: \`render_scene_preview\` (renders to PNG offscreen, auto-framed; \`show_collision:true\` draws the collision shapes)
+- Where things actually SIT in a 2D scene: \`analyze_2d_layout\` — decoration floating above the ground, standing over a hole, or fused into a platform, plus every floor gap with its width (and whether a given jump clears it). The class of bug that is numerically plausible and visually broken.
+- A texture's real content box: \`texture_info\` — size, alpha bbox, per-frame bbox, and whether the crop secretly contains two disconnected pieces
 - Restart the editor: \`restart_editor\` (needed after adding an autoload or a new class_name — until it restarts, scripts using them fail to compile and nodes silently lose their exported properties)
 
 ## Running the game

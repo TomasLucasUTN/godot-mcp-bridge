@@ -21,7 +21,12 @@ ever disagree, that file wins.
 
 A flat goal-to-tool index optimized for "I want to do X — which tool?" lookups.
 
-### Editing files / scripts
+### Cannot find the tool
+- Search all 230 by what you want to do, loaded or not: `find_tools({query})`.
+  Only `core` (38) is loaded by default; the answer says which toolset to
+  turn on with `enable_toolset`.
+
+## Editing files / scripts
 - Edit a small chunk of GDScript: `edit_script`
 - Validate it parses: `validate_script`
 - Create / delete / rename files: `create_script`, `delete_file` (requires `confirm:true`), `rename_file`
@@ -50,7 +55,9 @@ A flat goal-to-tool index optimized for "I want to do X — which tool?" lookups
 - Output / errors: `get_console_log`, `get_errors`, `clear_console_log`
 - Filesystem: `rescan_filesystem`, `list_dir`, `read_file`, `search_project`
 - Open in editor: `open_in_godot`
-- Look at a scene WITHOUT running it: `render_scene_preview` (renders to PNG offscreen, auto-framed)
+- Look at a scene WITHOUT running it: `render_scene_preview` (renders to PNG offscreen, auto-framed; `show_collision:true` draws the collision shapes)
+- Where things actually SIT in a 2D scene: `analyze_2d_layout` — decoration floating above the ground, standing over a hole, or fused into a platform, plus every floor gap with its width (and whether a given jump clears it). The class of bug that is numerically plausible and visually broken.
+- A texture's real content box: `texture_info` — size, alpha bbox, per-frame bbox, and whether the crop secretly contains two disconnected pieces
 - Restart the editor: `restart_editor` (required after adding an autoload or a new `class_name` — a running editor registers neither, and scripts using them fail to compile until it restarts)
 
 ### Running the game

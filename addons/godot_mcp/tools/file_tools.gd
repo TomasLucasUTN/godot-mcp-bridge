@@ -7,7 +7,11 @@ class_name FileTools
 const PathGuard = preload("res://addons/godot_mcp/utils/path_guard.gd")
 
 const DEFAULT_MAX_BYTES := 200_000
-const DEFAULT_MAX_RESULTS := 200
+const DEFAULT_MAX_RESULTS := 50
+## A matched line is shown, not the file, so a single generated or minified
+## line must not be able to dominate the answer. Long lines are cut here and
+## say so.
+const MAX_MATCH_CHARS := 200
 const MAX_TRAVERSAL_DEPTH := 20
 const _SKIP_EXTENSIONS: Dictionary = {
 	".import": true, ".png": true, ".jpg": true, ".jpeg": true,
@@ -211,21 +215,34 @@ func search_project(args: Dictionary) -> Dictionary:
 			var line := lines[i]
 			var search_line := line if case_sensitive else line.to_lower()
 			if search_line.find(search_query) != -1:
+				var content_line := line.strip_edges()
+				var cut := content_line.length() > MAX_MATCH_CHARS
 				matches.append({
 					&"file": file_path,
 					&"line": i + 1,
-					&"content": line.strip_edges()
+					&"content": content_line.substr(0, MAX_MATCH_CHARS) if cut else content_line,
+					&"content_truncated": cut,
 				})
 				if matches.size() >= max_results:
 					break
 
-	return {
+	# When the scan stops early there is no honest total to give: it stopped
+	# looking. Reporting matches.size() as "total_matches" said 50 whether the
+	# project held 51 or 20,000, which is a number that reads as measured and
+	# was not. The count is only reported when it IS the count.
+	var truncated := matches.size() >= max_results
+	var out := {
 		&"ok": true,
 		&"query": query,
 		&"matches": matches,
-		&"total_matches": matches.size(),
-		&"truncated": matches.size() >= max_results
+		&"returned": matches.size(),
+		&"truncated": truncated,
 	}
+	if truncated:
+		out[&"note"] = "Stopped at max_results (%d), so this is not how many matches exist. Narrow the query, pass a glob, or raise max_results." % max_results
+	else:
+		out[&"total_matches"] = matches.size()
+	return out
 
 func _collect_files(path: String, glob_filter: String) -> PackedStringArray:
 	"""Recursively collect all searchable files."""
