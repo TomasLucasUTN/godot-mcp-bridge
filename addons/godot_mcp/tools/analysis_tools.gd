@@ -621,6 +621,105 @@ func _load_image(path: String) -> Image:
 	return null
 
 # =============================================================================
+# texture_info — content bbox of a texture, without a Python round trip
+# =============================================================================
+## Alpha threshold below which a pixel counts as background, not content.
+## Matches the recipe in the project's own GAMEDEV-LLM.md (>10 alpha = content) —
+## chosen there to ignore anti-aliasing fringe without missing real pixels.
+const _ALPHA_CONTENT_THRESHOLD := 10
+
+## Size + content alpha bbox of a texture (whole image, or per-frame on an
+## hframes-wide sheet), done in-engine instead of the PIL round trip this
+## project used all of last session for sprite alignment work.
+##
+## `getbbox()`-equivalent (min/max content extent) is NOT the only thing this
+## checks. It also row-scans for a fully-empty row *inside* that bbox — the
+## exact miss that shipped three world-tileset PNGs (bush/rock/grass_tuft) each
+## containing two disconnected art pieces with real transparency between them,
+## because an outer bbox alone cannot tell "one piece" from "two pieces with a
+## gap." Flagged here as `has_internal_gap`, per frame if `hframes` is given.
+func texture_info(args: Dictionary) -> Dictionary:
+	var raw_path: String = str(args.get(&"path", "")).strip_edges()
+	if raw_path.is_empty():
+		return {&"ok": false, &"error": "Missing 'path' (res:// or user:// to a texture)"}
+	var path: String = _ensure_res_path(raw_path)
+	if path == "res://__mcp_rejected_path__":
+		return {&"ok": false, &"error": "'path' was rejected by the project sandbox: '%s'. Must stay inside res:// or user://." % raw_path}
+
+	var img := _load_image(path)
+	if img == null:
+		return {&"ok": false, &"error": "Could not load image: " + path}
+	img.convert(Image.FORMAT_RGBA8)
+	var w := img.get_width()
+	var h := img.get_height()
+
+	var hframes: int = clampi(int(args.get(&"hframes", 1)), 1, maxi(w, 1))
+	if hframes > 1 and w % hframes != 0:
+		return {&"ok": false, &"error": "Image is %dpx wide, not evenly divisible by hframes=%d." % [w, hframes]}
+	var frame_w: int = w / hframes if hframes > 1 else w
+
+	var out := {
+		&"ok": true,
+		&"path": path,
+		&"width": w,
+		&"height": h,
+	}
+
+	if hframes <= 1:
+		var bbox := _alpha_bbox(img, 0, w)
+		out.merge(bbox)
+	else:
+		var frames: Array = []
+		for i in range(hframes):
+			var fbbox := _alpha_bbox(img, i * frame_w, frame_w)
+			fbbox[&"frame"] = i
+			frames.append(fbbox)
+		out[&"frame_width"] = frame_w
+		out[&"hframes"] = hframes
+		out[&"frames"] = frames
+	return out
+
+## Content alpha bbox within columns [x0, x0+width) of `img`, plus whether any
+## row inside that bbox's y-range is fully transparent (see texture_info doc).
+## Row-scan, not a single getbbox() call — that is the whole point of this tool.
+func _alpha_bbox(img: Image, x0: int, width: int) -> Dictionary:
+	var h := img.get_height()
+	var min_x := width
+	var min_y := h
+	var max_x := -1
+	var max_y := -1
+	var row_has_content: Array = []
+	row_has_content.resize(h)
+	row_has_content.fill(false)
+
+	for y in range(h):
+		var any_in_row := false
+		for x in range(x0, x0 + width):
+			if img.get_pixel(x, y).a8 > _ALPHA_CONTENT_THRESHOLD:
+				any_in_row = true
+				var local_x := x - x0
+				if local_x < min_x: min_x = local_x
+				if local_x > max_x: max_x = local_x
+				if y < min_y: min_y = y
+				if y > max_y: max_y = y
+		row_has_content[y] = any_in_row
+
+	if max_x < 0:
+		return {&"has_content": false, &"content_bbox": null, &"has_internal_gap": false}
+
+	var gap := false
+	for y in range(min_y, max_y + 1):
+		if not row_has_content[y]:
+			gap = true
+			break
+
+	return {
+		&"has_content": true,
+		&"content_bbox": {&"x": min_x, &"y": min_y, &"width": max_x - min_x + 1, &"height": max_y - min_y + 1},
+		&"has_internal_gap": gap,
+	}
+
+# =============================================================================
 # scene_diff — what changed in this scene since you last looked
 # =============================================================================
 ## The question an agent asks constantly, and until now could only answer by

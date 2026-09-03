@@ -278,6 +278,10 @@ export const projectTools: ToolDefinition[] = [
         startup_timeout_ms: {
           type: 'number',
           description: 'Max time in ms to wait for the above signals. Default: 20000 (MCPRuntime connect time varies ~11-20s with system load). If wait_for_runtime still reports false, poll get_runtime_status shortly after — the connection is often about to land, not actually broken.'
+        },
+        debug_collisions: {
+          type: 'boolean',
+          description: 'Turn on SceneTree.debug_collisions_hint for this run, so CollisionShape2D/3D outlines are drawn — take_screenshot / render_scene_preview will then show them. Has to be set before this call, not after: flipping it mid-session is documented as unreliable, so this only takes effect on the run it is passed to. Default: false.'
         }
       }
     }
@@ -483,8 +487,8 @@ export const projectTools: ToolDefinition[] = [
   },
   {
     name: 'monitor_properties',
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Record a time-series of one or more properties on a live node, one sample per frame for N frames, in the running game. Verifies motion/physics/interpolation (e.g. "did velocity ramp then settle?") WITHOUT screenshots. REQUIRES the game running with MCPRuntime connected. Property paths accept get_indexed() sub-paths like "position:x". Returns {samples:[{frame, t_msec, values:{prop:value}}]}.',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: 'Record a time-series of one or more properties on a live node, one sample per frame for N frames, in the running game. Verifies motion/physics/interpolation (e.g. "did velocity ramp then settle?") WITHOUT screenshots. REQUIRES the game running with MCPRuntime connected. Property paths accept get_indexed() sub-paths like "position:x". Optional `setup_code` runs once before the first sample, in the same call — use it to trigger the event being measured with zero round-trip gap (readOnlyHint is false because of this). Returns {samples:[{frame, t_msec, values:{prop:value}}], setup_result?}.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -494,7 +498,8 @@ export const projectTools: ToolDefinition[] = [
           items: { type: 'string' },
           description: 'Property paths to sample each frame, e.g. ["position", "velocity:y", "modulate:a"]. Sub-paths use get_indexed() colon syntax.'
         },
-        frames: { type: 'number', description: 'Number of frames to sample (1..1200, default 60). At 60fps, 60 frames ≈ 1 second.' }
+        frames: { type: 'number', description: 'Number of frames to sample (1..1200, default 60). At 60fps, 60 frames ≈ 1 second.' },
+        setup_code: { type: 'string', description: 'Optional game_eval-style snippet (function body, same `tree`/`node` scope as `node_path`) run once, synchronously, before the first sample — in the same call that starts sampling. Use this to trigger the event being measured (e.g. "node.jump()") so no round trip is lost between triggering it and starting to watch: without it, a sub-second event (a 0.7s jump arc, a 0.1s input buffer) can be entirely over before a separate monitor_properties call lands.' }
       },
       required: ['node_path', 'properties']
     }
@@ -723,7 +728,8 @@ export const projectTools: ToolDefinition[] = [
         save_to: { type: 'string', description: 'Where to write the PNG. Defaults to res://addons/godot_mcp/cache/previews/<scene>.png' },
         width: { type: 'number', description: 'Output width in pixels. Default 1152.' },
         height: { type: 'number', description: 'Output height in pixels. Default 648.' },
-        transparent: { type: 'boolean', description: 'Transparent background instead of the scene\'s own. Default false.' }
+        transparent: { type: 'boolean', description: 'Transparent background instead of the scene\'s own. Default false.' },
+        show_collision: { type: 'boolean', description: 'Draw CollisionShape2D/CollisionPolygon2D outlines (same visual as Godot\'s Debug > Visible Collision Shapes), so hitboxes can be checked from the PNG directly. Default false.' }
       },
       required: ['scene_path']
     }

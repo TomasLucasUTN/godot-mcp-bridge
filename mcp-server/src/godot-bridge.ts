@@ -515,8 +515,8 @@ export class GodotBridge {
    * the CLI) means no debugger either, which is the case that never broke — and
    * an addon too old to have the handler must not make game_eval unusable.
    */
-  private async precheckEvalSnippet(args: Record<string, unknown>): Promise<void> {
-    const code = args?.code;
+  private async precheckEvalSnippet(args: Record<string, unknown>, field: string = 'code'): Promise<void> {
+    const code = args?.[field];
     if (typeof code !== 'string' || code.trim() === '') return;
     if (!this.isConnected()) return;
 
@@ -539,6 +539,7 @@ export class GodotBridge {
 
   async invokeTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
     if (toolName === 'game_eval') await this.precheckEvalSnippet(args);
+    if (toolName === 'monitor_properties') await this.precheckEvalSnippet(args, 'setup_code');
 
     const target: 'editor' | 'runtime' = this.routeIsRuntime(toolName, args) ? 'runtime' : 'editor';
     const slot = target === 'editor' ? this.editor : this.runtime;

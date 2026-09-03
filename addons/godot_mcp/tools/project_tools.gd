@@ -1207,6 +1207,15 @@ func _yield_ms(ms: int) -> void:
 		OS.delay_msec(ms)
 
 
+## Marker consumed once by MCPRuntime._ready() in the spawned game process. Has
+## to be a file rather than an argument to play_custom_scene()/play_main_scene()
+## (neither takes one) — writing it just before Play launches the process and
+## reading it in the first autoload's _ready() is what makes debug_collisions
+## land before the scene exists, which is the one point SceneTree.debug_
+## collisions_hint is documented to reliably apply from (see notes/BACKLOG.md
+## §5.4 — flipping it mid-session is not reliable).
+const _DEBUG_COLLISIONS_MARKER := "res://addons/godot_mcp/cache/.debug_collisions"
+
 func run_scene(args: Dictionary) -> Dictionary:
 	if not _editor_plugin:
 		return {&"ok": false, &"error": "Editor plugin not available"}
@@ -1214,6 +1223,14 @@ func run_scene(args: Dictionary) -> Dictionary:
 	var scene: String = str(args.get(&"scene", ""))
 	var block_until_started: bool = bool(args.get(&"block_until_started", true))
 	var wait_for_runtime: bool = bool(args.get(&"wait_for_runtime", false))
+	var debug_collisions: bool = bool(args.get(&"debug_collisions", false))
+	if debug_collisions:
+		DirAccess.make_dir_recursive_absolute(_DEBUG_COLLISIONS_MARKER.get_base_dir())
+		var f := FileAccess.open(_DEBUG_COLLISIONS_MARKER, FileAccess.WRITE)
+		if f:
+			f.store_string("1")
+	elif FileAccess.file_exists(_DEBUG_COLLISIONS_MARKER):
+		DirAccess.remove_absolute(_DEBUG_COLLISIONS_MARKER)
 	# Default of 20s gives slower machines (cold-cache import, autoload heavy
 	# games) enough headroom for the editor to reach the playing state and
 	# for MCPRuntime to connect. Measured empirically: MCPRuntime connects
@@ -1511,12 +1528,26 @@ func render_scene_preview(args: Dictionary) -> Dictionary:
 	viewport.add_child(camera)
 	camera.make_current()
 
-	# Two frames: one to build the render target, one to draw into it.
+	# Set before the scene ever draws a frame in this tree — the exact point
+	# SceneTree.debug_collisions_hint is documented to reliably apply from (see
+	# notes/BACKLOG.md §5.4). Reliable here in a way it is not for a live
+	# run_scene: this instance was only just added to the tree, so there is no
+	# "already drawn" frame to have missed. Restored after, since `host`'s tree
+	# is long-lived (the editor's own, most of the time) and this must not leave
+	# collision outlines on for anything else sharing it.
+	var show_collision: bool = bool(args.get(&"show_collision", false))
 	var tree := host.get_tree()
+	var prev_debug_collisions := tree.debug_collisions_hint
+	if show_collision:
+		tree.debug_collisions_hint = true
+
+	# Two frames: one to build the render target, one to draw into it.
 	await tree.process_frame
 	await tree.process_frame
 
 	var image := viewport.get_texture().get_image()
+	if show_collision:
+		tree.debug_collisions_hint = prev_debug_collisions
 	host.remove_child(viewport)
 	viewport.queue_free()
 

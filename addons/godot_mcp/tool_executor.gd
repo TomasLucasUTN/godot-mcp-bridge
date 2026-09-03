@@ -170,6 +170,7 @@ func _init_tools() -> void:
 		&"analyze_signal_flow": [_analysis_tools, &"analyze_signal_flow"],
 		&"validate_references": [_analysis_tools, &"validate_references"],
 		&"compare_screenshots": [_analysis_tools, &"compare_screenshots"],
+		&"texture_info": [_analysis_tools, &"texture_info"],
 		&"scene_diff": [_analysis_tools, &"scene_diff"],
 		&"disconnect_signal": [_scene_tools, &"disconnect_signal"],
 		&"duplicate_node": [_scene_tools, &"duplicate_node"],

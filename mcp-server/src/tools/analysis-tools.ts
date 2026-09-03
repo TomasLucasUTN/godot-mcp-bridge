@@ -98,6 +98,19 @@ export const analysisTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'texture_info',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Size and content alpha bbox of a texture, computed in-engine — no PIL round trip needed for sprite alignment work (standing height, feet position, crop centring). With `hframes`, splits the image into that many equal-width columns and returns bbox per frame. Also flags `has_internal_gap`: true when a row inside the content bbox is fully transparent, which a plain bbox cannot detect — it means the crop contains two disconnected art pieces, not one (this is how three world-tileset PNGs shipped broken in this project: bush/rock/grass_tuft each had a real gap that getbbox()-only verification missed).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Texture to inspect (res:// or user:// path)' },
+        hframes: { type: 'number', description: 'If the image is a horizontal sprite sheet, the number of equal-width frames to split it into. Default 1 (whole image). Must evenly divide the width.' }
+      },
+      required: ['path']
+    }
+  },
+  {
     name: 'scene_diff',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     description: 'Answer "what changed in this scene since I last looked" without re-reading the whole tree. Call once with just scene_path to take a snapshot (returns a snapshot_id, no tree), then call again with that snapshot_id to get only the added, removed and modified nodes — with per-property before/after for the ones that changed. Catches the developer\'s edits as well as your own, because it compares the actual tree rather than tracking tool calls. Use this instead of a second read_scene: on a scene of any size, almost all of a re-read is nodes that did not change. Snapshots live in the editor session and are dropped when it restarts.',
