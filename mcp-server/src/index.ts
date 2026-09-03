@@ -43,6 +43,7 @@ import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
 import { findUnusedResources, projectStatistics } from './project-scan.js';
 import { searchTools } from './tool-search.js';
+import { projectMapAnswer, type ProjectMap } from './project-map.js';
 import { isDebugTool, handleDebugTool } from './debug-session.js';
 import { isLspTool, handleLspTool } from './lsp-session.js';
 
@@ -690,16 +691,12 @@ async function executeToolCall(
 
     if (name === 'map_project' && result && typeof result === 'object' && 'project_map' in (result as Record<string, unknown>)) {
       try {
-        const projectMap = (result as Record<string, unknown>).project_map;
+        const projectMap = (result as Record<string, unknown>).project_map as ProjectMap;
         const url = await serveVisualization(projectMap);
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({
-              ...(result as Record<string, unknown>),
-              visualization_url: url,
-              message: `Project mapped: ${(projectMap as any).total_scripts} scripts, ${(projectMap as any).total_connections} connections. Interactive visualization opened in browser at ${url}`
-            })
+            text: JSON.stringify(projectMapAnswer(projectMap, url, toolArgs.include_map === true)),
           }]
         };
       } catch (vizError) {
