@@ -342,6 +342,21 @@ func _test_analyze_2d_layout() -> void:
 	_check(gaps.size() == 1, "reports exactly one floor gap")
 	if gaps.size() == 1:
 		_check(absf(float(gaps[0].get("width_px", 0.0)) - 100.0) < 0.01, "and measures it at 100px")
+		_check(not gaps[0].has("clearable"), "says nothing about clearing it until told the jump reach")
+
+	# Given the reach, "can the player get past this" is arithmetic rather than
+	# something you find out by playing it. The 100px gap against a 120px jump
+	# clears with 20px to spare; against an 80px jump it does not, by 20px.
+	var far = at.analyze_2d_layout({"scene_path": scene_path, "jump_reach_px": 120})
+	var far_gap: Dictionary = far.get("floor_gaps", [{}])[0]
+	_check(far_gap.get("clearable", false) == true, "a 100px gap clears a 120px jump")
+	_check(absf(float(far_gap.get("margin_px", 0.0)) - 20.0) < 0.01, "with 20px of margin")
+
+	var short_jump = at.analyze_2d_layout({"scene_path": scene_path, "jump_reach_px": 80})
+	var short_gap: Dictionary = short_jump.get("floor_gaps", [{}])[0]
+	_check(short_gap.get("clearable", true) == false, "and does not clear an 80px one")
+	_check(absf(float(short_gap.get("margin_px", 0.0)) + 20.0) < 0.01, "reporting how far short, as a negative margin")
+	_check("wider than a 80px jump" in str(short_jump.get("summary", "")), "and says so in the summary")
 
 	at.free()
 	_rm(scene_path)

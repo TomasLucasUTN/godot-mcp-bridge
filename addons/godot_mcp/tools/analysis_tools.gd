@@ -662,6 +662,10 @@ func analyze_2d_layout(args: Dictionary) -> Dictionary:
 	# default tolerance for "resting" in both directions.
 	var tolerance: float = float(args.get(&"tolerance_px", 2.0))
 	var max_items: int = clampi(int(args.get(&"max_items", 40)), 1, 500)
+	# How far the player can carry themselves across a hole. Optional, because
+	# only the game knows it — but once given, "is this gap crossable" stops
+	# being a thing you find out by playing.
+	var jump_reach: float = float(args.get(&"jump_reach_px", 0.0))
 
 	var solids: Array = []      # {path, rect} for collision shapes
 	var decor: Array = []       # {path, type, rect} for textured nodes with no collider
@@ -716,7 +720,7 @@ func analyze_2d_layout(args: Dictionary) -> Dictionary:
 				overlaps.append({&"decoration": d[&"path"], &"solid": s[&"path"],
 					&"overlap_px": {&"w": snappedf(hit.size.x, 0.01), &"h": snappedf(hit.size.y, 0.01)}})
 
-	return _finish_layout_report(root, scene_path, solids, decor, floating, over_nothing, overlaps, tolerance, max_items)
+	return _finish_layout_report(root, scene_path, solids, decor, floating, over_nothing, overlaps, tolerance, max_items, jump_reach)
 
 
 ## Merge the solid footprints along x and report the holes between them — the
@@ -752,8 +756,16 @@ func _floor_gaps(solids: Array) -> Array:
 
 func _finish_layout_report(root: Node, scene_path: String, solids: Array, decor: Array,
 		floating: Array, over_nothing: Array, overlaps: Array,
-		tolerance: float, max_items: int) -> Dictionary:
+		tolerance: float, max_items: int, jump_reach: float) -> Dictionary:
 	var gaps := _floor_gaps(solids)
+	var unreachable := 0
+	if jump_reach > 0.0:
+		for gap in gaps:
+			var crossable: bool = float(gap[&"width_px"]) <= jump_reach
+			gap[&"clearable"] = crossable
+			gap[&"margin_px"] = snappedf(jump_reach - float(gap[&"width_px"]), 0.01)
+			if not crossable:
+				unreachable += 1
 	root.queue_free()
 
 	var findings := floating.size() + over_nothing.size() + overlaps.size()
@@ -767,8 +779,10 @@ func _finish_layout_report(root: Node, scene_path: String, solids: Array, decor:
 		&"over_nothing": over_nothing.slice(0, max_items),
 		&"overlaps": overlaps.slice(0, max_items),
 		&"floor_gaps": gaps.slice(0, max_items),
-		&"summary": "%d finding(s): %d floating, %d over nothing, %d fused into a solid; %d floor gap(s)." % [
-			findings, floating.size(), over_nothing.size(), overlaps.size(), gaps.size()],
+		&"summary": "%d finding(s): %d floating, %d over nothing, %d fused into a solid; %d floor gap(s)%s." % [
+			findings, floating.size(), over_nothing.size(), overlaps.size(), gaps.size(),
+			"" if jump_reach <= 0.0 else ", %d of them wider than a %dpx jump" % [unreachable, int(jump_reach)]],
+		&"jump_reach_px": jump_reach if jump_reach > 0.0 else null,
 		&"method": "World-space AABBs from CollisionShape2D extents and texture sizes. 'Resting' means the piece's base is within tolerance_px of the surface under it — a convention, not an engine rule, so read the numbers, not just the verdict.",
 	}
 

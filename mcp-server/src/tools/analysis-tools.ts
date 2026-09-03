@@ -106,7 +106,8 @@ export const analysisTools: ToolDefinition[] = [
       properties: {
         scene_path: { type: 'string', description: 'Scene to analyse (res://path/to/scene.tscn)' },
         tolerance_px: { type: 'number', description: 'How far a base may sit from the surface under it and still count as resting on it. Default 2 — art is normally seated a pixel or two into the ground.' },
-        max_items: { type: 'number', description: 'Cap per finding list (default 40, max 500).' }
+        max_items: { type: 'number', description: 'Cap per finding list (default 40, max 500).' },
+        jump_reach_px: { type: 'number', description: 'How far the player can carry themselves horizontally across a hole. Given it, each floor gap comes back with clearable true/false and the margin in px — so "can the player get past this" is answered by arithmetic instead of by playing it. Omit if you do not know the number.' }
       },
       required: ['scene_path']
     }
