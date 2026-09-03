@@ -615,6 +615,7 @@ async function executeToolCall(
           editor_connected: status.connected,
           runtime_connected: runtimeConnected,
           project_path: status.projectPath || null,
+          addon_version: status.addonVersion || null,
           connected_at: status.connectedAt?.toISOString() || null,
           pending_requests: status.pendingRequests,
           checks,
