@@ -281,7 +281,7 @@ export const projectTools: ToolDefinition[] = [
         },
         startup_timeout_ms: {
           type: 'number',
-          description: 'Max time in ms to wait for the above signals. Default: 20000 (MCPRuntime connect time varies ~11-20s with system load). If wait_for_runtime still reports false, poll get_runtime_status shortly after — the connection is often about to land, not actually broken.'
+          description: 'Max time in ms to wait for the above signals, not an expected wait. Measured 2026-09-03: MCPRuntime connects in about 1.6-1.7s, attached or detached. The default stays generous for a cold-cache import on a large project; it costs nothing when the connection is fast. If wait_for_runtime still reports false, poll get_runtime_status shortly after — the connection is often about to land, not actually broken.'
         },
         attach_debugger: {
           type: 'boolean',

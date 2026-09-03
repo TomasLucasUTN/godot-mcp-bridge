@@ -1305,15 +1305,15 @@ func run_scene(args: Dictionary) -> Dictionary:
 			f.store_string("1")
 	elif FileAccess.file_exists(_DEBUG_COLLISIONS_MARKER):
 		DirAccess.remove_absolute(_DEBUG_COLLISIONS_MARKER)
-	# Default of 20s gives slower machines (cold-cache import, autoload heavy
-	# games) enough headroom for the editor to reach the playing state and
-	# for MCPRuntime to connect. Measured empirically: MCPRuntime connects
-	# anywhere from ~11s to ~20s after run_scene is called (engine boot +
-	# autoload init + WS handshake — timing varies with system load), so a
-	# 10s default was cutting it too close and made wait_for_runtime report
-	# false even though the runtime went on to connect moments later. If it
-	# still reports false, poll get_runtime_status shortly after — the
-	# connection is very likely just about to land, not actually broken.
+	# A cap, not an expected wait. The "~11-20s" this comment used to quote was
+	# measured while a bug made every call run its full timeout; re-measured
+	# 2026-09-03 on the same machine and project, MCPRuntime connects in
+	# **1.6-1.7s**, attached or detached, across repeated runs. The default
+	# stays at 20s because it costs nothing when the connection is fast and
+	# still covers a cold-cache import on a big project — but an agent should
+	# expect ~2s, not a stall. If wait_for_runtime does report false, poll
+	# get_runtime_status shortly after: the connection is very likely about to
+	# land rather than broken.
 	var startup_timeout_ms: int = int(args.get(&"startup_timeout_ms", 20000))
 
 	if ei.is_playing_scene():
