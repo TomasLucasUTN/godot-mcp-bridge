@@ -368,6 +368,24 @@ func _discard_validation_artifact(res_path: String) -> void:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
 
+## Remove any `__mcp_snippet_*.gd` left behind by an earlier validation.
+##
+## The discard above runs immediately after `reload()`, and a run_tests case
+## asserts nothing survives — yet one was found sitting in a real project's
+## addons folder, committed-adjacent and confusing. The engine can flush a
+## GDScript that carries a res:// resource_path back to disk later (a Save All
+## while it is still in the resource cache will do it), which is after the
+## discard has already run. Sweeping before each validation bounds the litter
+## to one file that only exists between two calls, rather than trusting a
+## single delete to be the last word.
+func _sweep_validation_artifacts() -> void:
+	var dir := DirAccess.open("res://addons/godot_mcp")
+	if dir == null:
+		return
+	for file in dir.get_files():
+		if file.begins_with("__mcp_snippet_") and (file.ends_with(".gd") or file.ends_with(".gd.uid")):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://addons/godot_mcp/" + file))
+
 ## Compile a game_eval snippet HERE, in the editor, before it is sent to the game.
 ##
 ## Not called by agents — the MCP server calls it on their behalf (see the
@@ -390,6 +408,8 @@ func validate_eval_snippet(args: Dictionary) -> Dictionary:
 	var src := "extends RefCounted\nfunc _mcp_eval(tree, node):\n"
 	for line in code.split("\n"):
 		src += "\t" + line + "\n"
+
+	_sweep_validation_artifacts()
 
 	var script := GDScript.new()
 	# Under res://addons/ on purpose: `exclude_addons` (on by default) mutes the
