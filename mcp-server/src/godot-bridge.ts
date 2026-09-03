@@ -23,6 +23,12 @@ import type {
 const DEFAULT_PORT = 6505;
 const DEFAULT_TIMEOUT = 30000;
 const PING_INTERVAL = 10000;
+/**
+ * Above this, a tool call is reported back with how long it took. Chosen as
+ * half the old ping-death window: long enough that ordinary calls stay silent,
+ * short enough to name a tool before it grows into the next 120-second sweep.
+ */
+const SLOW_TOOL_MS = 10000;
 
 /** Close code for "you are the wrong project". Distinct from 4000/4001 (slot
  *  already taken) so the addon can tell a collision from a misconfiguration. */
@@ -156,6 +162,8 @@ export class GodotBridge {
   private runtime: ConnSlot | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
   private pingInterval: NodeJS.Timeout | null = null;
+  /** Injectable so the watchdog's behaviour can be tested in milliseconds. */
+  private pingIntervalMs: number;
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
   private runtimeStatusCallbacks: Set<RuntimeStatusCallback> = new Set();
 
@@ -169,10 +177,12 @@ export class GodotBridge {
     port: number = DEFAULT_PORT,
     timeout: number = DEFAULT_TIMEOUT,
     expectedProjectPath: string | null = null,
-    expectedSecret: string | null = null
+    expectedSecret: string | null = null,
+    pingIntervalMs: number = PING_INTERVAL
   ) {
     this.port = port;
     this.timeout = timeout;
+    this.pingIntervalMs = pingIntervalMs;
     this.expectedProjectPath = expectedProjectPath ? normalizeProjectPath(expectedProjectPath) : null;
     // Opt-in: with no secret configured the handshake is unchanged, so existing
     // setups keep working. Origin rejection above is the always-on defence.
@@ -416,25 +426,59 @@ export class GodotBridge {
     });
   }
 
+  /** Is a tool call still in flight on this slot? */
+  private hasPending(target: 'editor' | 'runtime'): boolean {
+    for (const [, pending] of this.pendingRequests) {
+      if (pending.target === target) return true;
+    }
+    return false;
+  }
+
   private startPingLoop(): void {
     if (this.pingInterval) return;
     this.pingInterval = setInterval(() => {
-      const staleBefore = Date.now() - PING_INTERVAL * 2;
+      const staleBefore = Date.now() - this.pingIntervalMs * 2;
       // A slot that missed two ping cycles is a dead peer the 'close' event
       // never fired for (e.g. the process was killed hard enough that the
       // TCP teardown didn't reach us). terminate() force-closes the socket,
       // which triggers the normal ws.on('close') cleanup for that slot.
-      if (this.editor && this.editor.lastPongAt < staleBefore) {
+      //
+      // ... unless it is busy answering us. Godot runs @tool code on the
+      // editor's main thread, which is the same thread that would reply to a
+      // ping, so any tool call slower than two ping cycles made a HEALTHY
+      // editor look dead and got its socket terminated mid-answer. That is
+      // what "Godot disconnected" meant for every slow sweep: not a lost
+      // editor, a killed one. A request already carries its own timeout, so
+      // the pending call is the thing allowed to give up, not this loop.
+      if (this.editor && this.editor.lastPongAt < staleBefore && !this.hasPending('editor')) {
         this.log('warn', 'Editor connection unresponsive to ping; terminating stale slot.');
         this.editor.ws.terminate();
       }
-      if (this.runtime && this.runtime.lastPongAt < staleBefore) {
+      if (this.runtime && this.runtime.lastPongAt < staleBefore && !this.hasPending('runtime')) {
         this.log('warn', 'Runtime connection unresponsive to ping; terminating stale slot.');
         this.runtime.ws.terminate();
       }
       this.sendTo(this.editor?.ws, { type: 'ping' });
       this.sendTo(this.runtime?.ws, { type: 'ping' });
-    }, PING_INTERVAL);
+    }, this.pingIntervalMs);
+  }
+
+  /**
+   * Tell the caller when a tool ran long enough to be worth knowing about.
+   *
+   * An editor-side tool holds Godot's main thread for its whole duration: the
+   * UI is frozen for the developer sitting in front of it, and until the ping
+   * watchdog was taught to wait for in-flight calls, a slow one got its own
+   * socket terminated. Both failures were invisible from the answer, which is
+   * how get_project_statistics spent 120s per call without anyone noticing it
+   * was the reason the editor kept "disconnecting". A number in the payload is
+   * what makes the next one obvious on the first call instead of the tenth.
+   */
+  private withSlowCallNote(result: unknown, toolName: string, elapsedMs: number): unknown {
+    if (elapsedMs >= SLOW_TOOL_MS) {
+      this.log('warn', `Tool ${toolName} took ${elapsedMs}ms; the editor was blocked for that whole time.`);
+    }
+    return slowCallNote(result, toolName, elapsedMs, SLOW_TOOL_MS);
   }
 
   private failPending(target: 'editor' | 'runtime', err: Error): void {
@@ -480,7 +524,7 @@ export class GodotBridge {
     const duration = Date.now() - pending.startTime;
     this.log('debug', `Tool ${pending.toolName} completed in ${duration}ms (${pending.target})`);
     if (message.success) {
-      pending.resolve(message.result);
+      pending.resolve(this.withSlowCallNote(message.result, pending.toolName, duration));
     } else {
       // Surface structured error details (open_in_editor, where, clamped, …)
       // to the MCP layer instead of collapsing the response into just the
@@ -669,11 +713,37 @@ export function getDefaultBridge(): GodotBridge {
   if (!defaultBridge) defaultBridge = new GodotBridge();
   return defaultBridge;
 }
+/**
+ * Attach the elapsed time to a slow tool's own answer. Below the threshold the
+ * result is handed back untouched, and a non-object result (a bare string, an
+ * array) is never rewrapped — an agent parsing it should not have to care that
+ * the call was slow.
+ */
+export function slowCallNote(
+  result: unknown,
+  toolName: string,
+  elapsedMs: number,
+  thresholdMs: number
+): unknown {
+  if (elapsedMs < thresholdMs) return result;
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return result;
+  return {
+    ...(result as Record<string, unknown>),
+    _perf: {
+      elapsed_ms: elapsedMs,
+      note: `${toolName} held the Godot editor's main thread for ${(elapsedMs / 1000).toFixed(1)}s. `
+        + 'The UI was frozen for that long. If this is a project-wide scan, prefer a narrower argument '
+        + '(explicit paths, a single scene) or expect it to get worse as the project grows.',
+    },
+  };
+}
+
 export function createBridge(
   port?: number,
   timeout?: number,
   expectedProjectPath?: string | null,
-  expectedSecret?: string | null
+  expectedSecret?: string | null,
+  pingIntervalMs?: number
 ): GodotBridge {
-  return new GodotBridge(port, timeout, expectedProjectPath, expectedSecret);
+  return new GodotBridge(port, timeout, expectedProjectPath, expectedSecret, pingIntervalMs);
 }

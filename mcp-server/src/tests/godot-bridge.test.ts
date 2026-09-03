@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { WebSocket } from 'ws';
-import { createBridge, GodotBridge } from '../godot-bridge.js';
+import { createBridge, GodotBridge, slowCallNote } from '../godot-bridge.js';
 
 const TEST_PORT = 16505;
 const SHORT_TIMEOUT = 500;
@@ -441,5 +441,81 @@ describe('GodotBridge — protocol', () => {
     const msg = await msgPromise;
     expect(msg.type).toBe('client_status');
     expect(msg.count).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slow calls
+// ---------------------------------------------------------------------------
+
+describe('GodotBridge — slow calls', () => {
+  let bridge: GodotBridge;
+  let editor: WebSocket | null = null;
+
+  afterEach(() => {
+    editor?.close(); editor = null;
+    bridge?.stop();
+  });
+
+  // Godot runs @tool code on the same main thread that answers pings, so a tool
+  // slower than two ping cycles used to get its own socket terminated while it
+  // was still working — reported to the caller as "Godot disconnected", which
+  // sent everyone looking for a connection bug instead of a slow tool.
+  it('does not terminate a slot that is still answering a call', async () => {
+    bridge = createBridge(TEST_PORT, 4000, null, null, 40);
+    await bridge.start();
+    editor = await connectClient(TEST_PORT);
+    editor.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p' }));
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Deliberately never answers the ping: this client is "busy", exactly like
+    // an editor mid-sweep.
+    const invoked = new Promise<string>((resolve) => {
+      editor!.on('message', (d) => {
+        const m = JSON.parse(d.toString());
+        if (m.type === 'tool_invoke') resolve(m.id);
+      });
+    });
+
+    const call = bridge.invokeTool('get_project_statistics', {});
+    const id = await invoked;
+
+    // Long enough for several ping cycles to have declared it dead before.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(bridge.isConnected()).toBe(true);
+
+    editor!.send(JSON.stringify({ type: 'tool_result', id, success: true, result: { ok: true } }));
+    await expect(call).resolves.toMatchObject({ ok: true });
+  });
+
+  it('still terminates a slot that is idle and unresponsive', async () => {
+    bridge = createBridge(TEST_PORT, 4000, null, null, 40);
+    await bridge.start();
+    editor = await connectClient(TEST_PORT);
+    editor.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p' }));
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(bridge.isConnected()).toBe(false);
+  });
+});
+
+describe('slowCallNote', () => {
+  it('leaves a fast call untouched', () => {
+    const result = { ok: true };
+    expect(slowCallNote(result, 'read_scene', 12, 10000)).toBe(result);
+  });
+
+  it('reports the seconds the editor was blocked, without losing the answer', () => {
+    const noted = slowCallNote({ ok: true, files: 3 }, 'get_project_statistics', 120685, 10000) as Record<string, any>;
+    expect(noted.ok).toBe(true);
+    expect(noted.files).toBe(3);
+    expect(noted._perf.elapsed_ms).toBe(120685);
+    expect(noted._perf.note).toContain('120.7s');
+  });
+
+  it('does not rewrap a non-object answer', () => {
+    expect(slowCallNote('plain text', 'x', 99999, 10)).toBe('plain text');
+    const arr = [1, 2];
+    expect(slowCallNote(arr, 'x', 99999, 10)).toBe(arr);
   });
 });
