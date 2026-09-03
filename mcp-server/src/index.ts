@@ -42,6 +42,7 @@ import { serveVisualization, stopVisualizationServer, setGodotBridge } from './v
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
 import { findUnusedResources, projectStatistics } from './project-scan.js';
+import { searchTools } from './tool-search.js';
 import { isDebugTool, handleDebugTool } from './debug-session.js';
 import { isLspTool, handleLspTool } from './lsp-session.js';
 
@@ -325,6 +326,40 @@ async function executeToolCall(
   name: string,
   toolArgs: Record<string, unknown>
 ): Promise<ToolCallResult> {
+  // Answered here: it is a question about this server's own surface, so it
+  // works with Godot closed and never touches the editor.
+  if (name === 'find_tools') {
+    const query = typeof toolArgs.query === 'string' ? toolArgs.query : '';
+    const enabledNames = new Set(
+      Object.entries(TOOLSETS)
+        .filter(([toolsetName]) => toolsetName === 'core' || activeToolsets.has(toolsetName))
+        .flatMap(([, tools]) => tools.map(t => t.name))
+    );
+    const hits = searchTools(allTools, query, {
+      limit: typeof toolArgs.limit === 'number' ? toolArgs.limit : undefined,
+      includeSchema: toolArgs.include_schema === true,
+      enabledNames,
+    }).map(hit => ({ ...hit, toolset: toolsetOf(hit.name) }));
+
+    const disabled = [...new Set(hits.filter(h => !h.enabled).map(h => h.toolset))];
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          query,
+          matches: hits,
+          searched_tools: allTools.length,
+          ...(disabled.length > 0
+            ? { hint: `Some matches are in toolsets that are off: ${disabled.join(', ')}. Call enable_toolset with the one you need.` }
+            : {}),
+          ...(hits.length === 0
+            ? { hint: 'Nothing matched every word. Try fewer or more common words, or list_toolsets to browse by area.' }
+            : {}),
+        }),
+      }],
+    };
+  }
+
   if (name === 'list_toolsets') {
     return {
       content: [{
@@ -786,6 +821,21 @@ function createMcpServer(handleTool: ToolHandler): Server {
       annotations: { readOnlyHint: true, openWorldHint: false }
     };
 
+    const findToolsTool = {
+      name: 'find_tools',
+      description: `Find a tool by what you want to do, across all ${allTools.length} of them — including the ones whose toolset is currently off. Only "core" (${TOOLSETS.core.length} tools) is loaded by default, because handing a model every schema costs tokens before it reads your message and measurably degrades which tool it picks. This is the cheap way back: ask "autotile a tilemap" or "record input", get the matching names with a one-line summary and the toolset each lives in, then enable_toolset that one. Prefer this over list_toolsets when you know what you want to DO but not what it is called.`,
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          query: { type: 'string', description: 'What you are trying to do, in your own words (e.g. "bake a navmesh", "read the player position while the game runs").' },
+          limit: { type: 'number', description: 'How many matches to return (1-40, default 8).' },
+          include_schema: { type: 'boolean', description: "Also return each match's full inputSchema. Default false — the names and summaries are usually enough to pick one." },
+        },
+        required: ['query'] as string[],
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    };
+
     const listToolsetsTool = {
       name: 'list_toolsets',
       description: `List every toolset with what it is for and the names of the tools it holds, plus whether it is currently enabled. Only "core" is on by default; if the tool you need is not in list_tools, find it here and enable that one toolset. Optional toolsets: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.`,
@@ -824,6 +874,7 @@ function createMcpServer(handleTool: ToolHandler): Server {
         connectionStatusTool,
         diagnoseConnectionTool,
         getGuideTool,
+        findToolsTool,
         listToolsetsTool,
         enableToolsetTool,
         disableToolsetTool,
