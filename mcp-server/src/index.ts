@@ -483,6 +483,7 @@ async function executeToolCall(
           websocket_port: status.port,
           mode: status.connected ? 'live' : 'waiting',
           project_path: status.projectPath || null,
+          addon_version: status.addonVersion || null,
           connected_at: status.connectedAt?.toISOString() || null,
           pending_requests: status.pendingRequests,
           message: status.connected
@@ -535,12 +536,38 @@ async function executeToolCall(
 
   if (name === 'diagnose_connection') {
     const status = godotBridge!.getStatus();
+    const versionRemedies: string[] = [];
     const listening = godotBridge!.isListening();
     const checks = [
       { check: 'MCP server (Node) running', ok: true, detail: `v${SERVER_VERSION}` },
       { check: 'WebSocket bridge listening', ok: listening, detail: `port ${WEBSOCKET_PORT}` },
       { check: 'Godot editor connected', ok: status.connected, detail: status.connected ? `${status.projectPath || 'connected'} since ${status.connectedAt?.toISOString()}` : 'no editor on the bridge' },
     ];
+
+    // A server newer than the addon advertises tools whose GDScript handler
+    // does not exist in the project yet. That surfaces as "Unknown tool", or
+    // worse as an argument silently ignored, and every release note so far has
+    // handled it by asking the user to remember to reinstall. Checked instead.
+    if (status.connected) {
+      const addonVersion = status.addonVersion;
+      const matches = addonVersion === SERVER_VERSION;
+      checks.push({
+        check: 'Addon matches this server version',
+        // An addon too old to report its version is the same problem, and is
+        // itself evidence of an old install.
+        ok: matches,
+        detail: addonVersion
+          ? (matches ? `both ${SERVER_VERSION}` : `addon ${addonVersion}, server ${SERVER_VERSION}`)
+          : `addon did not report a version (older than 1.1.7); server is ${SERVER_VERSION}`,
+      });
+      if (!matches) {
+        versionRemedies.push(
+          `Reinstall the addon: the copy in this project is ${addonVersion ?? 'older than 1.1.7'} and this server is ${SERVER_VERSION}. ` +
+          `Run 'npx godot-mcp-bridge install' in the project, then restart the editor. ` +
+          `A mismatch shows up as "Unknown tool" or an argument that appears to be ignored.`
+        );
+      }
+    }
 
     // The runtime helper is a separate connection, and it used to be invisible
     // here: with a game running and MCPRuntime absent, this answered "healthy"
@@ -567,7 +594,8 @@ async function executeToolCall(
       `Launch the game straight from a terminal (Godot --path <project> <scene>): it connects to port ${WEBSOCKET_PORT} the same way, which separates a launch problem from a runtime-code problem.`,
     ];
 
-    const remedies = healthy ? [] : [
+    const remedies = healthy ? versionRemedies : [
+      ...versionRemedies,
       `Open your project in the Godot editor — the plugin auto-connects to port ${WEBSOCKET_PORT} on load.`,
       'Enable the plugin: Project > Project Settings > Plugins > "Godot MCP" checkbox ON.',
       'Confirm the addon exists at res://addons/godot_mcp/ with plugin.cfg present.',
@@ -591,7 +619,7 @@ async function executeToolCall(
           pending_requests: status.pendingRequests,
           checks,
           message: healthy
-            ? `Editor connected and tools will run.${runtimeConnected ? ' The in-game helper is connected too.' : ' The in-game helper is NOT connected — fine unless a game is running.'}`
+            ? `Editor connected and tools will run.${versionRemedies.length > 0 ? ' The addon is a different version from this server, so some tools may not exist in it — see remedies.' : ''}${runtimeConnected ? ' The in-game helper is connected too.' : ' The in-game helper is NOT connected — fine unless a game is running.'}`
             : 'Editor not connected. Work through the remedies in order; the first that applies usually fixes it.',
           ...(remedies.length > 0 ? { remedies } : {}),
           ...(runtimeRemedies.length > 0 ? { runtime_remedies: runtimeRemedies } : {}),

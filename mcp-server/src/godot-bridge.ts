@@ -144,6 +144,8 @@ interface GodotInfo {
   projectPath?: string;
   connectedAt: Date;
   role: 'editor' | 'runtime';
+  /** plugin.cfg version of the addon that connected, when it reports one. */
+  addonVersion?: string;
 }
 
 type ConnectionCallback = (connected: boolean, info?: GodotInfo) => void;
@@ -381,14 +383,28 @@ export class GodotBridge {
           return;
         }
         if (!this.editor) {
-          this.editor = { ws, info: { connectedAt: new Date(), projectPath: message.project_path, role: 'editor' }, lastPongAt: Date.now() };
+          this.editor = {
+            ws,
+            info: {
+              connectedAt: new Date(),
+              projectPath: message.project_path,
+              role: 'editor',
+              addonVersion: message.addon_version,
+            },
+            lastPongAt: Date.now(),
+          };
           assignedRole = 'editor';
           this.startPingLoop();
           this.notifyConnectionChange(true, this.editor.info);
         } else {
+          // The slot exists from the moment the socket opened; godot_ready is
+          // where it learns who it is. Both fields have to land here too, or
+          // the version stays unknown for every connection taking this path —
+          // which is all of them.
           this.editor.info.projectPath = message.project_path;
+          this.editor.info.addonVersion = message.addon_version;
         }
-        this.log('info', `Godot editor ready (project=${message.project_path})`);
+        this.log('info', `Godot editor ready (project=${message.project_path}${message.addon_version ? `, addon ${message.addon_version}` : ''})`);
         this.sendRuntimeStatusToEditor();
         return;
       }
@@ -649,6 +665,7 @@ export class GodotBridge {
     runtimeConnected: boolean;
     projectPath?: string;
     connectedAt?: Date;
+    addonVersion?: string;
     pendingRequests: number;
     port: number;
   } {
@@ -657,6 +674,7 @@ export class GodotBridge {
       runtimeConnected: this.isRuntimeConnected(),
       projectPath: this.editor?.info.projectPath,
       connectedAt: this.editor?.info.connectedAt,
+      addonVersion: this.editor?.info.addonVersion,
       pendingRequests: this.pendingRequests.size,
       port: this.port,
     };

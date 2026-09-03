@@ -75,6 +75,9 @@ export interface GodotReadyMessage {
   // helper. Older addons (pre-runtime support) omit this; we treat that as 'editor'.
   role?: 'editor' | 'runtime';
   started_at?: number;
+  // plugin.cfg version of the addon. Absent on 1.1.6 and older, which the
+  // server reads as "old enough to be worth reinstalling".
+  addon_version?: string;
   // Shared secret, sent only when one is configured on both sides. Absent on
   // every existing setup, which is why the server treats "no secret expected"
   // as "do not check".

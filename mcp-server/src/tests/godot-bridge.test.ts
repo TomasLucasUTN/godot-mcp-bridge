@@ -519,3 +519,37 @@ describe('slowCallNote', () => {
     expect(slowCallNote(arr, 'x', 99999, 10)).toBe(arr);
   });
 });
+
+describe('GodotBridge — addon version', () => {
+  let bridge: GodotBridge;
+  let editor: WebSocket | null = null;
+
+  afterEach(() => {
+    editor?.close(); editor = null;
+    bridge?.stop();
+  });
+
+  // A server newer than the addon advertises tools whose GDScript handler is
+  // not in the project, and that failure reads as "Unknown tool" rather than
+  // "reinstall the addon". Reporting the version is what lets diagnose say so.
+  it('records the version the addon reports', async () => {
+    bridge = createBridge(TEST_PORT, SHORT_TIMEOUT);
+    await bridge.start();
+    editor = await connectClient(TEST_PORT);
+    editor.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p', addon_version: '1.1.7' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(bridge.getStatus().addonVersion).toBe('1.1.7');
+  });
+
+  it('leaves it undefined for an addon too old to send one', async () => {
+    bridge = createBridge(TEST_PORT, SHORT_TIMEOUT);
+    await bridge.start();
+    editor = await connectClient(TEST_PORT);
+    editor.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(bridge.getStatus().connected).toBe(true);
+    expect(bridge.getStatus().addonVersion).toBeUndefined();
+  });
+});
