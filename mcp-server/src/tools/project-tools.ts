@@ -511,7 +511,7 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'game_eval',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: "Run a GDScript snippet inside the RUNNING game (like a REPL) and return the result. The snippet is a function body that receives `tree` (the SceneTree) and `node` (the node at node_path, or null); use `return X` to get a value back. Powerful for driving/inspecting live state (e.g. `return tree.get_nodes_in_group(\"enemies\").size()` or `node.velocity = Vector2(100,0)`). REQUIRES the game running with MCPRuntime. A runtime error inside the snippet cannot be caught and will time out the call — the compile step is guarded, execution is on you.",
+    description: "Run a GDScript snippet inside the RUNNING game (like a REPL) and return the result. The snippet is a function body that receives `tree` (the SceneTree) and `node` (the node at node_path, or null); use `return X` to get a value back. Powerful for driving/inspecting live state (e.g. `return tree.get_nodes_in_group(\"enemies\").size()` or `node.velocity = Vector2(100,0)`). REQUIRES the game running with MCPRuntime. A runtime error inside the snippet cannot be caught and will time out the call — the compile step is guarded, execution is on you. Where its output lands, measured: print() goes to the game's own stdout, while push_error and push_warning travel the debugger channel and come back through get_errors - NOT through get_console_log, which is the EDITOR's Output panel.",
     inputSchema: {
       type: 'object',
       properties: {
