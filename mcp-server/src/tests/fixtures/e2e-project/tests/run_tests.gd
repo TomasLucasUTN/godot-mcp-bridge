@@ -24,6 +24,8 @@ func _initialize() -> void:
 	_test_set_main_scene()
 	_test_debugger_error_tree_identification()
 	_test_analyze_2d_layout()
+	_test_every_advertised_tool_is_dispatchable()
+	_test_tools_do_not_claim_work_they_did_not_do()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -282,6 +284,145 @@ func _test_set_main_scene() -> void:
 	ProjectSettings.save()
 	_rm(scene)
 	pt.free()
+
+# The contract the TypeScript side declares, written by
+# scripts/export-tool-contract.mjs at build time. It is the join between the two
+# halves of this project: the registry test only sees the schemas, this suite
+# only sees the Godot handlers, and a tool is dark unless BOTH exist.
+func _load_tool_contract() -> Array:
+	var f := FileAccess.open("res://tests/tool-contract.json", FileAccess.READ)
+	if f == null:
+		return []
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	return data if data is Array else []
+
+# Every advertised tool must be dispatchable somewhere. CLAUDE.md's "wired in
+# three places" rule was enforced by remembering it; a tool that gets a schema
+# and no dispatch entry answers "Unknown tool" to a user and nothing to the test
+# suite.
+#
+# Three homes, and the check knows all three because writing it found the second
+# one the hard way: the editor's tool_executor map, the in-game MCPRuntime
+# autoload (every runtime tool lives there and has no editor entry), and the
+# server itself for debug_* / gd_*, which are answered over DAP and LSP and
+# deliberately have no GDScript handler at all.
+func _test_every_advertised_tool_is_dispatchable() -> void:
+	print("
+[tool wiring]")
+	var contract := _load_tool_contract()
+	if contract.is_empty():
+		_check(false, "tool-contract.json is present (run `npm run build` in mcp-server)")
+		return
+
+	var Executor = load("res://addons/godot_mcp/tool_executor.gd")
+	var ex = Executor.new()
+	root.add_child(ex)
+	ex._init_tools()
+
+	# The runtime handler dispatches from a match on the tool name, so its source
+	# is the list. Read as text rather than instantiated: MCPRuntime is an
+	# autoload that opens a WebSocket, which a test has no business starting.
+	var runtime_src := ""
+	var rf := FileAccess.open("res://addons/godot_mcp/runtime/mcp_runtime.gd", FileAccess.READ)
+	if rf != null:
+		runtime_src = rf.get_as_text()
+		rf.close()
+	_check(not runtime_src.is_empty(), "found the runtime handler to check against")
+
+	var executor_src := ""
+	var ef := FileAccess.open("res://addons/godot_mcp/tool_executor.gd", FileAccess.READ)
+	if ef != null:
+		executor_src = ef.get_as_text()
+		ef.close()
+
+	var undispatchable: Array = []
+	for entry in contract:
+		var tool_name := str(entry["name"])
+		if tool_name.begins_with("debug_") or tool_name.begins_with("gd_"):
+			continue
+		if ex._tool_map.has(StringName(tool_name)) or ex._tool_map.has(tool_name):
+			continue
+		if runtime_src.contains('"%s"' % tool_name):
+			continue
+		# A few tools are special-cased inside execute_tool before the map is
+		# consulted, because they dispatch OTHER tools (batch_execute) and would
+		# recurse through it. Handled, just not via the map.
+		if executor_src.contains('"%s"' % tool_name):
+			continue
+		undispatchable.append(tool_name)
+
+	_check(contract.size() > 200, "read the contract for %d tools" % contract.size())
+	_check(undispatchable.is_empty(), "every advertised tool has a dispatch entry: %s" % str(undispatchable))
+	ex.queue_free()
+
+# Point every MUTATING tool at a scene that cannot exist, and check it admits
+# the work did not happen.
+#
+# "ok" for work that never occurred is the worst failure this surface can have:
+# the agent believes it, moves on, and the wrongness turns up later somewhere
+# unrelated. This project has shipped that bug before ("Stop the tools
+# reporting success for work they did not do"), which is why it is a sweep now
+# rather than a habit.
+#
+# A unique ghost path per tool matters: the first version of this reused one
+# path, the first tool in the list CREATED it, and every tool after that was
+# legitimately editing a real scene — three of them looked like bugs and were
+# not.
+func _test_tools_do_not_claim_work_they_did_not_do() -> void:
+	print("
+[no false success]")
+	var contract := _load_tool_contract()
+	if contract.is_empty():
+		return
+
+	var Executor = load("res://addons/godot_mcp/tool_executor.gd")
+	var ex = Executor.new()
+	root.add_child(ex)
+	ex._init_tools()
+
+	# Tools whose job is to CREATE the thing, so a path that does not exist yet
+	# is the normal case rather than a failure.
+	var creators := ["create_scene", "scaffold_entity", "scaffold_state_machine",
+		"create_script", "create_csharp_script", "create_folder", "create_resource",
+		"mp_scaffold_lobby"]
+
+	var liars: Array = []
+	var checked := 0
+	var i := 0
+	for entry in contract:
+		i += 1
+		var tool_name := str(entry["name"])
+		if bool(entry["read_only"]) or tool_name in creators:
+			continue
+		var required: Array = entry["required"]
+		if not ("scene_path" in required or "node_path" in required):
+			continue
+		if not (ex._tool_map.has(StringName(tool_name)) or ex._tool_map.has(tool_name)):
+			continue
+
+		var args := {"scene_path": "res://__ghost_%d.tscn" % i, "node_path": "NoSuchNode/Deeper"}
+		for r in required:
+			if args.has(r):
+				continue
+			match str(r):
+				"path", "file_path", "script_path": args[r] = "res://__nope.gd"
+				"property", "property_path": args[r] = "position"
+				"value": args[r] = 0
+				"type", "node_type": args[r] = "Node2D"
+				"signal", "signal_name": args[r] = "pressed"
+				_: args[r] = "probe"
+
+		var res = ex.execute_tool(tool_name, args)
+		if not (res is Dictionary):
+			continue
+		checked += 1
+		if res.get("ok", res.get(&"ok", null)) == true:
+			liars.append("%s -> %s" % [tool_name, JSON.stringify(res).substr(0, 90)])
+
+	_check(checked > 50, "swept a meaningful number of mutating tools (%d)" % checked)
+	_check(liars.is_empty(), "no mutating tool reports ok for a scene that does not exist: %s" % str(liars))
+	ex.queue_free()
 
 # analyze_2d_layout answers geometry questions that cost a whole session by hand:
 # decoration hanging in the air, decoration standing over a hole, decoration

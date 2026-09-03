@@ -1,0 +1,1925 @@
+[
+ {
+  "name": "list_dir",
+  "required": [
+   "root"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "read_file",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "search_project",
+  "required": [
+   "query"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "scene_tree_dump",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "read_scene",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "classdb_query",
+  "required": [
+   "class_name"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_project_settings",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "create_scene",
+  "required": [
+   "scene_path",
+   "root_node_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_node",
+  "required": [
+   "scene_path",
+   "node_name",
+   "node_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "remove_node",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "modify_node_property",
+  "required": [
+   "scene_path",
+   "property_name",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_node_properties",
+  "required": [
+   "scene_path",
+   "properties"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_node_reference",
+  "required": [
+   "scene_path",
+   "node_path",
+   "property",
+   "target_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "rename_node",
+  "required": [
+   "scene_path",
+   "node_path",
+   "new_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "move_node",
+  "required": [
+   "scene_path",
+   "node_path",
+   "new_parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "duplicate_node",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "instance_scene",
+  "required": [
+   "scene_path",
+   "instance_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "attach_script",
+  "required": [
+   "scene_path",
+   "script_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "connect_signal",
+  "required": [
+   "scene_path",
+   "from_node",
+   "signal",
+   "to_node",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "batch_scene_edit",
+  "required": [
+   "scene_path",
+   "operations"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_script",
+  "required": [
+   "path",
+   "content"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "edit_script",
+  "required": [
+   "edit"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "list_scripts",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "validate_scripts",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "delete_file",
+  "required": [
+   "path",
+   "confirm"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "run_scene",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "stop_scene",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "is_playing",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_runtime_log",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "take_screenshot",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_errors",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_console_log",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "rescan_filesystem",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "restart_editor",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "render_scene_preview",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "batch_execute",
+  "required": [
+   "operations"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "find_nodes_by_type",
+  "required": [
+   "scene_path",
+   "node_type"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_scene_dependencies",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_runtime_status",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "wait",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "send_input",
+  "required": [
+   "event"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "query_runtime_node",
+  "required": [
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "connect_signal_runtime",
+  "required": [
+   "from_node_path",
+   "signal",
+   "to_node_path",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "disconnect_signal_runtime",
+  "required": [
+   "from_node_path",
+   "signal",
+   "to_node_path",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "tween_property_runtime",
+  "required": [
+   "node_path",
+   "property",
+   "final_value"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "play_animation_runtime",
+  "required": [
+   "node_path",
+   "animation_name"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "dump_control_tree",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "click_control_runtime",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "get_focused_control",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "assert_screen_text",
+  "required": [
+   "text"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "monitor_properties",
+  "required": [
+   "node_path",
+   "properties"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "game_eval",
+  "required": [
+   "code"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "replay_input_sequence",
+  "required": [
+   "sequence"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "start_input_recording",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "stop_input_recording",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_multiplayer_status",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "call_rpc_runtime",
+  "required": [
+   "node_path",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "call_method_runtime",
+  "required": [
+   "node_path",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_runtime_property",
+  "required": [
+   "node_path",
+   "property",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "await_signal_runtime",
+  "required": [
+   "node_path",
+   "signal"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "serialize_runtime_tree",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "spawn_headless_peers",
+  "required": [
+   "scene"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "stop_headless_peers",
+  "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "seed_rng",
+  "required": [
+   "seed"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "step_frames",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "time_scale",
+  "required": [
+   "scale"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "await_condition",
+  "required": [
+   "condition"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "wire_signal",
+  "required": [
+   "scene_path",
+   "from_node",
+   "signal",
+   "to_node"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "generate_onready_refs",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "scaffold_entity",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "scaffold_state_machine",
+  "required": [
+   "scene_path",
+   "states"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "generate_property_forwarder",
+  "required": [
+   "script_path",
+   "property_name",
+   "target_expression",
+   "target_property"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_csharp_script",
+  "required": [
+   "path"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "csharp_status",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "mp_add_spawner",
+  "required": [
+   "scene_path",
+   "spawn_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "mp_add_synchronizer",
+  "required": [
+   "scene_path",
+   "properties"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "mp_wire_rpc",
+  "required": [
+   "script_path",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "mp_scaffold_lobby",
+  "required": [
+   "script_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "mp_set_authority",
+  "required": [
+   "peer_id",
+   "script_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_project_statistics",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "find_unused_resources",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "detect_circular_dependencies",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "analyze_scene_complexity",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "analyze_signal_flow",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "compare_screenshots",
+  "required": [
+   "baseline",
+   "current"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "mp_diagnose",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "validate_references",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "analyze_2d_layout",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "texture_info",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "scene_diff",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_editor_activity",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_editor_selection",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "select_nodes",
+  "required": [
+   "scene_path",
+   "node_paths"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "clear_editor_selection",
+  "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "close_scene_tab",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "open_in_godot",
+  "required": [
+   "path"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "get_performance_monitors",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_editor_performance",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "clear_console_log",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "get_uid",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_node_properties",
+  "required": [
+   "node_type"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "undo_last",
+  "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "redo_last",
+  "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "save_scene",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "list_settings",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "update_project_settings",
+  "required": [
+   "settings"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_main_scene",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "configure_input_map",
+  "required": [
+   "action",
+   "operation"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_input_map",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "setup_autoload",
+  "required": [
+   "operation"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "remove_autoload",
+  "required": [
+   "name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_resource",
+  "required": [
+   "resource_path",
+   "resource_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "sync_localization",
+  "required": [
+   "csv_path"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "get_collision_layers",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "set_resource_property",
+  "required": [
+   "scene_path",
+   "resource_path",
+   "property_name",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "save_resource_to_file",
+  "required": [
+   "scene_path",
+   "resource_path",
+   "save_to"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_resource_info",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "list_export_presets",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_export_info",
+  "required": [
+   "preset_index"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "export_project",
+  "required": [
+   "output_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_export_status",
+  "required": [
+   "job_id"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "rename_symbol_project_wide",
+  "required": [
+   "old_name",
+   "new_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "rename_file",
+  "required": [
+   "old_path",
+   "new_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_folder",
+  "required": [
+   "path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "batch_set_property",
+  "required": [
+   "scene_path",
+   "node_paths",
+   "property_name",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "validate_script",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_definition",
+  "required": [
+   "path",
+   "line",
+   "column"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_references",
+  "required": [
+   "path",
+   "line",
+   "column"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_rename",
+  "required": [
+   "path",
+   "line",
+   "column",
+   "new_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "gd_diagnostics",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_hover",
+  "required": [
+   "path",
+   "line",
+   "column"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_document_symbols",
+  "required": [
+   "path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_completion",
+  "required": [
+   "path",
+   "line",
+   "column"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "gd_lsp_status",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "debug_launch",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_attach",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_set_breakpoints",
+  "required": [
+   "path",
+   "lines"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_continue",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_step",
+  "required": [],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_stack_trace",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "debug_scopes",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "debug_variables",
+  "required": [
+   "variables_reference"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "debug_evaluate",
+  "required": [
+   "expression"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "debug_status",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "debug_disconnect",
+  "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_anchor_preset",
+  "required": [
+   "scene_path",
+   "node_path",
+   "preset"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "detach_script",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_collision_shape",
+  "required": [
+   "scene_path",
+   "shape_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_sprite_texture",
+  "required": [
+   "scene_path",
+   "texture_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_mesh",
+  "required": [
+   "scene_path",
+   "mesh_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_material",
+  "required": [
+   "scene_path",
+   "material_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_node_spatial_info",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "measure_node_distance",
+  "required": [
+   "scene_path",
+   "from_node_path",
+   "to_node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "snap_node_to_grid",
+  "required": [
+   "scene_path",
+   "grid_size"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_node_groups",
+  "required": [
+   "scene_path",
+   "groups"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_node_groups",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "find_nodes_in_group",
+  "required": [
+   "scene_path",
+   "group"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "list_signal_connections",
+  "required": [
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "disconnect_signal",
+  "required": [
+   "scene_path",
+   "from_node",
+   "signal",
+   "to_node",
+   "method"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "list_animations",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "create_animation",
+  "required": [
+   "scene_path",
+   "node_path",
+   "animation_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_animation_track",
+  "required": [
+   "scene_path",
+   "node_path",
+   "animation_name",
+   "track_type",
+   "track_node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_sprite_animation",
+  "required": [
+   "scene_path",
+   "sprite_path",
+   "animation_name"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "create_sprite_frames",
+  "required": [
+   "path",
+   "animations"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "set_animation_keyframe",
+  "required": [
+   "scene_path",
+   "node_path",
+   "animation_name",
+   "track_index",
+   "time",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_animation_info",
+  "required": [
+   "scene_path",
+   "node_path",
+   "animation_name"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "remove_animation",
+  "required": [
+   "scene_path",
+   "node_path",
+   "animation_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_animation_tree",
+  "required": [
+   "scene_path",
+   "parent_path",
+   "anim_player_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_animation_tree_structure",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "add_state_machine_state",
+  "required": [
+   "scene_path",
+   "node_path",
+   "state_name",
+   "animation_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "remove_state_machine_state",
+  "required": [
+   "scene_path",
+   "node_path",
+   "state_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_state_machine_transition",
+  "required": [
+   "scene_path",
+   "node_path",
+   "from",
+   "to"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "remove_state_machine_transition",
+  "required": [
+   "scene_path",
+   "node_path",
+   "from",
+   "to"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_raycast",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "setup_collision",
+  "required": [
+   "scene_path",
+   "node_path",
+   "shape_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_physics_layers",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_collision_info",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "set_collision_preset",
+  "required": [
+   "name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_collision_presets",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "apply_collision_preset",
+  "required": [
+   "scene_path",
+   "node_path",
+   "name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_audio_player",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_audio_bus",
+  "required": [
+   "bus_name"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_audio_bus_layout",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "tilemap_set_cell",
+  "required": [
+   "scene_path",
+   "node_path",
+   "coords",
+   "source_id"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "tilemap_fill_rect",
+  "required": [
+   "scene_path",
+   "node_path",
+   "from_coords",
+   "to_coords",
+   "source_id"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "tilemap_get_cell",
+  "required": [
+   "scene_path",
+   "node_path",
+   "coords"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "tilemap_clear",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "tilemap_get_info",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "tilemap_get_used_cells",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "tilemap_set_terrain_cells",
+  "required": [
+   "scene_path",
+   "node_path",
+   "cells",
+   "terrain_set",
+   "terrain"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "tilemap_autotile",
+  "required": [
+   "scene_path",
+   "node_path",
+   "cells",
+   "mask_to_atlas"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "add_mesh_instance",
+  "required": [
+   "scene_path",
+   "parent_path",
+   "mesh_type"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "setup_lighting",
+  "required": [
+   "scene_path",
+   "parent_path",
+   "preset"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_material_3d",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "setup_environment",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "setup_camera_3d",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_skeleton_info",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "add_bone",
+  "required": [
+   "scene_path",
+   "node_path",
+   "bone_name"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "set_bone_pose",
+  "required": [
+   "scene_path",
+   "node_path",
+   "bone_name"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
+  "name": "add_gridmap",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "create_shader",
+  "required": [
+   "shader_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "read_shader",
+  "required": [
+   "shader_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "edit_shader",
+  "required": [
+   "shader_path",
+   "old_code_snippet",
+   "new_code_snippet"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "assign_shader_material",
+  "required": [
+   "scene_path",
+   "node_path",
+   "shader_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_shader_param",
+  "required": [
+   "scene_path",
+   "node_path",
+   "param_name",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_shader_params",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "setup_navigation_region",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "bake_navigation_mesh",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "setup_navigation_agent",
+  "required": [
+   "scene_path",
+   "parent_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_navigation_layers",
+  "required": [
+   "scene_path",
+   "node_path",
+   "layers"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_navigation_info",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "create_theme",
+  "required": [
+   "theme_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_theme_color",
+  "required": [
+   "theme_path",
+   "control_type",
+   "color_name",
+   "color"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_theme_constant",
+  "required": [
+   "theme_path",
+   "control_type",
+   "constant_name",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_theme_font_size",
+  "required": [
+   "theme_path",
+   "control_type",
+   "value"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_theme_stylebox",
+  "required": [
+   "theme_path",
+   "control_type",
+   "stylebox_name",
+   "style"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_theme_info",
+  "required": [
+   "theme_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "create_particles",
+  "required": [
+   "scene_path",
+   "parent_path",
+   "dimension"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_particle_material",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "set_particle_color_gradient",
+  "required": [
+   "scene_path",
+   "node_path",
+   "stops"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "apply_particle_preset",
+  "required": [
+   "scene_path",
+   "node_path",
+   "preset"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "get_particle_info",
+  "required": [
+   "scene_path",
+   "node_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "assert_node_property",
+  "required": [
+   "scene_path",
+   "node_path",
+   "property",
+   "expected"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "run_scene_assertions",
+  "required": [
+   "scene_path",
+   "assertions"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "validate_scene_integrity",
+  "required": [
+   "scene_path"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "validate_meshes",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "run_gut_tests",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "get_gut_status",
+  "required": [
+   "job_id"
+  ],
+  "read_only": true,
+  "destructive": false
+ },
+ {
+  "name": "generate_2d_asset",
+  "required": [
+   "svg_code",
+   "filename"
+  ],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "map_project",
+  "required": [],
+  "read_only": true,
+  "destructive": false
+ }
+]

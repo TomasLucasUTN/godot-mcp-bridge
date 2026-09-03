@@ -26,7 +26,7 @@
     "bundled-addon"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build-visualizer.js && node scripts/bundle-addon.js",
+    "build": "tsc && node scripts/build-visualizer.js && node scripts/bundle-addon.js && node scripts/export-tool-contract.mjs",
     "build:visualizer": "node scripts/build-visualizer.js",
     "prepare": "npm run build",
     "start": "node dist/index.js",
