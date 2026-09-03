@@ -82,7 +82,7 @@ func _load_scene(scene_path: String) -> Array:
 		return [null, {&"ok": false, &"error": "Failed to load scene: " + scene_path}]
 	var root = _instantiate_packed_scene_for_edit(packed)
 	if not root:
-		return [null, {&"ok": false, &"error": "Failed to instantiate scene"}]
+		return [null, {&"ok": false, &"error": "Failed to instantiate scene: " + scene_path + ". It loaded as a PackedScene but produced no node — usually a scene whose root script fails to compile."}]
 	return [root, {}]
 
 ## Instantiate with the right edit-state flag so sub-resources and inherited

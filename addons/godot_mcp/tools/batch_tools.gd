@@ -53,7 +53,7 @@ func _load_scene(scene_path: String) -> Array:
 
 	var root = _instantiate_packed_scene_for_edit(packed)
 	if not root:
-		return [null, {&"ok": false, &"error": "Failed to instantiate scene"}]
+		return [null, {&"ok": false, &"error": "Failed to instantiate scene: " + scene_path + ". It loaded as a PackedScene but produced no node — usually a scene whose root script fails to compile."}]
 
 	return [root, {}]
 
@@ -156,7 +156,10 @@ func batch_set_property(args: Dictionary) -> Dictionary:
 		var node_path := str(np)
 		var target := _find_node(root, node_path)
 		if not target:
-			failed.append({&"node_path": node_path, &"error": "Node not found"})
+			# Named in the message too: a batch answer is read as a list of
+			# strings, and "Node not found" repeated four times says nothing
+			# about which four.
+			failed.append({&"node_path": node_path, &"error": "Node not found: " + node_path})
 			continue
 		if not (property_name in target):
 			failed.append({&"node_path": node_path, &"error": "No property '%s' on %s" % [property_name, target.get_class()]})

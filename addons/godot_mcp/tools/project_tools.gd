@@ -2164,7 +2164,13 @@ func export_project(args: Dictionary) -> Dictionary:
 			return {&"ok": false, &"error": "Preset index %d not found" % preset_index}
 		preset_name = str(cfg.get_value(section, "name", ""))
 	if preset_name.is_empty():
-		return {&"ok": false, &"error": "Could not resolve a preset name"}
+		# Say what there IS. "Could not resolve a preset name" leaves the caller
+		# guessing at strings when the answer is a list the file already holds.
+		var known: Array = []
+		for sect in cfg.get_sections():
+			if sect.begins_with("preset.") and not sect.ends_with(".options"):
+				known.append(str(cfg.get_value(sect, "name", sect)))
+		return {&"ok": false, &"error": "Could not resolve a preset name. Presets in export_presets.cfg: %s" % (", ".join(known) if not known.is_empty() else "(none)")}
 
 	# Flush unsaved editor state so the clone reflects the current project.
 	if _editor_plugin:

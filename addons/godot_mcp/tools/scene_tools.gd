@@ -986,7 +986,8 @@ func _apply_op(root: Node, op: Dictionary, ctx: Dictionary) -> Dictionary:
 				return {&"ok": false, &"op": kind, &"error": "Node not found: " + str(op.get(&"node_path", ""))}
 			var new_parent := _find_node(root, str(op.get(&"new_parent_path", ".")))
 			if not new_parent:
-				return {&"ok": false, &"op": kind, &"error": "New parent not found"}
+				var np_err := _node_not_found(root, str(op.get(&"new_parent_path", ".")), "New parent")
+				return {&"ok": false, &"op": kind, &"error": str(np_err.get(&"error", "New parent not found"))}
 			var old_parent_b := t4.get_parent()
 			var old_index_b := t4.get_index()
 			_reparent_node(t4, new_parent, root, int(op.get(&"sibling_index", -1)))
@@ -3771,8 +3772,13 @@ func disconnect_signal(args: Dictionary) -> Dictionary:
 	var src := _find_node(root, from_node)
 	var dst := _find_node(root, to_node)
 	if not src or not dst:
+		# Which one. "from_node or to_node not found" sent the caller to check
+		# both, and the near-miss list is the part that actually resolves it.
+		var missing := from_node if not src else to_node
+		var label := "from_node" if not src else "to_node"
+		var err := _node_not_found(root, missing, label)
 		_discard_scene(root, is_live)
-		return {&"ok": false, &"error": "from_node or to_node not found"}
+		return {&"ok": false, &"error": str(err.get(&"error", "%s not found: %s" % [label, missing]))}
 
 	var callable := Callable(dst, method)
 	if not src.is_connected(signal_name, callable):
