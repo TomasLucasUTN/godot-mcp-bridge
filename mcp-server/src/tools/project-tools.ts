@@ -163,6 +163,10 @@ export const projectTools: ToolDefinition[] = [
     name: 'scene_tree_dump',
     annotations: { readOnlyHint: true, openWorldHint: false },
     description: 'Dump the scene tree of the scene currently open in the Godot editor (node names, types, and attached scripts). Pass max_depth to keep the output small on large scenes — a depth-limited branch reports its descendant count instead of expanding. Start shallow (max_depth 1-2) for an overview, then drill in.',
+    // In a host that supports MCP Apps the same result is also drawn as a
+    // collapsible panel the developer can click; everywhere else this key is
+    // ignored and the text answer is unchanged.
+    _meta: { ui: { resourceUri: 'ui://godot-mcp-bridge/scene-tree' } },
     inputSchema: {
       type: 'object',
       properties: {

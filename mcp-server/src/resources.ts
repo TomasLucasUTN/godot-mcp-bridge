@@ -17,6 +17,12 @@ import {
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ActivityFeed, ACTIVITY_URI } from './activity-feed.js';
+import {
+  MCP_APP_MIME,
+  SCENE_TREE_APP_HTML,
+  SCENE_TREE_APP_RESOURCE,
+  SCENE_TREE_APP_URI,
+} from './apps/scene-tree-app.js';
 
 export interface Guide {
   uri: string;
@@ -428,11 +434,27 @@ export function registerResources(server: Server, feed?: ActivityFeed): void {
         uri, name, description, mimeType,
       })),
       ...(feed ? [ACTIVITY_RESOURCE] : []),
+      SCENE_TREE_APP_RESOURCE,
     ],
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
+
+    // An MCP App (SEP-1865): HTML the host frames in a sandboxed iframe. Hosts
+    // without the extension never ask for it.
+    if (uri === SCENE_TREE_APP_URI) {
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: MCP_APP_MIME,
+            text: SCENE_TREE_APP_HTML,
+            _meta: SCENE_TREE_APP_RESOURCE._meta,
+          },
+        ],
+      };
+    }
 
     if (feed && uri === ACTIVITY_URI) {
       return {

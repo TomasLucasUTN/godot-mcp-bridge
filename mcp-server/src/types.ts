@@ -17,6 +17,16 @@ export interface ToolDefinition {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   };
+  /**
+   * MCP Apps (SEP-1865). `ui.resourceUri` points at a `ui://` resource the host
+   * renders beside this tool's result; hosts without the extension ignore it.
+   */
+  _meta?: {
+    ui?: {
+      resourceUri?: string;
+      visibility?: Array<'model' | 'app'>;
+    };
+  };
 }
 
 export interface PropertySchema {

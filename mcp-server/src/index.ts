@@ -831,7 +831,10 @@ function createMcpServer(handleTool: ToolHandler): Server {
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          ...(tool.annotations ? { annotations: tool.annotations } : {})
+          ...(tool.annotations ? { annotations: tool.annotations } : {}),
+          // `_meta.ui` binds a tool to an MCP App (SEP-1865). A host without
+          // the extension ignores the key, so this costs nothing there.
+          ...(tool._meta ? { _meta: tool._meta } : {})
         }))
       ]
     };
