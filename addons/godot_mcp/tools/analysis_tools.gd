@@ -77,6 +77,15 @@ func _referenced_uids(text: String) -> Array:
 # =============================================================================
 # get_project_statistics
 # =============================================================================
+## NOTE: the MCP server normally answers this itself, from disk, and never
+## reaches this handler. Measured against a 24,649-file project this version
+## took 120,685 ms — six times the bridge's 20s ping watchdog — and a live call
+## did drop the editor off the bridge. The cost is in the two lines that need
+## the engine least: a FileAccess.open() per file just to read its length, and
+## a ResourceLoader.load() per .tscn, which pulls every scene's textures and
+## scripts into the cache to count its nodes. See mcp-server/src/project-scan.ts.
+## This stays as the fallback for when the server has no project path to scan;
+## keep the two in step.
 func get_project_statistics(args: Dictionary) -> Dictionary:
 	var include_addons: bool = bool(args.get(&"include_addons", false))
 

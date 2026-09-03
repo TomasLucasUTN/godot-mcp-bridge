@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findUnusedResources, walkProject } from '../project-scan.js';
+import { findUnusedResources, projectStatistics, walkProject } from '../project-scan.js';
 
 let root: string;
 
@@ -42,6 +42,61 @@ describe('walkProject', () => {
     await write('addons/plugin/thing.gd', 'extends Node\n');
     const files = (await walkProject(root, true)).map(f => f.res);
     expect(files).toContain('res://addons/plugin/thing.gd');
+  });
+});
+
+describe('projectStatistics', () => {
+  it('counts scripts, scenes and resources by kind', async () => {
+    await write('main.tscn', '[gd_scene]\n\n[node name="Root" type="Node2D"]\n[node name="Child" type="Sprite2D" parent="."]\n');
+    await write('src/player.gd', 'extends Node\n\nfunc _ready():\n\tpass\n');
+    await write('data/config.tres', '[gd_resource type="Resource"]\n');
+
+    const stats = await projectStatistics(root);
+    expect(stats.scripts).toBe(1);
+    expect(stats.scenes).toBe(1);
+    expect(stats.resources).toBe(1);
+    expect(stats.scanned_in).toBe('node');
+  });
+
+  // The editor version got this from PackedScene.get_state().get_node_count(),
+  // which meant loading every scene and its textures — the 120s that killed the
+  // bridge. Every node in a text scene is one [node ...] block, so the count is
+  // the same without the engine.
+  it('counts nodes across text scenes without loading them', async () => {
+    await write('a.tscn', '[gd_scene]\n\n[node name="Root" type="Node2D"]\n[node name="A" type="Node" parent="."]\n');
+    await write('b.tscn', '[gd_scene]\n\n[node name="Root" type="Node2D"]\n');
+
+    const stats = await projectStatistics(root);
+    expect(stats.nodes_in_scenes).toBe(3);
+    expect(stats.scenes_scanned).toBe(2);
+  });
+
+  it('counts declarations and markers in GDScript', async () => {
+    await write('src/thing.gd', [
+      'class_name Thing',
+      'extends Node',
+      '',
+      'signal died',
+      'signal hurt(amount)',
+      '',
+      'func _ready():',
+      '\tpass  # TODO: wire this up',
+      '',
+      'static func make() -> Thing:',
+      '\treturn Thing.new()  # FIXME',
+    ].join('\n'));
+
+    const stats = await projectStatistics(root);
+    expect(stats.script_functions).toBe(2);
+    expect(stats.signal_declarations).toBe(2);
+    expect(stats.scripts_with_class_name).toBe(1);
+    expect(stats.todo_markers).toBe(2);
+  });
+
+  it('excludes addons unless asked', async () => {
+    await write('addons/plugin/thing.gd', 'extends Node\n');
+    expect((await projectStatistics(root)).scripts).toBe(0);
+    expect((await projectStatistics(root, true)).scripts).toBe(1);
   });
 });
 

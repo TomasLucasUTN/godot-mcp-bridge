@@ -41,7 +41,7 @@ import { ActivityFeed, type ActivityEvent } from './activity-feed.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
 import { probeExistingServer, proxyToolCall, registerProxyClient, unregisterProxyClient } from './proxy-client.js';
-import { findUnusedResources } from './project-scan.js';
+import { findUnusedResources, projectStatistics } from './project-scan.js';
 import { isDebugTool, handleDebugTool } from './debug-session.js';
 import { isLspTool, handleLspTool } from './lsp-session.js';
 
@@ -594,6 +594,17 @@ async function executeToolCall(
       return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
     }
     // No project path to scan; fall through to the editor-side implementation.
+  }
+
+  // Same reason, and it was the worse offender of the two: measured at
+  // 120,685 ms in the editor against a 24,649-file project, against a 20s
+  // watchdog. See projectStatistics().
+  if (name === 'get_project_statistics') {
+    const root = godotBridge!.getStatus().projectPath ?? EXPECTED_PROJECT;
+    if (root) {
+      const payload = await projectStatistics(root, toolArgs.include_addons === true);
+      return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    }
   }
 
   if (!godotBridge!.isConnected()) {

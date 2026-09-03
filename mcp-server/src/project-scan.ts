@@ -214,6 +214,120 @@ export async function findUnusedResources(root: string, options: UnusedScanOptio
   };
 }
 
+export interface ProjectStatistics {
+  ok: true;
+  include_addons: boolean;
+  files_total: number;
+  files_by_extension: Record<string, number>;
+  scripts: number;
+  scenes: number;
+  resources: number;
+  script_lines: number;
+  script_functions: number;
+  scripts_with_class_name: number;
+  signal_declarations: number;
+  todo_markers: number;
+  nodes_in_scenes: number;
+  scenes_scanned: number;
+  project_bytes: number;
+  scanned_in: 'node';
+  elapsed_ms: number;
+}
+
+const FUNC_DECL = /^[ \t]*(?:static[ \t]+)?func[ \t]/gm;
+const SIGNAL_DECL = /^[ \t]*signal[ \t]/gm;
+const TODO_MARKER = /TODO|FIXME|HACK|XXX/gi;
+/** Every node in a text scene is one `[node ...]` block, which is what
+ *  PackedScene.get_state().get_node_count() counts. */
+const SCENE_NODE = /^\[node /gm;
+
+function countMatches(text: string, pattern: RegExp): number {
+  pattern.lastIndex = 0;
+  let n = 0;
+  while (pattern.exec(text) !== null) n++;
+  return n;
+}
+
+/**
+ * Project-wide counts, read from disk here instead of in the editor.
+ *
+ * Moved for the same reason as findUnusedResources, and it was worse: measured
+ * against the same 24,649-file project the editor-side version took 120,685 ms
+ * — six times the bridge's 20s watchdog — and a live call did drop the editor
+ * off the bridge. Two things made it that slow, and neither needs the engine:
+ * it opened every file with FileAccess just to read its length (a `stat` here),
+ * and it called ResourceLoader.load() on every .tscn, which pulls each scene's
+ * textures and scripts into the resource cache to count its nodes.
+ */
+export async function projectStatistics(root: string, includeAddons = false): Promise<ProjectStatistics> {
+  const startedAt = Date.now();
+  const files = await walkProject(root, includeAddons);
+
+  const byExt: Record<string, number> = {};
+  let scripts = 0;
+  let scenes = 0;
+  let resources = 0;
+  let scriptLines = 0;
+  let scriptFunctions = 0;
+  let scriptsWithClassName = 0;
+  let signalDeclarations = 0;
+  let todoMarkers = 0;
+  let nodesInScenes = 0;
+  let scenesScanned = 0;
+  let projectBytes = 0;
+
+  await mapLimit(files, READ_CONCURRENCY, async (file) => {
+    byExt[file.ext] = (byExt[file.ext] ?? 0) + 1;
+    try {
+      projectBytes += (await stat(file.abs)).size;
+    } catch {
+      // A file that vanished mid-scan contributes nothing rather than failing
+      // the whole call.
+    }
+
+    if (file.ext === 'gd') {
+      scripts++;
+      const src = await readTextOrEmpty(file.abs);
+      scriptLines += src.split('\n').length;
+      scriptFunctions += countMatches(src, FUNC_DECL);
+      signalDeclarations += countMatches(src, SIGNAL_DECL);
+      todoMarkers += countMatches(src, TODO_MARKER);
+      if (src.includes('class_name ')) scriptsWithClassName++;
+    } else if (file.ext === 'tscn' || file.ext === 'scn') {
+      scenes++;
+      // Only text scenes can be counted without the engine; a binary .scn is
+      // skipped, exactly as the editor-side version skipped it.
+      if (file.ext === 'tscn') {
+        const text = await readTextOrEmpty(file.abs);
+        nodesInScenes += countMatches(text, SCENE_NODE);
+        scenesScanned++;
+      }
+    } else if (file.ext === 'tres' || file.ext === 'res') {
+      resources++;
+    }
+  });
+
+  return {
+    ok: true,
+    include_addons: includeAddons,
+    files_total: files.length,
+    files_by_extension: byExt,
+    scripts,
+    scenes,
+    resources,
+    script_lines: scriptLines,
+    script_functions: scriptFunctions,
+    scripts_with_class_name: scriptsWithClassName,
+    signal_declarations: signalDeclarations,
+    todo_markers: todoMarkers,
+    nodes_in_scenes: nodesInScenes,
+    scenes_scanned: scenesScanned,
+    project_bytes: projectBytes,
+    scanned_in: 'node',
+    elapsed_ms: Date.now() - startedAt,
+  };
+}
+
 /** Does this look like a Godot project root? */
 export async function isProjectRoot(dir: string): Promise<boolean> {
   try {

@@ -11,7 +11,7 @@ export const analysisTools: ToolDefinition[] = [
   {
     name: 'get_project_statistics',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    description: 'Project-wide counts in one call: files by extension, script/scene/resource totals, lines of GDScript, function and signal declarations, TODO/FIXME markers, and total nodes across all .tscn scenes. Use it to size up an unfamiliar project before diving in, or to track growth over time.',
+    description: 'Project-wide counts in one call: files by extension, script/scene/resource totals, lines of GDScript, function and signal declarations, TODO/FIXME markers, and total nodes across all .tscn scenes. Use it to size up an unfamiliar project before diving in, or to track growth over time. Answered by the MCP server from disk, not inside the editor, so a large project cannot freeze the editor UI — and it works with Godot closed when GODOT_MCP_PROJECT is set.',
     inputSchema: {
       type: 'object',
       properties: {
