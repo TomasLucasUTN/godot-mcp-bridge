@@ -108,6 +108,7 @@ func _initialize() -> void:
 	_test_dimension_follows_the_parent()
 	_test_navigation_info_points_somewhere()
 	_test_validate_meshes_names_what_it_dropped()
+	_test_search_skips_addons()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1057,6 +1058,25 @@ func _test_validate_meshes_names_what_it_dropped() -> void:
 	var skipped: Array = r.get("skipped", [])
 	_check(skipped.size() == 1 and str(skipped[0].get("path", "")) == scene, "but names the file it dropped")
 	_rm(scene)
+
+# Addon source answers almost every common identifier, and none of those hits
+# are what the caller meant — they crowd out the project own code and cost
+# context to read.
+func _test_search_skips_addons() -> void:
+	print("\n[search skips addon source]")
+	var ft = preload("res://addons/godot_mcp/tools/file_tools.gd").new()
+	# A string only the addon contains — built by hand so this file does not
+	# contain it whole and match itself.
+	var query := "_collect_" + "mesh_files"
+
+	var default_run = ft.search_project({"query": query})
+	_check(default_run.get("ok", false), "search answers ok")
+	_check(int(default_run.get("returned", -1)) == 0, "and finds nothing outside addons")
+	_check(int(default_run.get("skipped_addon_files", 0)) > 0, "while saying how many addon files it skipped")
+
+	var opted_in = ft.search_project({"query": query, "include_addons": true})
+	_check(int(opted_in.get("returned", 0)) > 0, "include_addons brings them back")
+	_check(not opted_in.has("skipped_addon_files"), "and then nothing is reported as skipped")
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

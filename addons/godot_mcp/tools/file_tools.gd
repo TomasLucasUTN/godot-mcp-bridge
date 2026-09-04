@@ -192,6 +192,7 @@ func search_project(args: Dictionary) -> Dictionary:
 	var glob_filter: String = str(args.get(&"glob", ""))
 	var max_results: int = int(args.get(&"max_results", DEFAULT_MAX_RESULTS))
 	var case_sensitive: bool = bool(args.get(&"case_sensitive", false))
+	var include_addons: bool = bool(args.get(&"include_addons", false))
 
 	if query.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'query' parameter"}
@@ -199,10 +200,17 @@ func search_project(args: Dictionary) -> Dictionary:
 	var search_query := query if case_sensitive else query.to_lower()
 	var files := _collect_files("res://", glob_filter)
 	var matches: Array = []
+	var addon_hits := 0
 
 	for file_path: String in files:
 		if matches.size() >= max_results:
 			break
+		# Third-party addon source answers almost every common identifier, and
+		# it is never what the caller meant — the hits crowd out the project's
+		# own code and cost context to read. Same default as validate_references.
+		if not include_addons and file_path.begins_with("res://addons/"):
+			addon_hits += 1
+			continue
 
 		var file := FileAccess.open(file_path, FileAccess.READ)
 		if file == null:
@@ -247,6 +255,9 @@ func search_project(args: Dictionary) -> Dictionary:
 		out[&"note"] = "Stopped at max_results (%d), so this is not how many matches exist. Narrow the query, pass a glob, or raise max_results." % max_results
 	else:
 		out[&"total_matches"] = matches.size()
+	if addon_hits > 0:
+		out[&"skipped_addon_files"] = addon_hits
+		out[&"addons_note"] = "Skipped %d file(s) under res://addons/. Pass include_addons: true to search them." % addon_hits
 	return out
 
 func _collect_files(path: String, glob_filter: String) -> PackedStringArray:

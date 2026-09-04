@@ -74,6 +74,10 @@ export const fileTools: ToolDefinition[] = [
         case_sensitive: {
           type: 'boolean',
           description: 'Match case exactly. Default false.'
+        },
+        include_addons: {
+          type: 'boolean',
+          description: 'Search res://addons/ too. Default false: third-party addon source answers almost every common identifier and crowds out the project own code.'
         }
       },
       required: ['query']
