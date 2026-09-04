@@ -606,9 +606,16 @@ func create_sprite_frames(args: Dictionary) -> Dictionary:
 		if name == "default":
 			wants_default = true
 
-		var tex_path: String = _ensure_res_path(str(spec.get("texture", "")))
+		# A missing key read as an empty path and came back "texture not found: ",
+		# which reads as a bad path rather than an absent argument. The
+		# unknown-argument guard cannot see inside array items, so this is the
+		# only place that can say it.
+		var raw_texture := str(spec.get("texture", ""))
+		if raw_texture.strip_edges().is_empty():
+			return {&"ok": false, &"error": "Animation '%s' has no 'texture'. Each entry takes {name, texture, hframes?, vframes?, frames?, fps?, loop?}; the keys present were: %s." % [name, ", ".join(PackedStringArray(spec.keys()))]}
+		var tex_path: String = _ensure_res_path(raw_texture)
 		if PathGuard.is_bad(tex_path) or not FileAccess.file_exists(tex_path):
-			return {&"ok": false, &"error": "Animation '%s': texture not found: %s" % [name, str(spec.get("texture", ""))]}
+			return {&"ok": false, &"error": "Animation '%s': texture not found: %s" % [name, raw_texture]}
 		var sheet := load(tex_path) as Texture2D
 		if sheet == null:
 			return {&"ok": false, &"error": "Animation '%s': could not load '%s' as a Texture2D. A just-created image is not importable until the editor rescans — call rescan_filesystem and retry." % [name, tex_path]}
