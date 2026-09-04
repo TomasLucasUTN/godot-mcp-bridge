@@ -105,6 +105,7 @@ func _initialize() -> void:
 	_test_root_name_resolves_as_root()
 	_test_shape_and_vector_forms()
 	_test_missing_path_is_not_an_escape()
+	_test_dimension_follows_the_parent()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -979,6 +980,40 @@ func _test_missing_path_is_not_an_escape() -> void:
 
 	_check("Missing 'scene_path'" in str(bt.find_nodes_by_type({"node_type": "Node2D"}).get("error", "")), "batch tools report a missing scene_path the same way")
 	_check("Missing 'theme_path'" in str(tt.get_theme_info({"theme_path": ""}).get("error", "")), "theme tools too")
+
+# A NavigationRegion2D under a Node3D does nothing, and the tools used to build
+# exactly that: dimension defaulted to "2D" whatever it was being added to, and
+# the call still answered ok.
+func _test_dimension_follows_the_parent() -> void:
+	print("
+[dimension follows the parent]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var nt = preload("res://addons/godot_mcp/tools/navigation_tools.gd").new()
+	var pt = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var scene := "res://__gdtest_dimension.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+
+	_check(nt.setup_navigation_region({"scene_path": scene, "parent_path": "."}).get("ok", false), "navigation region added to a 3D scene")
+	_check(nt.setup_navigation_agent({"scene_path": scene, "parent_path": "."}).get("ok", false), "navigation agent added to a 3D scene")
+	_check(pt.add_raycast({"scene_path": scene, "parent_path": ".", "node_name": "Ray"}).get("ok", false), "raycast added to a 3D scene")
+
+	var types: Array = []
+	for child in st.read_scene({"scene_path": scene}).get("root", {}).get("children", []):
+		types.append(str(child.get("type", "")))
+	_check(types.has("NavigationRegion3D"), "the region is 3D, not 2D")
+	_check(types.has("NavigationAgent3D"), "the agent is 3D, not 2D")
+	_check(types.has("RayCast3D"), "the raycast is 3D, not 2D")
+
+	# An explicit dimension still wins over the parent.
+	_check(pt.add_raycast({"scene_path": scene, "parent_path": ".", "node_name": "Flat", "dimension": "2D"}).get("ok", false), "an explicit dimension is accepted")
+	var flat := ""
+	for child in st.read_scene({"scene_path": scene}).get("root", {}).get("children", []):
+		if str(child.get("name", "")) == "Flat":
+			flat = str(child.get("type", ""))
+	_check(flat == "RayCast2D", "and overrides what the parent implies")
+	_check(not pt.add_raycast({"scene_path": scene, "parent_path": ".", "dimension": "4D"}).get("ok", true), "a nonsense dimension is still refused")
+	_rm(scene)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

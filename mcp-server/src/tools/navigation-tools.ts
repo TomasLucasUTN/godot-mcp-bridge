@@ -15,7 +15,7 @@ export const navigationTools: ToolDefinition[] = [
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
-        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Default: "2D".' },
+        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Omit to follow the parent node: a Node3D parent gets the 3D variant, a 2D parent the 2D one.' },
         node_name: { type: 'string', description: 'Name for the new node (default: "NavigationRegion2D"/"NavigationRegion3D")' },
         dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
@@ -50,7 +50,7 @@ export const navigationTools: ToolDefinition[] = [
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
-        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Default: "2D".' },
+        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Omit to follow the parent node: a Node3D parent gets the 3D variant, a 2D parent the 2D one.' },
         node_name: { type: 'string', description: 'Name for the new node (default: "NavigationAgent2D"/"NavigationAgent3D")' },
         radius: { type: 'number', description: 'Agent radius' },
         max_speed: { type: 'number', description: 'Agent max speed' },

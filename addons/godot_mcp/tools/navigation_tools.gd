@@ -27,17 +27,13 @@ func _mask_to_layers(mask: int) -> Array:
 func setup_navigation_region(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var parent_path: String = str(args.get(&"parent_path", "."))
-	var dimension: String = str(args.get(&"dimension", "2D"))
+	var dimension: String = str(args.get(&"dimension", ""))
 	var node_name: String = str(args.get(&"node_name", ""))
 
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
-	if dimension not in ["2D", "3D"]:
+	if not dimension.is_empty() and dimension not in ["2D", "3D"]:
 		return {&"ok": false, &"error": "Invalid 'dimension': %s. Use '2D' or '3D'." % dimension}
-
-	var node_type: String = "NavigationRegion2D" if dimension == "2D" else "NavigationRegion3D"
-	if node_name.strip_edges().is_empty():
-		node_name = node_type
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():
@@ -50,6 +46,15 @@ func setup_navigation_region(args: Dictionary) -> Dictionary:
 		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
 		return err
+
+	if dimension.is_empty():
+		dimension = _dimension_of(parent)
+		if dimension.is_empty():
+			dimension = "2D"
+
+	var node_type: String = "NavigationRegion2D" if dimension == "2D" else "NavigationRegion3D"
+	if node_name.strip_edges().is_empty():
+		node_name = node_type
 
 	var region: Node = ClassDB.instantiate(node_type)
 	region.name = node_name
@@ -202,19 +207,15 @@ func _navigation_polygon_bounds(np: NavigationPolygon) -> Rect2:
 func setup_navigation_agent(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var parent_path: String = str(args.get(&"parent_path", "."))
-	var dimension: String = str(args.get(&"dimension", "2D"))
+	var dimension: String = str(args.get(&"dimension", ""))
 	var node_name: String = str(args.get(&"node_name", ""))
 	var radius = args.get(&"radius")
 	var max_speed = args.get(&"max_speed")
 
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
-	if dimension not in ["2D", "3D"]:
+	if not dimension.is_empty() and dimension not in ["2D", "3D"]:
 		return {&"ok": false, &"error": "Invalid 'dimension': %s. Use '2D' or '3D'." % dimension}
-
-	var node_type: String = "NavigationAgent2D" if dimension == "2D" else "NavigationAgent3D"
-	if node_name.strip_edges().is_empty():
-		node_name = node_type
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():
@@ -227,6 +228,15 @@ func setup_navigation_agent(args: Dictionary) -> Dictionary:
 		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
 		return err
+
+	if dimension.is_empty():
+		dimension = _dimension_of(parent)
+		if dimension.is_empty():
+			dimension = "2D"
+
+	var node_type: String = "NavigationAgent2D" if dimension == "2D" else "NavigationAgent3D"
+	if node_name.strip_edges().is_empty():
+		node_name = node_type
 
 	var agent: Node = ClassDB.instantiate(node_type)
 	agent.name = node_name

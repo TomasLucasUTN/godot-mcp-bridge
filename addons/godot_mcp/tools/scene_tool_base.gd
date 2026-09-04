@@ -195,6 +195,19 @@ func _collect_node_paths(scene_root: Node, node: Node, out: Array[String]) -> vo
 		out.append(str(scene_root.get_path_to(child)))
 		_collect_node_paths(scene_root, child, out)
 
+## The dimension a node lives in, or "" when it says nothing either way.
+##
+## Tools that take an explicit `dimension` defaulted to "2D" no matter what they
+## were building into, so a NavigationRegion2D or a RayCast2D landed under a
+## Node3D and did nothing — with an ok answer. Infer from the parent instead;
+## an explicit argument still wins.
+func _dimension_of(node: Node) -> String:
+	if node is Node3D:
+		return "3D"
+	if node is CanvasItem:
+		return "2D"
+	return ""
+
 func _parse_value(value: Variant) -> Variant:
 	return VariantCodec.parse_value(value)
 

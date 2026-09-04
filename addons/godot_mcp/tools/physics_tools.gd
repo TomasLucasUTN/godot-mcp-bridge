@@ -12,18 +12,14 @@ func add_raycast(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var parent_path: String = str(args.get(&"parent_path", "."))
 	var node_name: String = str(args.get(&"node_name", ""))
-	var dimension: String = str(args.get(&"dimension", "2D"))
+	var dimension: String = str(args.get(&"dimension", ""))
 	var target_position = args.get(&"target_position")
 	var enabled: bool = bool(args.get(&"enabled", true))
 
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
-	if dimension not in ["2D", "3D"]:
+	if not dimension.is_empty() and dimension not in ["2D", "3D"]:
 		return {&"ok": false, &"error": "Invalid 'dimension': %s. Use '2D' or '3D'." % dimension}
-
-	var node_type: String = "RayCast2D" if dimension == "2D" else "RayCast3D"
-	if node_name.strip_edges().is_empty():
-		node_name = node_type
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():
@@ -36,6 +32,15 @@ func add_raycast(args: Dictionary) -> Dictionary:
 		var err := _node_not_found(root, parent_path, "Parent node")
 		_discard_scene(root, is_live)
 		return err
+
+	if dimension.is_empty():
+		dimension = _dimension_of(parent)
+		if dimension.is_empty():
+			dimension = "2D"
+
+	var node_type: String = "RayCast2D" if dimension == "2D" else "RayCast3D"
+	if node_name.strip_edges().is_empty():
+		node_name = node_type
 
 	var raycast: Node = ClassDB.instantiate(node_type)
 	if not raycast:

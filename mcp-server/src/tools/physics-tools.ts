@@ -16,7 +16,7 @@ export const physicsTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file (res://path/to/scene.tscn)' },
         parent_path: { type: 'string', description: 'Path to the parent node (. for root)' },
         node_name: { type: 'string', description: 'Name for the new node (default: "RayCast2D"/"RayCast3D")' },
-        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Default: "2D".' },
+        dimension: { type: 'string', enum: ['2D', '3D'], description: 'Omit to follow the parent node: a Node3D parent gets the 3D variant, a 2D parent the 2D one.' },
         target_position: {
           type: 'object',
           description: 'Ray target relative to the raycast origin: {x,y} for 2D or {x,y,z} for 3D'
