@@ -244,10 +244,31 @@ func read_scene(args: Dictionary) -> Dictionary:
 		return acq[2]
 	var root: Node = acq[0]
 	var is_live: bool = acq[1]
-	var structure = _build_node_structure(root, include_properties, ".", max_depth, 0, wanted_props)
+
+	# Read one branch instead of the whole tree. max_depth makes a big scene
+	# cheap by cutting it off at the top; this makes it cheap by starting
+	# lower, which is the question an agent usually has ("what is under
+	# Player?") and used to cost the entire scene to answer.
+	var node_path: String = str(args.get(&"node_path", ".")).strip_edges()
+	if node_path.is_empty():
+		node_path = "."
+	var subject: Node = root
+	if node_path != ".":
+		subject = _find_node(root, node_path)
+		if subject == null:
+			var err := _node_not_found(root, node_path)
+			_discard_scene(root, is_live)
+			return err
+
+	var structure = _build_node_structure(subject, include_properties, node_path, max_depth, 0, wanted_props)
 	_discard_scene(root, is_live)
 
-	return {&"ok": true, &"scene_path": scene_path, &"max_depth": max_depth, &"root": structure}
+	var out := {&"ok": true, &"scene_path": scene_path, &"max_depth": max_depth, &"root": structure}
+	if node_path != ".":
+		# Say what was read. Without this the answer looks like a whole scene
+		# whose root happens to be a Sprite2D.
+		out[&"read_from"] = node_path
+	return out
 
 func _build_node_structure(node: Node, include_props: bool, path: String = ".", max_depth: int = -1, depth: int = 0, wanted_props: Array = []) -> Dictionary:
 	const PROPERTIES: PackedStringArray = ["position", "rotation", "scale", "size", "offset", "visible",

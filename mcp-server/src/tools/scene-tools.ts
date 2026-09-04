@@ -65,6 +65,10 @@ export const sceneTools: ToolDefinition[] = [
         max_depth: {
           type: 'number',
           description: 'Max tree depth to expand (root is 0). Omit or -1 for the full tree. Use 1-2 for a cheap overview of a big scene.'
+        },
+        node_path: {
+          type: 'string',
+          description: 'Read this branch instead of the whole scene, e.g. "Player" or "UI/HUD". Default "." (the scene root). max_depth cuts a big scene off at the top; this starts lower, which is usually the actual question ("what is under Player?") and answers it without paying for the rest of the tree.'
         }
       },
       required: ['scene_path']

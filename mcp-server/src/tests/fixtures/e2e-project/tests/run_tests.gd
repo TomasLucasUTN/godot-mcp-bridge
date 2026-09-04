@@ -29,6 +29,7 @@ func _initialize() -> void:
 	await _test_dry_run_writes_nothing()
 	_test_detached_pid_bookkeeping()
 	_test_path_guard_holds_against_traversal()
+	_test_read_scene_subtree()
 	_test_read_scene_depth()
 	_test_duplicate_and_groups()
 	_test_move_and_rename()
@@ -458,6 +459,40 @@ func _test_path_guard_holds_against_traversal() -> void:
 	# back into "..", which is the traversal this guard exists to stop.
 	var enc = PG.sanitize("res://foo/%2e%2e/bar")
 	_check(enc.get("ok", false) and "%2e%2e" in str(enc.get("path", "")), "percent-encoding is left as a literal name, not decoded into ..")
+
+# read_scene could only start at the root, so "what is under Player?" cost the
+# whole scene. max_depth cuts a big tree off at the top; node_path starts lower.
+func _test_read_scene_subtree() -> void:
+	print("
+[read_scene subtree]")
+	var scene := "res://__gdtest_subtree.tscn"
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	root.add_child(st)
+
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Player", "node_type": "Node2D", "parent_path": "."})
+	st.add_node({"scene_path": scene, "node_name": "Sprite", "node_type": "Sprite2D", "parent_path": "Player"})
+	st.add_node({"scene_path": scene, "node_name": "Elsewhere", "node_type": "Node2D", "parent_path": "."})
+
+	var whole = st.read_scene({"scene_path": scene})
+	var whole_json := JSON.stringify(whole)
+	_check(whole.get("ok", false) and "Elsewhere" in whole_json, "a full read still sees the whole scene")
+	_check(not whole.has("read_from"), "and does not claim to have read a branch")
+
+	var branch = st.read_scene({"scene_path": scene, "node_path": "Player"})
+	var branch_json := JSON.stringify(branch)
+	_check(branch.get("ok", false), "reading a branch answers ok")
+	_check(str(branch.get("read_from", "")) == "Player", "and says which branch it read")
+	_check("Sprite" in branch_json, "the branch contains its own child")
+	_check(not ("Elsewhere" in branch_json), "and nothing from the rest of the scene")
+	_check(branch_json.length() < whole_json.length(), "which is the point: %d chars vs %d" % [branch_json.length(), whole_json.length()])
+
+	var missing = st.read_scene({"scene_path": scene, "node_path": "Playr"})
+	_check(not missing.get("ok", true), "a wrong branch path is refused")
+	_check("Player" in str(missing.get("error", "")), "with the near-miss named")
+
+	st.free()
+	_rm(scene)
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two
