@@ -528,6 +528,34 @@ func _test_every_advertised_tool_is_dispatchable() -> void:
 
 	_check(contract.size() > 200, "read the contract for %d tools" % contract.size())
 	_check(undispatchable.is_empty(), "every advertised tool has a dispatch entry: %s" % str(undispatchable))
+
+	# The other direction: something dispatchable that no schema advertises is
+	# unreachable through MCP. One is deliberate — the visualizer edits node
+	# properties inline through its own channel, not as a tool — and naming it
+	# here is what keeps the next one from hiding behind it.
+	var advertised := {}
+	for entry in contract:
+		advertised[str(entry["name"])] = true
+	# Deliberately internal, each for a reason recorded in
+	# mcp-server/src/tests/tool-registry.test.ts (INTENTIONALLY_INTERNAL); that
+	# list is the source of truth and this mirrors it. Writing this check found
+	# that two of them were recommended BY NAME in the guides, so an agent
+	# following the documentation got "Unknown tool" — the guides were what was
+	# wrong, not the decision to keep the tools internal.
+	var internal_only := {
+		"set_scene_node_property": "visualizer inline editing",
+		"get_scene_hierarchy": "superseded by read_scene / scene_tree_dump",
+		"get_scene_node_properties": "superseded by read_scene; ignores its filter and dumps ~8k tokens",
+		"map_scenes": "backs the visualizer; map_project is the tool",
+		"validate_eval_snippet": "the server's own pre-check for game_eval",
+	}
+	var unadvertised: Array = []
+	for tool_name in ex._tool_map.keys():
+		var name := str(tool_name)
+		if advertised.has(name) or internal_only.has(name):
+			continue
+		unadvertised.append(name)
+	_check(unadvertised.is_empty(), "nothing is dispatchable but unreachable: %s" % str(unadvertised))
 	ex.queue_free()
 
 # Point every MUTATING tool at a scene that cannot exist, and check it admits

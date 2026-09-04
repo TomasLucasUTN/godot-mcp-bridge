@@ -281,7 +281,7 @@ the same rule the addon's tools follow.
 ## Scenes
 - Create / read / hierarchy: \`create_scene\`, \`read_scene\`, \`scene_tree_dump\`
 - Add / remove / move / rename / duplicate / reorder nodes: \`add_node\`, \`remove_node\`, \`move_node\`, \`rename_node\`, \`duplicate_node\`, \`reorder_node\`
-- Properties on a node: \`modify_node_property\` (one), \`set_node_properties\` (many), \`get_scene_node_properties\` (read all)
+- Properties on a node: \`modify_node_property\` (one), \`set_node_properties\` (many), \`read_scene\` (read them back)
 - Class-level property metadata: \`get_node_properties\` (with \`node_type\`)
 - Groups: \`set_node_groups\`, \`get_node_groups\`, \`find_nodes_in_group\`
 - Scripts on nodes: \`attach_script\`, \`detach_script\`
@@ -316,7 +316,7 @@ the same rule the addon's tools follow.
 - SVG -> PNG: \`generate_2d_asset\` (now with \`width\`, \`height\`, \`scale\`)
 
 ## Visualizer
-- Project + scenes maps: \`map_project\`, \`map_scenes\`
+- Project map: \`map_project\` (scripts, their structure, and what connects to what)
 
 ## TileMap
 - Paint / read cells: \`tilemap_set_cell\`, \`tilemap_get_cell\`, \`tilemap_fill_rect\`, \`tilemap_clear\`

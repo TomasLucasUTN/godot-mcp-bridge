@@ -620,6 +620,16 @@ async function executeToolCall(
           connected_at: status.connectedAt?.toISOString() || null,
           pending_requests: status.pendingRequests,
           checks,
+          // Orientation an agent would otherwise spend two more calls on. The
+          // first thing a session does is work out what it is connected to and
+          // what it can reach; diagnose_connection is already that first call.
+          toolsets_enabled: [...activeToolsets].sort(),
+          tools_available_now: allTools.filter(t => {
+            const set = toolsetOf(t.name) ?? '';
+            return set === 'core' || activeToolsets.has(set);
+          }).length + 7,
+          tools_total: allTools.length,
+          find_a_tool: 'find_tools({query}) searches all of them, including toolsets that are off.',
           message: healthy
             ? `Editor connected and tools will run.${versionRemedies.length > 0 ? ' The addon is a different version from this server, so some tools may not exist in it — see remedies.' : ''}${runtimeConnected ? ' The in-game helper is connected too.' : ' The in-game helper is NOT connected — fine unless a game is running.'}`
             : 'Editor not connected. Work through the remedies in order; the first that applies usually fixes it.',
