@@ -114,6 +114,7 @@ func _initialize() -> void:
 	_test_map_counts_only_drawable_edges()
 	_test_enum_errors_name_their_options()
 	_test_input_map_is_the_projects_own()
+	_test_wire_text_survives_subprocess_output()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1221,6 +1222,39 @@ func _test_input_map_is_the_projects_own() -> void:
 	_check(int(mine.get("builtin_skipped", 0)) > 0, "while the default says how many it left out")
 
 	pt.configure_input_map({"operation": "remove", "action": "__gdtest_fire"})
+
+# JSON.stringify leaves C0 control characters raw, and one of them makes the
+# whole message unparseable at the server, which drops it — the call then hangs
+# to its timeout with the answer already computed and the editor perfectly
+# healthy. That is what made the GUT runner look broken: GUT prints its summary
+# in colour and the escape byte rode along in the job's log.
+func _test_wire_text_survives_subprocess_output() -> void:
+	print("\n[wire text survives subprocess output]")
+	var WireText = preload("res://addons/godot_mcp/utils/wire_text.gd")
+
+	var coloured := "\u001b[90m\u001b[1mPassing Tests\u001b[22m  4\u001b[0m"
+	var clean: String = WireText.clean(coloured)
+	_check(not ("\u001b" in clean), "the escape byte is gone")
+	_check(not ("[90m" in clean), "and so is the rest of the sequence, not just the escape")
+	_check("Passing Tests" in clean and "4" in clean, "while the text it wrapped survives")
+
+	var kept := WireText.clean("line one\nline\ttwo")
+	_check("\n" in kept and "\t" in kept, "newlines and tabs are kept — JSON escapes those")
+
+	# The whole payload, the way a tool result reaches the wire.
+	var payload := {"ok": true, "log": coloured, "rows": [coloured, {"nested": coloured}]}
+	var cleaned: Dictionary = WireText.clean_tree(payload)
+	var text := JSON.stringify(cleaned)
+	_check(JSON.parse_string(text) != null, "the cleaned payload round-trips through JSON")
+	_check(not ("\u001b" in text), "with no control character left anywhere in it")
+	_check(bool(cleaned.get("ok", false)), "and non-string values are untouched")
+
+	# Proof the guard is needed. Godot's own parser is lenient and reads this
+	# back happily, which is exactly why the bug was invisible from this side —
+	# only the strict parser at the server end rejects it, per the JSON spec.
+	var raw := JSON.stringify(payload)
+	_check("\u001b" in raw, "stringify leaves the control character raw in the wire text")
+	_check(JSON.parse_string(raw) != null, "and Godot reads it back, which is why this went unnoticed")
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

@@ -1,4 +1,5 @@
 extends Node
+const WireText = preload("res://addons/godot_mcp/utils/wire_text.gd")
 ## MCPRuntime — autoload that lives inside the user's running game and exposes
 ## a small set of "runtime" tools to the MCP server (take_screenshot,
 ## send_input, query_runtime_node, get_runtime_log, list_signal_connections).
@@ -1801,4 +1802,8 @@ func _ensure_cache_dir() -> void:
 
 func _send(msg: Dictionary) -> void:
 	if _socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
-		_socket.send_text(JSON.stringify(msg))
+		# Same reason as the editor client: a raw control character anywhere in
+		# the payload makes the message unparseable at the far end, and the call
+		# hangs to its timeout with the answer already computed. game_eval and
+		# get_runtime_log both carry whatever the game printed.
+		_socket.send_text(JSON.stringify(WireText.clean_tree(msg)))

@@ -1,6 +1,7 @@
 @tool
 extends Node
 class_name MCPClient
+const WireText = preload("res://addons/godot_mcp/utils/wire_text.gd")
 ## WebSocket client for communication with the MCP server.
 ## Handles connection, reconnection, and message routing.
 
@@ -278,7 +279,11 @@ func send_editor_activity(event: Dictionary) -> void:
 
 func _send_message(message: Dictionary) -> void:
 	if socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
-		socket.send_text(JSON.stringify(message))
+		# Cleaned here rather than in each tool: JSON.stringify leaves C0 control
+		# characters raw, and one of them makes the whole message unparseable at
+		# the far end. The server drops it and the call hangs to its timeout with
+		# the answer already computed. See WireText.
+		socket.send_text(JSON.stringify(WireText.clean_tree(message)))
 
 func is_connected_to_server() -> bool:
 	return _is_connected
