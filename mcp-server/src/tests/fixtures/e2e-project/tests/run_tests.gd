@@ -106,6 +106,7 @@ func _initialize() -> void:
 	_test_shape_and_vector_forms()
 	_test_missing_path_is_not_an_escape()
 	_test_dimension_follows_the_parent()
+	_test_navigation_info_points_somewhere()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1013,6 +1014,30 @@ func _test_dimension_follows_the_parent() -> void:
 			flat = str(child.get("type", ""))
 	_check(flat == "RayCast2D", "and overrides what the parent implies")
 	_check(not pt.add_raycast({"scene_path": scene, "parent_path": ".", "dimension": "4D"}).get("ok", true), "a nonsense dimension is still refused")
+	_rm(scene)
+
+# Pointed at the root (its default), get_navigation_info answered with the
+# root's class and nothing else — no sign it had been aimed at the wrong node.
+func _test_navigation_info_points_somewhere() -> void:
+	print("
+[navigation info points somewhere]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var nt = preload("res://addons/godot_mcp/tools/navigation_tools.gd").new()
+	var scene := "res://__gdtest_nav.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+
+	var bare = nt.get_navigation_info({"scene_path": scene, "node_path": "."})
+	_check(bare.get("ok", false), "a scene with no navigation still answers ok")
+	_check("no navigation nodes" in str(bare.get("note", "")), "and says the scene has none")
+
+	nt.setup_navigation_region({"scene_path": scene, "parent_path": "."})
+	var pointed = nt.get_navigation_info({"scene_path": scene, "node_path": "."})
+	_check(pointed.get("navigation_nodes", []).has("NavigationRegion3D"), "once one exists it is named")
+
+	var real = nt.get_navigation_info({"scene_path": scene, "node_path": "NavigationRegion3D"})
+	_check(real.has("has_baked_data"), "and the region itself still reports its own settings")
+	_check(not real.has("note"), "with no note, because there was something to report")
 	_rm(scene)
 
 # Every node path in a read_scene tree, flattened.

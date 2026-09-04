@@ -357,5 +357,25 @@ func get_navigation_info(args: Dictionary) -> Dictionary:
 		info[&"max_speed"] = float(target.get(&"max_speed"))
 		info[&"avoidance_enabled"] = bool(target.get(&"avoidance_enabled"))
 
+	# node_path defaults to the root, which is rarely the navigation node — the
+	# answer was then a shell naming the root's class and nothing else, with no
+	# sign that the tool had simply been pointed at the wrong node. Say so, and
+	# name the nodes it would have something to report on.
+	if info.size() == 4:
+		var found: Array[String] = []
+		_collect_navigation_nodes(root, root, found)
+		info[&"note"] = "'%s' (%s) holds no navigation settings." % [node_path, target.get_class()]
+		info[&"navigation_nodes"] = found
+		if found.is_empty():
+			info[&"note"] += " This scene has no navigation nodes — setup_navigation_region adds one."
+		else:
+			info[&"note"] += " Pass one of navigation_nodes as node_path."
+
 	_discard_scene(root, is_live)
 	return info
+
+func _collect_navigation_nodes(scene_root: Node, node: Node, out: Array[String]) -> void:
+	for child in node.get_children():
+		if child is NavigationRegion2D or child is NavigationRegion3D 			or child is NavigationAgent2D or child is NavigationAgent3D:
+			out.append(str(scene_root.get_path_to(child)))
+		_collect_navigation_nodes(scene_root, child, out)

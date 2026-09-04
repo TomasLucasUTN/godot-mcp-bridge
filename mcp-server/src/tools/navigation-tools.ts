@@ -77,7 +77,7 @@ export const navigationTools: ToolDefinition[] = [
   {
     name: 'get_navigation_info',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Read navigation config for a NavigationRegion2D/3D (enabled, is_baking, bounds, has_baked_data) or NavigationAgent2D/3D (radius, max_speed, avoidance_enabled), plus navigation_layers on either.',
+    description: 'Read navigation config for a NavigationRegion2D/3D (enabled, is_baking, bounds, has_baked_data) or NavigationAgent2D/3D (radius, max_speed, avoidance_enabled), plus navigation_layers on either. Pointed at a node with no navigation settings, it says so and lists the scene\'s navigation nodes.',
     inputSchema: {
       type: 'object',
       properties: {
