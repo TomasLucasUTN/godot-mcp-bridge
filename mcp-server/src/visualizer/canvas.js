@@ -862,6 +862,14 @@ export function centerOnNodes(nodeList) {
   updateZoomIndicator();
 }
 
+// Set when a fit was asked for before the viewport had a size, so the first
+// resize that gives us one can complete it.
+let pendingFit = false;
+
+export function hasPendingFit() {
+  return pendingFit;
+}
+
 export function fitToView(nodeList) {
   if (!nodeList || nodeList.length === 0) return;
 
@@ -878,8 +886,23 @@ export function fitToView(nodeList) {
 
   const spanX = (maxX - minX) + NODE_W * 2;
   const spanY = (maxY - minY) + NODE_H * 2;
-  // Calculate zoom to fit all nodes, but cap at 100% (1.0) to avoid zooming in too much
-  camera.zoom = Math.min(1.0, W / spanX, H / spanY) * 0.9;
+
+  // Nothing to fit against until the viewport has a size. Loading in a pane that
+  // reports innerWidth 0 (an automation surface, a hidden tab) put a 0 in W, and
+  // this ratio then made camera.zoom exactly 0: the whole graph on the canvas,
+  // drawn at zero scale, with the zoom box reading "0%". Keep the default zoom
+  // and let the first real resize do the fit.
+  if (!(W > 0) || !(H > 0)) {
+    pendingFit = true;
+    updateZoomIndicator();
+    return;
+  }
+  pendingFit = false;
+
+  // Cap at 100% so a small graph is not blown up, and floor it so a large one
+  // is not shrunk out of sight: 60 unconnected scripts lay out across ~53,000px,
+  // which fits at 1% — on screen, an empty canvas.
+  camera.zoom = Math.max(0.1, Math.min(1.0, W / spanX, H / spanY) * 0.9);
   // Don't change defaultZoom - keep it at 1 (100%) so reset always goes to 100%
   updateZoomIndicator();
 }

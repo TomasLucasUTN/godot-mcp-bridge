@@ -13,7 +13,7 @@ import {
   selectedSceneNode, scenePositions, setScenePosition
 } from './state.js';
 import {
-  getCanvas, screenToWorld, hitTest, draw, resize,
+  getCanvas, screenToWorld, hitTest, draw, resize, fitToView, hasPendingFit,
   updateZoomIndicator, centerOnNodes, savePositions,
   sceneHitTest, SCENE_CARD_W, SCENE_CARD_H
 } from './canvas.js';
@@ -246,6 +246,9 @@ export function initEvents() {
   // Window resize
   window.addEventListener('resize', () => {
     resize();
+    // A fit skipped for want of a viewport size is completed here, the first
+    // time we actually have one.
+    if (hasPendingFit()) fitToView(nodes);
     draw();
   });
 }
