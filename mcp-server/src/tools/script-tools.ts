@@ -17,7 +17,7 @@ export const scriptTools: ToolDefinition[] = [
           type: 'object',
           description: 'Edit spec: {type: "snippet_replace", file: "res://path.gd", old_snippet: "old code", new_snippet: "new code", context_before: "line above", context_after: "line below"}. Keep old_snippet SMALL (1-10 lines).'
         },
-        dry_run: { type: 'boolean', description: 'Preview the edit without writing it: the snippet is located and the new content built, so you learn whether it would match and what it would produce, and the file is left alone. Default false.' }
+        dry_run: { type: 'boolean', description: "Preview only: reports whether the snippet matched and what it would produce, writes nothing. Default false." }
       },
       required: ['edit']
     }
@@ -84,7 +84,7 @@ export const scriptTools: ToolDefinition[] = [
         },
         confirm: {
           type: 'boolean',
-          description: 'REQUIRED. Must be explicitly set to true \u2014 safety gate to prevent accidental deletes. Calls without confirm=true fail with an error.'
+          description: "Must be true — the safety gate described above."
         },
         create_backup: {
           type: 'boolean',
@@ -92,9 +92,9 @@ export const scriptTools: ToolDefinition[] = [
         },
         force: {
           type: 'boolean',
-          description: 'If true, bypass the "file is open in editor" guard. Use ONLY if you know the file is not the active scene. The guard exists because deleting the active scene tab from under the editor can crash Godot.'
+          description: "Bypass the \"open in editor\" guard. Only when you know it is not the active scene."
         },
-        dry_run: { type: 'boolean', description: 'Preview without deleting: reports the file it would remove. Default false. Note this is separate from `confirm`, which is the gate — a preview needs no confirmation because it changes nothing.' }
+        dry_run: { type: 'boolean', description: 'Preview without deleting. Default false. Needs no confirm — it changes nothing.' }
       },
       required: ['path', 'confirm']
     }

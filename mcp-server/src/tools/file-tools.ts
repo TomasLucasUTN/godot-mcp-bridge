@@ -98,7 +98,7 @@ export const fileTools: ToolDefinition[] = [
           type: 'string',
           description: 'Full GDScript content to write to the file'
         },
-        dry_run: { type: 'boolean', description: 'Preview without creating the file: the path is checked against the sandbox and for an existing file, and nothing is written. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: checks the path and whether the file exists, writes nothing. Default false.' }
       },
       required: ['path', 'content']
     }

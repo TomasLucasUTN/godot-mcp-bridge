@@ -9,7 +9,7 @@ export const batchTools: ToolDefinition[] = [
   {
     name: 'batch_execute',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Run a sequence of tool calls in ONE request instead of N separate round-trips. Each operation is {tool, args}. USE THIS FOR WORK THAT SPANS SEVERAL SCENES — batch_scene_edit only covers one scene, but a batch_execute holding several batch_scene_edit / setup_collision / set_physics_layers calls builds a whole set of scenes in one round-trip. Operations run in order; each is subject to the same read-only-mode gating as a direct call. IMPORTANT: this dispatches inside the EDITOR, so it cannot reach runtime tools that live in the running game (take_screenshot, send_input, query_runtime_node, game_eval, step_frames, ...). Call those directly; batching them fails. NOT a transaction — a scene tool inside still does its own load/save, and set stop_on_error to halt on the first failure. Cannot be nested. Returns {count, all_ok, results:[...]} where results[i] is the full response of operation i. Use to cut latency when applying many edits.',
+    description: "Run a sequence of {tool, args} calls in ONE request instead of N round-trips — the way to build several scenes at once (batch_scene_edit covers only one). Dispatches inside the EDITOR, so it cannot reach tools that live in the running game (take_screenshot, send_input, query_runtime_node, game_eval, ...); call those directly. NOT a transaction: each scene tool still does its own load/save. stop_on_error halts at the first failure. Cannot be nested.",
     inputSchema: {
       type: 'object',
       properties: {

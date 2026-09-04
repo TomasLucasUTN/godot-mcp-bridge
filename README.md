@@ -210,10 +210,10 @@ re-run it:
 
 | | tools | ~tokens |
 |---|---:|---:|
-| **`core`** — what loads by default | 38 | **9,516** |
-| Everything, every toolset on | 231 | 50,563 |
+| **`core`** — what loads by default | 38 | **8,764** |
+| Everything, every toolset on | 231 | 49,811 |
 
-So the default surface is **18.8% of the full one**, and turning everything on
+So the default surface is **17.6% of the full one**, and turning everything on
 costs roughly **41,000 extra tokens on every request**. That is the reason the
 default is small and the rest is opt-in per toolset (or preset once via
 `GODOT_MCP_TOOLSETS`), rather than a judgement that the other 192 tools do not
@@ -510,7 +510,7 @@ Numbers rather than adjectives, all from 2026-09-03 against a 24,880-file projec
 
 | | |
 |---|---|
-| Default tool surface | 38 tools, **9,516 tokens** of schema (everything on: 231 / 50,563) |
+| Default tool surface | 38 tools, **8,764 tokens** of schema (everything on: 231 / 49,811) |
 | Slowest read-only tool | `get_project_statistics` at **2,012 ms** — it answers in the MCP server; the in-editor version took 120,685 ms |
 | Largest answer | `map_project` at **7,744 chars** — it used to return 151,159 |
 | Runtime helper connect | **1.6-1.7 s**, attached or detached |

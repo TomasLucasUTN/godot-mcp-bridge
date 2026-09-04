@@ -28,7 +28,7 @@ export const sceneTools: ToolDefinition[] = [
         nodes: {
           type: 'array',
           items: { type: 'object', description: 'A node spec: {name|node_name, type|node_type, properties?, script?, groups?, children?}. Unknown keys are rejected with an error.' },
-          description: 'Array of child nodes to add. Each node spec: {name|node_name, type|node_type, properties?, script?, groups?, children?}. Use either {name, type} or the same {node_name, node_type} keys used at the top level \u2014 both work. Unknown keys (e.g. "class", "kind", "parent") return an error instead of silently producing a generic Node.'
+          description: "Child nodes to add: {name|node_name, type|node_type, properties?, script?, groups?, children?}. Both key styles work; an unknown key is an error, not a generic Node."
         },
         attach_script: {
           type: 'string',
@@ -36,7 +36,7 @@ export const sceneTools: ToolDefinition[] = [
         },
         dry_run: {
           type: 'boolean',
-          description: 'If true, preview the scene that would be created (root_type, child_count) without saving anything to disk. Defaults to false.'
+          description: "Preview only: do the work, report it, write nothing. Default false."
         }
       },
       required: ['scene_path', 'root_node_type']
@@ -55,7 +55,7 @@ export const sceneTools: ToolDefinition[] = [
         },
         include_properties: {
           type: 'boolean',
-          description: 'Include a fixed set of common properties (position, rotation, scale, size, visible, modulate, z_index, text, collision layers, mass) on every node. Prefer `properties` when you know what you want — this one is all-or-nothing and gets expensive on a big tree.'
+          description: "Include a fixed set of common properties (position, rotation, scale, size, visible, modulate, z_index, text, collision layers, mass) on every node. All-or-nothing and expensive on a big tree — prefer `properties`."
         },
         properties: {
           type: 'array',
@@ -77,7 +77,7 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'add_node',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Add a node to an existing scene file. Supports an optional script attachment, group memberships, and a tree of children created in the same call (1 tool call instead of N). Children format: {name|node_name, type|node_type, properties?, script?, groups?, children?}. Both key styles are accepted so children can reuse the same keys you use at the top level (node_name, node_type) or the shorter form (name, type). Unknown child keys are rejected with a clear error.',
+    description: "Add a node to an existing scene file, optionally with a script, groups, and a whole sub-tree of children in the same call. Children take the same keys as add_node itself ({name|node_name, type|node_type, properties?, script?, groups?, children?}); an unknown key is an error.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -113,11 +113,11 @@ export const sceneTools: ToolDefinition[] = [
         children: {
           type: 'array',
           items: { type: 'object', description: '{name, type, properties?, script?, groups?, children?}' },
-          description: 'Optional tree of children to create under the new node. Each entry has the same shape as add_node\'s args (minus parent_path). Use this to build sub-trees in one call.'
+          description: "Sub-tree to create in the same call. Each entry takes add_node's own args, minus parent_path."
         },
         dry_run: {
           type: 'boolean',
-          description: 'If true, preview the node (and any children) that would be added, without saving the scene. Defaults to false.'
+          description: "Preview only: do the work, report it, write nothing. Default false."
         }
       },
       required: ['scene_path', 'node_name', 'node_type']
@@ -140,7 +140,7 @@ export const sceneTools: ToolDefinition[] = [
         },
         dry_run: {
           type: 'boolean',
-          description: 'If true, preview the removal (returns the node\'s name, type, and child count) without saving the scene. Defaults to false.'
+          description: 'Preview only: do the work, report it, write nothing. Default false.'
         }
       },
       required: ['scene_path', 'node_path']
@@ -149,7 +149,7 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'modify_node_property',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    description: 'Modify ONE property on ONE node. Use this when you know the node and the single value to change. NOT for several properties on the same node (set_node_properties, one save instead of N) and NOT for the same property across many nodes (batch_set_property). ALWAYS use a tool to modify .tscn files \u2014 NEVER edit them as text. To attach or change a script, use attach_script (NOT modify_node_property with property="script") \u2014 modify_node_property only rewrites the .tscn on disk, leaving the editor\'s in-memory node without the script, which makes connect_signal fail.',
+    description: "Modify ONE property on ONE node. For several properties on one node use set_node_properties; for one property across many nodes use batch_set_property. Never edit a .tscn as text. To set a script use attach_script, NOT this with property=\"script\": this only rewrites the file, leaving the editor's in-memory node scriptless, which makes connect_signal fail.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,11 +166,11 @@ export const sceneTools: ToolDefinition[] = [
           description: 'Name of the property to modify (position, scale, rotation, modulate, visible, etc.)'
         },
         value: {
-          description: 'New value for the property. ANY JSON value accepted: primitives (numbers, strings, booleans, null), arrays, or objects. Use the {type, ...} discriminated form for Godot variant types. Common forms: numeric (e.g. 1.5), boolean (true), string ("hello"), Vector2 ({type:"Vector2",x,y}), Vector3 ({type:"Vector3",x,y,z}), Color ({type:"Color",r,g,b,a}), Quaternion ({type:"Quaternion",x,y,z,w}), Basis ({type:"Basis",euler:{x,y,z}}), Transform3D ({type:"Transform3D",basis:{...},origin:{x,y,z}}), AABB ({type:"AABB",position:{x,y,z},size:{x,y,z}}), Rect2 ({type:"Rect2",x,y,width,height}), NodePath (string starting with "."). For Resource-typed properties (Texture2D, Mesh, Material, Shape, etc.) DO NOT pass values here \u2014 use set_resource_property, set_sprite_texture, set_mesh, set_material, or set_collision_shape.'
+          description: 'New value. Primitives, arrays, or a {type, ...} object for Godot variant types ({type:"Vector2",x,y}, {type:"Color",r,g,b,a}, ...) — get_guide("scene-editing") lists them all. NOT for Resource-typed properties (Texture2D, Mesh, Material, Shape): use set_resource_property, set_sprite_texture, set_mesh, set_material or set_collision_shape.'
         },
         dry_run: {
           type: 'boolean',
-          description: 'If true, preview the change (returns old_value/new_value) without saving the scene. Defaults to false.'
+          description: "Preview only: do the work, report it, write nothing. Default false."
         }
       },
       required: ['scene_path', 'property_name', 'value']
@@ -247,7 +247,7 @@ export const sceneTools: ToolDefinition[] = [
           type: 'string',
           description: 'Optional name for the duplicate. Defaults to the original name with an incrementing number suffix.'
         },
-        dry_run: { type: 'boolean', description: 'Preview what would be duplicated without writing anything. Default false. The handler has always supported this; it was missing from the schema, so the unknown-argument guard rejected it.' }
+        dry_run: { type: 'boolean', description: "Preview only: do the work, report it, write nothing. Default false." }
       },
       required: ['scene_path', 'node_path']
     }
@@ -594,7 +594,7 @@ export const sceneTools: ToolDefinition[] = [
         },
         dry_run: {
           type: 'boolean',
-          description: 'If true, preview the changes ("applied"/"failed" as usual) without saving the scene. Defaults to false.'
+          description: "Preview only: do the work, report it, write nothing. Default false."
         }
       },
       required: ['scene_path', 'properties']

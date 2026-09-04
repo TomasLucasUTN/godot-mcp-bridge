@@ -267,7 +267,7 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'run_scene',
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    description: 'Launch a scene in the Godot editor. By default the call BLOCKS until the editor flips to playing state (so the next get_errors / take_screenshot / send_input call sees a real game). The response includes started, runtime_connected, wait_for_started_ms, wait_for_runtime_ms, scene_path, and runtime_root. Use runtime_root (e.g. "/root/Main") as the prefix for query_runtime_node node_path arguments \u2014 it is computed from the actual root node name in the .tscn, NOT from the file name. Set wait_for_runtime=true to additionally wait for the in-game MCPRuntime helper to connect (required before take_screenshot / send_input will work). Recommended testing loop: run_scene({wait_for_runtime:true}) \u2192 query_runtime_node / send_input / take_screenshot \u2192 get_errors \u2192 stop_scene.',
+    description: "Launch a scene in the Godot editor. Blocks until the editor is playing, so the next get_errors / take_screenshot call sees a real game. Use the returned runtime_root (e.g. \"/root/Main\") as the prefix for query_runtime_node paths — it comes from the root node name in the .tscn, NOT the file name. wait_for_runtime=true also waits for the in-game MCPRuntime helper, which take_screenshot and send_input need. Full loop: get_guide(\"testing-loop\").",
     inputSchema: {
       type: 'object',
       properties: {
@@ -285,15 +285,15 @@ export const projectTools: ToolDefinition[] = [
         },
         startup_timeout_ms: {
           type: 'number',
-          description: 'A cap, not an expected wait: MCPRuntime connects in about 1.6-1.7s (measured). Default 20000, generous for a cold-cache import. If wait_for_runtime reports false, poll get_runtime_status — the connection is usually about to land.'
+          description: "A cap, not an expected wait — MCPRuntime connects in ~1.7s. Default 20000. If wait_for_runtime reports false, poll get_runtime_status; it is usually about to land."
         },
         attach_debugger: {
           type: 'boolean',
-          description: "Default true (the editor's Play). Set false to run the game as its own process with no debugger: a game_eval runtime error then answers as a result instead of halting the game, at the cost of debug_* stepping and get_errors' Debugger>Errors source. See guide 'troubleshooting'."
+          description: "Default true (the editor's Play). False runs the game as its own process with no debugger: a game_eval runtime error then answers as a result instead of halting the game, at the cost of debug_* stepping and get_errors' Debugger>Errors source. See guide 'troubleshooting'."
         },
         debug_collisions: {
           type: 'boolean',
-          description: 'Turn on SceneTree.debug_collisions_hint for this run, so CollisionShape2D/3D outlines are drawn — take_screenshot / render_scene_preview will then show them. Has to be set before this call, not after: flipping it mid-session is documented as unreliable, so this only takes effect on the run it is passed to. Default: false.'
+          description: "Draw CollisionShape2D/3D outlines for this run, so take_screenshot shows them. Only takes effect on the run it is passed to — flipping it mid-session is unreliable. Default: false."
         }
       }
     }
