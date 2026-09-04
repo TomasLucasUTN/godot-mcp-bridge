@@ -111,6 +111,7 @@ func _initialize() -> void:
 	_test_search_skips_addons()
 	_test_input_map_round_trips()
 	_test_export_log_is_readable()
+	_test_map_counts_only_drawable_edges()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1124,6 +1125,46 @@ func _test_export_log_is_readable() -> void:
 	_check("Done" in condensed, "and so is the outcome")
 	_check(not ("res://a.gd" in condensed), "while per-file progress is dropped")
 	_check("2 per-file progress line(s) omitted" in condensed, "and the count is reported, not hidden")
+
+# The map excludes addon scripts from its nodes by default, but emitted a preload
+# edge for any .gd reference — so every preload into res://addons/ became an edge
+# with no node at the far end. The header then advertised connections the graph
+# could not draw a single one of.
+func _test_map_counts_only_drawable_edges() -> void:
+	print("\n[map counts only drawable edges]")
+	var vt = preload("res://addons/godot_mcp/tools/visualizer_tools.gd").new()
+	var a := "res://__gdtest_map_a.gd"
+	var b := "res://__gdtest_map_b.gd"
+	_rm(a)
+	_rm(b)
+	# a preloads b (both project scripts) and an addon script (excluded by default).
+	_write_text(a, "extends Node\n\nconst B = preload(\"" + b + "\")\nconst Guard = preload(\"res://addons/godot_mcp/utils/path_guard.gd\")\n")
+	_write_text(b, "extends Node\n")
+
+	var r = vt.map_project({"root": "res://"})
+	_check(r.get("ok", false), "map_project answers ok")
+	var map: Dictionary = r.get("project_map", {})
+	var node_paths: Array = []
+	for n in map.get("nodes", []):
+		node_paths.append(str(n.get("path", "")))
+	_check(node_paths.has(a) and node_paths.has(b), "both project scripts are nodes")
+	_check(not node_paths.has("res://addons/godot_mcp/utils/path_guard.gd"), "the addon script is not a node")
+
+	var edge_targets: Array = []
+	for e in map.get("edges", []):
+		edge_targets.append(str(e.get("to", "")))
+	_check(edge_targets.has(b), "the edge to a script in the map is kept")
+	_check(not edge_targets.has("res://addons/godot_mcp/utils/path_guard.gd"), "the edge to a script outside it is not")
+
+	# Every edge must land on a node, or the count is advertising nothing.
+	var dangling := 0
+	for e in map.get("edges", []):
+		if not node_paths.has(str(e.get("to", ""))) or not node_paths.has(str(e.get("from", ""))):
+			dangling += 1
+	_check(dangling == 0, "no edge points outside the map (%d dangling)" % dangling)
+	_check(int(map.get("total_connections", -1)) == map.get("edges", []).size(), "total_connections counts the edges it returns")
+	_rm(a)
+	_rm(b)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

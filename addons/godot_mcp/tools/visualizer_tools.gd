@@ -34,10 +34,12 @@ func map_project(args: Dictionary) -> Dictionary:
 	# Parse each script
 	var nodes: Array = []
 	var class_map: Dictionary = {}  # class_name -> path
+	var node_paths: Dictionary = {}  # path -> true, for edge targets
 
 	for path: String in script_paths:
 		var info: Dictionary = _parse_script(path)
 		nodes.append(info)
+		node_paths[path] = true
 		if info.get(&"class_name", "") != "":
 			class_map[info[&"class_name"]] = path
 
@@ -52,8 +54,14 @@ func map_project(args: Dictionary) -> Dictionary:
 			edges.append({&"from": from_path, &"to": class_map[extends_class], &"type": "extends"})
 
 		# preload/load references
+		#
+		# Only to a script the map actually holds. extends and signal edges are
+		# already filtered this way through class_map; preloads were not, so with
+		# addons excluded from the nodes (the default) every preload into
+		# res://addons/ still produced an edge. The map then advertised
+		# "122 connections" while the graph could draw none of them.
 		for ref: String in node.get(&"preloads", []):
-			if ref.ends_with(".gd"):
+			if ref.ends_with(".gd") and node_paths.has(ref):
 				edges.append({&"from": from_path, &"to": ref, &"type": "preload"})
 
 		# signal connections
