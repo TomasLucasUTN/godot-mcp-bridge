@@ -945,6 +945,16 @@ func _test_shape_and_vector_forms() -> void:
 	_check(ray_paths.has("Body/Ray"), "and the raycast lands under the body")
 
 	_check(at.add_audio_player({"scene_path": scene, "parent_path": ".", "node_name": "Sfx", "player_type": "2d"}).get("ok", false), "add_audio_player accepts a lowercase player_type")
+
+	var tt = preload("res://addons/godot_mcp/tools/theme_tools.gd").new()
+	var theme_path := "res://__gdtest_theme.tres"
+	_rm(theme_path)
+	tt.create_theme({"theme_path": theme_path})
+	_check(tt.set_theme_color({"theme_path": theme_path, "control_type": "Button", "color_name": "font_color", "color": "#ff0000"}).get("ok", false), "set_theme_color accepts a hex string")
+	var loaded := ResourceLoader.load(theme_path, "Theme", ResourceLoader.CACHE_MODE_REPLACE) as Theme
+	_check(loaded != null and loaded.get_color("font_color", "Button") == Color.RED, "and stores the colour it names")
+	_check(not tt.set_theme_color({"theme_path": theme_path, "control_type": "Button", "color_name": "font_color", "color": "not a colour"}).get("ok", true), "a string that is not a colour is still refused")
+	_rm(theme_path)
 	_check(not pt.setup_collision({"scene_path": scene, "node_path": "Body", "shape_type": "triangle"}).get("ok", true), "an unsupported shape is still refused")
 	_rm(scene)
 

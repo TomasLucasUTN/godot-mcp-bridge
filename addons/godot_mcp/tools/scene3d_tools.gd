@@ -200,16 +200,16 @@ func set_material_3d(args: Dictionary) -> Dictionary:
 	# would leave those assignments applied while reporting total failure.
 	var parsed_albedo = null
 	if albedo_color != null:
-		parsed_albedo = _parse_value(albedo_color)
+		parsed_albedo = _parse_typed_value(albedo_color, TYPE_COLOR)
 		if not (parsed_albedo is Color):
 			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'albedo_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+			return {&"ok": false, &"error": "'albedo_color' must be a Color: \"#ff0000\" or {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 	var parsed_emission = null
 	if emission_color != null:
-		parsed_emission = _parse_value(emission_color)
+		parsed_emission = _parse_typed_value(emission_color, TYPE_COLOR)
 		if not (parsed_emission is Color):
 			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "'emission_color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+			return {&"ok": false, &"error": "'emission_color' must be a Color: \"#ff0000\" or {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 
 	var ctx := _begin_edit(is_live, "MCP: set material on %s" % node_path, root)
 	var material: StandardMaterial3D = target.get(&"material_override") as StandardMaterial3D
@@ -259,14 +259,14 @@ func setup_environment(args: Dictionary) -> Dictionary:
 	# behind while reporting failure.
 	var parsed_sky_top = null
 	if sky_top_color != null:
-		parsed_sky_top = _parse_value(sky_top_color)
+		parsed_sky_top = _parse_typed_value(sky_top_color, TYPE_COLOR)
 		if not (parsed_sky_top is Color):
-			return {&"ok": false, &"error": "'sky_top_color' must be a Color"}
+			return {&"ok": false, &"error": "'sky_top_color' must be a Color: \"#ff0000\" or {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 	var parsed_sky_horizon = null
 	if sky_horizon_color != null:
-		parsed_sky_horizon = _parse_value(sky_horizon_color)
+		parsed_sky_horizon = _parse_typed_value(sky_horizon_color, TYPE_COLOR)
 		if not (parsed_sky_horizon is Color):
-			return {&"ok": false, &"error": "'sky_horizon_color' must be a Color"}
+			return {&"ok": false, &"error": "'sky_horizon_color' must be a Color: \"#ff0000\" or {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():

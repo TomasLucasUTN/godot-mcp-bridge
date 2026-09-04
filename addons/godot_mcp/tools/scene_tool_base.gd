@@ -196,6 +196,9 @@ func _collect_node_paths(scene_root: Node, node: Node, out: Array[String]) -> vo
 func _parse_value(value: Variant) -> Variant:
 	return VariantCodec.parse_value(value)
 
+func _parse_typed_value(value: Variant, type_hint: int) -> Variant:
+	return VariantCodec.parse_typed_value(value, type_hint)
+
 func _serialize_value(value: Variant) -> Variant:
 	return VariantCodec.serialize_value(value)
 

@@ -43,6 +43,14 @@ static func parse_typed_value(value: Variant, type_hint: int) -> Variant:
 		# Not loadable: fall through and return the String unchanged, so callers
 		# that report per-property failures can still say what went wrong.
 
+	# "#ff0000" / "ff0000" for a Color-typed value. It is how a colour is written
+	# everywhere else — CSS, Godot's own inspector, Color.html — and the tools
+	# used to answer it with 'color' must be a Color, e.g. {"r":1,...}.
+	if type_hint == TYPE_COLOR and value is String:
+		var html := str(value)
+		if Color.html_is_valid(html):
+			return Color.html(html)
+
 	if value is Dictionary:
 		var dict: Dictionary = value
 		if not str(dict.get(&"type", "")).is_empty():

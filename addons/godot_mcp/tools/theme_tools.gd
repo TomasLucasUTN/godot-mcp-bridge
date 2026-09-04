@@ -95,9 +95,9 @@ func set_theme_color(args: Dictionary) -> Dictionary:
 		return result[1]
 	var theme: Theme = result[0]
 
-	var parsed = VariantCodec.parse_value(color)
+	var parsed = VariantCodec.parse_typed_value(color, TYPE_COLOR)
 	if not (parsed is Color):
-		return {&"ok": false, &"error": "'color' must be a Color, e.g. {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
+		return {&"ok": false, &"error": "'color' must be a Color: \"#ff0000\" or {\"r\":1,\"g\":1,\"b\":1,\"a\":1}"}
 
 	theme.set_color(StringName(color_name), StringName(control_type), parsed)
 
