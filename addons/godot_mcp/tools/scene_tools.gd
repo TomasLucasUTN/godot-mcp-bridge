@@ -1359,7 +1359,7 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 
 		_:
 			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "Unknown texture type: " + texture_type}
+			return {&"ok": false, &"error": "Unknown texture type: %s. Use one of: NewImageTexture (with texture_params.path), PlaceholderTexture2D, GradientTexture2D, NoiseTexture2D." % texture_type}
 
 	target.set("texture", texture)
 
@@ -1607,9 +1607,20 @@ func set_mesh(args: Dictionary) -> Dictionary:
 			return {&"ok": false, &"error": "Failed to load mesh resource (or not a Mesh): " + file_path}
 		mesh = loaded
 	else:
-		if not ClassDB.class_exists(mesh_type):
+		# add_mesh_instance takes "box"/"sphere"/..., so a caller who built the
+		# node with one of those writes the same word here. This took the Godot
+		# class name only, and answered "Unknown mesh type: sphere" without
+		# saying what it did want.
+		var friendly := {
+			"box": "BoxMesh", "sphere": "SphereMesh", "cylinder": "CylinderMesh",
+			"plane": "PlaneMesh", "capsule": "CapsuleMesh", "torus": "TorusMesh",
+			"quad": "QuadMesh", "prism": "PrismMesh",
+		}
+		if friendly.has(mesh_type.to_lower()):
+			mesh_type = friendly[mesh_type.to_lower()]
+		if not ClassDB.class_exists(mesh_type) or not ClassDB.is_parent_class(mesh_type, "Mesh"):
 			_discard_scene(root, is_live)
-			return {&"ok": false, &"error": "Unknown mesh type: " + mesh_type}
+			return {&"ok": false, &"error": "Unknown mesh type: %s. Use one of %s, a Mesh class name (BoxMesh, SphereMesh, ...), or \"file\" with mesh_params.path." % [mesh_type, ", ".join(PackedStringArray(friendly.keys()))]}
 		if not ClassDB.can_instantiate(mesh_type):
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Cannot instantiate mesh type: " + mesh_type}

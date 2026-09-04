@@ -112,6 +112,7 @@ func _initialize() -> void:
 	_test_input_map_round_trips()
 	_test_export_log_is_readable()
 	_test_map_counts_only_drawable_edges()
+	_test_enum_errors_name_their_options()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1165,6 +1166,35 @@ func _test_map_counts_only_drawable_edges() -> void:
 	_check(int(map.get("total_connections", -1)) == map.get("edges", []).size(), "total_connections counts the edges it returns")
 	_rm(a)
 	_rm(b)
+
+# An enum-shaped refusal that does not say what IS accepted costs a round trip
+# for nothing. set_mesh also took only the Godot class name, while
+# add_mesh_instance takes "box"/"sphere" — so the word that built the node was
+# rejected by the tool that changes it.
+func _test_enum_errors_name_their_options() -> void:
+	print("\n[enum errors name their options]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var s3 = preload("res://addons/godot_mcp/tools/scene3d_tools.gd").new()
+	var scene := "res://__gdtest_enums.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+	s3.add_mesh_instance({"scene_path": scene, "parent_path": ".", "node_name": "Box", "mesh_type": "box"})
+
+	var friendly = st.set_mesh({"scene_path": scene, "node_path": "Box", "mesh_type": "sphere"})
+	_check(friendly.get("ok", false), "set_mesh takes the same word add_mesh_instance takes")
+
+	var by_class = st.set_mesh({"scene_path": scene, "node_path": "Box", "mesh_type": "BoxMesh"})
+	_check(by_class.get("ok", false), "and still takes the Godot class name")
+
+	var bad = st.set_mesh({"scene_path": scene, "node_path": "Box", "mesh_type": "banana"})
+	_check(not bad.get("ok", true), "a type that is neither is refused")
+	_check("sphere" in str(bad.get("error", "")), "and the refusal lists what is accepted")
+
+	st.add_node({"scene_path": scene, "node_name": "Spr", "node_type": "Sprite2D", "parent_path": "."})
+	var tex = st.set_sprite_texture({"scene_path": scene, "node_path": "Spr", "texture_type": "circle"})
+	_check(not tex.get("ok", true), "an unknown texture type is refused")
+	_check("GradientTexture2D" in str(tex.get("error", "")), "and that refusal lists its options too")
+	_rm(scene)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:
