@@ -366,6 +366,93 @@ function confirmationBlock(name: string, args: Record<string, unknown>): ToolCal
   };
 }
 
+/**
+ * The toolset tools, answered by whatever process is serving tools/list.
+ *
+ * A proxy forwarded these to the primary, which flipped its own activeToolsets
+ * while the proxy kept serving the list from the set it started with: the call
+ * answered ok/enabled:true and the tools never appeared for that client. Every
+ * client after the first is a proxy, so that was most of them. Nothing here
+ * touches the editor, and execution is not gated on toolsets, so answering
+ * locally is both correct and enough.
+ *
+ * Returns null when `name` is not one of them.
+ */
+export function handleToolsetTool(
+  name: string,
+  toolArgs: Record<string, unknown>,
+): ToolCallResult | null {
+  if (name === 'list_toolsets') {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          toolsets: Object.entries(TOOLSETS).map(([toolsetName, tools]) => ({
+            name: toolsetName,
+            tool_count: tools.length,
+            enabled: activeToolsets.has(toolsetName),
+            description: TOOLSET_DESCRIPTIONS[toolsetName] ?? '',
+            // Names only (not full schemas) so a client can find the tool it
+            // needs and enable exactly one toolset, without paying for every
+            // definition up front.
+            tools: tools.map(t => t.name),
+          })),
+        }),
+      }],
+    };
+  }
+
+  if (name === 'enable_toolset' || name === 'disable_toolset') {
+    const toolsetName = typeof toolArgs.name === 'string' ? toolArgs.name : '';
+    if (toolsetName === 'core') {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: '"core" is always enabled.' }) }],
+        isError: true,
+      };
+    }
+    // GODOT_MCP_TOOLSETS documents "all"; refusing it here meant the same word
+    // worked in the config and failed as a call.
+    const isAll = toolsetName === 'all';
+    if (!isAll && !TOOLSETS[toolsetName]) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: `Unknown toolset: ${toolsetName}`,
+            available: ['all', ...OPTIONAL_TOOLSET_NAMES],
+          }),
+        }],
+        isError: true,
+      };
+    }
+    const affected = isAll ? OPTIONAL_TOOLSET_NAMES : [toolsetName];
+    for (const set of affected) {
+      if (name === 'enable_toolset') activeToolsets.add(set);
+      else activeToolsets.delete(set);
+    }
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          ok: true,
+          toolset: toolsetName,
+          enabled: name === 'enable_toolset',
+          // Do NOT advise "call list_tools again": that is a CLIENT action, and an
+          // agent cannot perform it. Several clients cache the list for the whole
+          // session, so on those the newly enabled tools stay unreachable no matter
+          // how many times the agent asks. GODOT_MCP_TOOLSETS is the fix that works
+          // without the client cooperating.
+          hint: name === 'enable_toolset'
+            ? 'Enabled for this server. Your client may have cached the tool list at startup — if these tools stay unreachable, preset them with GODOT_MCP_TOOLSETS in the client config instead of enabling them mid-session.'
+            : 'Disabled for this server.',
+        }),
+      }],
+    };
+  }
+
+  return null;
+}
+
 async function executeToolCall(
   name: string,
   toolArgs: Record<string, unknown>
@@ -404,70 +491,8 @@ async function executeToolCall(
     };
   }
 
-  if (name === 'list_toolsets') {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          toolsets: Object.entries(TOOLSETS).map(([toolsetName, tools]) => ({
-            name: toolsetName,
-            tool_count: tools.length,
-            enabled: activeToolsets.has(toolsetName),
-            description: TOOLSET_DESCRIPTIONS[toolsetName] ?? '',
-            // Names only (not full schemas) so a client can find the tool it
-            // needs and enable exactly one toolset, without paying for every
-            // definition up front.
-            tools: tools.map(t => t.name),
-          })),
-        }),
-      }],
-    };
-  }
-
-  if (name === 'enable_toolset' || name === 'disable_toolset') {
-    const toolsetName = typeof toolArgs.name === 'string' ? toolArgs.name : '';
-    if (toolsetName === 'core') {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: '"core" is always enabled.' }) }],
-        isError: true,
-      };
-    }
-    if (!TOOLSETS[toolsetName]) {
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            error: `Unknown toolset: ${toolsetName}`,
-            available: OPTIONAL_TOOLSET_NAMES,
-          }),
-        }],
-        isError: true,
-      };
-    }
-    if (name === 'enable_toolset') {
-      activeToolsets.add(toolsetName);
-    } else {
-      activeToolsets.delete(toolsetName);
-    }
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          ok: true,
-          toolset: toolsetName,
-          enabled: activeToolsets.has(toolsetName),
-          // Do NOT advise "call list_tools again": that is a CLIENT action, and an
-          // agent cannot perform it. Several clients cache the list for the whole
-          // session, so on those the newly enabled tools stay unreachable no matter
-          // how many times the agent asks. GODOT_MCP_TOOLSETS is the fix that works
-          // without the client cooperating.
-          hint: activeToolsets.has(toolsetName)
-            ? 'Enabled for this server. Your client may have cached the tool list at startup — if these tools stay unreachable, preset them with GODOT_MCP_TOOLSETS in the client config instead of enabling them mid-session.'
-            : 'Disabled for this server.',
-        }),
-      }],
-    };
-  }
+  const toolsetAnswer = handleToolsetTool(name, toolArgs);
+  if (toolsetAnswer) return toolsetAnswer;
 
   if (name === 'get_guide') {
     const slug = typeof toolArgs.slug === 'string' ? toolArgs.slug.trim() : '';
@@ -1221,6 +1246,11 @@ async function startProxy(): Promise<void> {
   console.error(`[${SERVER_NAME}] Starting in PROXY mode v${SERVER_VERSION} (primary on port ${HTTP_PORT})...`);
 
   const handleTool: ToolHandler = async (name, args) => {
+    // Not forwarded: these change what THIS process advertises. Sent to the
+    // primary they flipped its set instead, and the caller was told "enabled"
+    // while its own tool list never changed.
+    const toolsetAnswer = handleToolsetTool(name, args);
+    if (toolsetAnswer) return toolsetAnswer;
     try {
       return await proxyToolCall(HTTP_PORT, name, args, TOOL_TIMEOUT);
     } catch (error) {
