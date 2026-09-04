@@ -80,6 +80,32 @@ async function resolveFrameId(c: DapClient, frameId: unknown): Promise<number | 
  * succeeds, so retry rather than surfacing a confusing error for what is just
  * a race.
  */
+/**
+ * Every name the stopped frame holds, across its scopes — or null when the
+ * adapter will not say. Used to tell an unknown identifier apart from a null
+ * one, which Godot's adapter reports identically.
+ */
+async function frameVariableNames(c: DapClient, frameId: number | undefined): Promise<Set<string> | null> {
+  try {
+    const scopes = await c.request('scopes', { frameId });
+    const list = (scopes['scopes'] as Array<Record<string, unknown>>) ?? [];
+    const names = new Set<string>();
+    for (const scope of list) {
+      const ref = Number(scope['variablesReference']);
+      if (!Number.isFinite(ref) || ref <= 0) continue;
+      // Globals can be enormous and is not where a local typo would live.
+      if (String(scope['name']).toLowerCase() === 'globals') continue;
+      const body = await requestVariables(c, ref);
+      for (const v of ((body['variables'] as Array<Record<string, unknown>>) ?? [])) {
+        names.add(String(v['name']));
+      }
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 async function requestVariables(c: DapClient, ref: number): Promise<Record<string, unknown>> {
   const delaysMs = [0, 250, 500, 750];
   let lastError: unknown;
@@ -250,7 +276,18 @@ export async function handleDebugTool(
       if (!Number.isFinite(ref) || ref <= 0) {
         return { ok: false, error: "'variables_reference' must be a positive number from debug_scopes or a nested variable." };
       }
-      const body = await requestVariables(c, ref);
+      let body: Record<string, unknown>;
+      try {
+        body = await requestVariables(c, ref);
+      } catch (err) {
+        // The adapter answers a stale or invented reference with a bare
+        // "unknown", which tells the caller nothing about what to do next.
+        const detail = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: `The debug adapter rejected variables_reference ${ref} (${detail}). References come from debug_scopes and go stale on every step or continue — call debug_scopes again for current ones.`,
+        };
+      }
       const variables = ((body['variables'] as Array<Record<string, unknown>>) ?? []).map((v) => ({
         name: v['name'],
         value: v['value'],
@@ -270,13 +307,31 @@ export async function handleDebugTool(
       const frameId = await resolveFrameId(c, args.frame_id);
       const context = typeof args.context === 'string' ? args.context : 'watch';
       const body = await c.request('evaluate', { expression, frameId, context });
-      return {
+      const result = body['result'] ?? null;
+      const answer: Record<string, unknown> = {
         expression,
         frame_id: frameId ?? null,
-        result: body['result'] ?? null,
+        result,
         type: body['type'] ?? null,
         variables_reference: body['variablesReference'] ?? 0,
       };
+
+      // Godot's adapter answers an identifier that does not exist exactly as it
+      // answers one holding null: "<null>", reported as success. A caller then
+      // reads a typo as a real variable that happens to be null. When the
+      // expression is a bare name we can tell the two apart — ask the frame what
+      // it actually holds.
+      if (String(result) === '<null>' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(expression)) {
+        const names = await frameVariableNames(c, frameId);
+        if (names !== null && !names.has(expression)) {
+          answer['exists'] = false;
+          answer['error'] = `Nothing named '${expression}' is in scope here — the adapter reports an unknown identifier as "<null>", the same as a variable holding null.`;
+          answer['in_scope'] = [...names].sort();
+        } else if (names !== null) {
+          answer['exists'] = true;
+        }
+      }
+      return answer;
     }
 
     case 'debug_disconnect': {

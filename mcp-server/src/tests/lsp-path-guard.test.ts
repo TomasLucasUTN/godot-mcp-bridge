@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveProjectPath, isInsideProject, summarizeLspCapabilities } from '../lsp-session.js';
+import { resolveProjectPath, isInsideProject, summarizeLspCapabilities, handleLspTool } from '../lsp-session.js';
 
 /**
  * The gd_* tools read and write files directly from the Node process, outside
@@ -113,5 +113,31 @@ describe('summarizeLspCapabilities', () => {
 
   it('does not claim anything before a handshake', () => {
     expect(summarizeLspCapabilities({}).note).toContain('has not completed a handshake');
+  });
+});
+
+/**
+ * The language server parses whatever it is handed as GDScript. Given a .tscn it
+ * answered with one "Unexpected \"[\" in class body" per scene section, every one
+ * severity "error" — which reads as a broken scene and is nothing of the kind.
+ * The check runs before the client is used, so no adapter is needed here.
+ */
+describe('LSP file-type guard', () => {
+  it('refuses a scene, and says where scenes are read instead', async () => {
+    const r = await handleLspTool('gd_diagnostics', { path: 'res://levels/arena.tscn' }, PROJECT);
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toMatch(/only reads GDScript/i);
+    expect(String(r.hint)).toMatch(/validate_scene_integrity|read_scene/);
+  });
+
+  it('refuses other non-script files without a scene-specific hint', async () => {
+    const r = await handleLspTool('gd_hover', { path: 'res://icon.svg' }, PROJECT);
+    expect(r.ok).toBe(false);
+    expect(r.hint).toBeUndefined();
+  });
+
+  it('still reports a missing path as missing', async () => {
+    const r = await handleLspTool('gd_diagnostics', { path: '   ' }, PROJECT);
+    expect(String(r.error)).toMatch(/Missing 'path'/);
   });
 });
