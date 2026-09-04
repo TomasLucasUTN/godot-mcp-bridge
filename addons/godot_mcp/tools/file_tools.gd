@@ -211,6 +211,11 @@ func search_project(args: Dictionary) -> Dictionary:
 		if not include_addons and file_path.begins_with("res://addons/"):
 			addon_hits += 1
 			continue
+		# delete_file leaves a .bak beside what it removed. Searching it back up
+		# hands the caller the contents of a file they just deleted, as though it
+		# were still part of the project.
+		if file_path.ends_with(".bak"):
+			continue
 
 		var file := FileAccess.open(file_path, FileAccess.READ)
 		if file == null:

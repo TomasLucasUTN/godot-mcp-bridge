@@ -323,6 +323,16 @@ export function unknownArgumentError(
       : first.candidate;
   }
 
+  // A bare name list is not enough when an argument is itself an object: the
+  // caller who wrote edit_script's fields flat was told the tool takes "edit"
+  // and "dry_run", with nothing about what goes inside "edit". Object-typed
+  // arguments carry their shape in the description, so hand it over.
+  const shapes: Record<string, string> = {};
+  for (const [key, spec] of Object.entries(schema.properties)) {
+    const prop = spec as { type?: string; description?: string };
+    if (prop?.type === 'object' && prop.description) shapes[key] = prop.description;
+  }
+
   return {
     content: [{
       type: 'text',
@@ -331,6 +341,7 @@ export function unknownArgumentError(
         error: `Unknown argument(s) for '${name}': ${unknown.join(', ')}.`,
         did_you_mean: Object.keys(suggestions).length > 0 ? suggestions : undefined,
         accepted_arguments: declared,
+        argument_shapes: Object.keys(shapes).length > 0 ? shapes : undefined,
         hint: 'The call was refused rather than run with those values dropped — a dropped argument fails later, somewhere unrelated.',
       }),
     }],
