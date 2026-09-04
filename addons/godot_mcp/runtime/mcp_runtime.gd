@@ -1090,7 +1090,12 @@ func _send_async_result(rid: String, success: bool, payload: Dictionary) -> void
 		"type": "tool_result",
 		"id": rid,
 		"success": success,
-		"result": payload if success else null,
+		# On failure too — same reason as the synchronous path, and it matters
+		# more here: a failing async job carries the work it DID manage. When a
+		# monitored node is freed mid-sampling, monitor_properties reports the
+		# samples it collected up to that frame, and those were being dropped
+		# along with everything else that was not the error string.
+		"result": payload,
 		"error": str(payload.get("error", "")) if not success else "",
 	})
 

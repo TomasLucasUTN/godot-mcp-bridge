@@ -29,6 +29,7 @@ func _initialize() -> void:
 	await _test_dry_run_writes_nothing()
 	await _test_dry_run_on_file_writes()
 	_test_runtime_batch()
+	_test_failed_results_keep_their_payload()
 	_test_detached_pid_bookkeeping()
 	_test_path_guard_holds_against_traversal()
 	_test_read_scene_subtree()
@@ -621,6 +622,25 @@ func _test_runtime_batch() -> void:
 	_check(int(stopped.get("requested", 0)) == 2, "and still says how many were asked for")
 
 	rt.free()
+
+# A failing tool says more than its error string, and the runtime side threw
+# all of it away: it sent `result: null` on failure, so the caller got a bare
+# "Tool execution failed". The editor side has always sent the payload.
+#
+# It matters most for the async jobs, which carry the work they DID manage —
+# monitor_properties reports the samples it collected before the node was
+# freed — and for a batch, where the payload is the only thing that says which
+# operation broke.
+func _test_failed_results_keep_their_payload() -> void:
+	print("
+[failure payloads]")
+	var src := FileAccess.get_file_as_string("res://addons/godot_mcp/runtime/mcp_runtime.gd")
+	_check(not src.is_empty(), "read the runtime handler")
+	_check(not ("if success else null" in src),
+		"neither result path drops the payload when a tool fails")
+	# Both senders must pass it through, not just one of them.
+	_check(src.count("\"result\": result,") >= 1, "the synchronous path sends it")
+	_check(src.count("\"result\": payload,") >= 1, "and so does the async one")
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two
