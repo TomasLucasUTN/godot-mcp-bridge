@@ -1225,13 +1225,21 @@ async function startProxy(): Promise<void> {
       return await proxyToolCall(HTTP_PORT, name, args, TOOL_TIMEOUT);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      // An answer the primary produced is the primary's answer, not a transport
+      // failure: reporting it as "the server may have shut down" told the caller
+      // to restart a process that was working and had just explained itself.
+      const fromPrimary = (error as { fromPrimary?: boolean })?.fromPrimary === true;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            error: `Failed to reach primary server: ${msg}`,
-            hint: 'The primary godot-mcp-server may have shut down. Restart your AI client to spawn a new one.'
-          })
+          text: JSON.stringify(
+            fromPrimary
+              ? { error: msg }
+              : {
+                  error: `Failed to reach primary server: ${msg}`,
+                  hint: 'The primary godot-mcp-server may have shut down. Restart your AI client to spawn a new one.',
+                }
+          )
         }],
         isError: true
       };

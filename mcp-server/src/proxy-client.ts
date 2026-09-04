@@ -120,12 +120,38 @@ export async function proxyToolCall(
   return JSON.parse(response) as ProxyToolResult;
 }
 
+/**
+ * The primary answers a failed call with the reason in the body — including the
+ * "unknown tool, did you mean ..." list that took real work to produce. Dropping
+ * it and rejecting with "HTTP 500" turned a typo in a tool name into "the
+ * primary server may have shut down", sending the caller to restart a healthy
+ * process. Read the body and carry it.
+ */
+function readError(res: http.IncomingMessage, reject: (e: Error) => void): void {
+  const chunks: Buffer[] = [];
+  res.on('data', (chunk: Buffer) => chunks.push(chunk));
+  res.on('end', () => {
+    const raw = Buffer.concat(chunks).toString();
+    let message = '';
+    try {
+      const parsed = JSON.parse(raw) as { error?: unknown };
+      if (typeof parsed.error === 'string') message = parsed.error;
+    } catch {
+      message = raw.slice(0, 500);
+    }
+    const error = new Error(message || `HTTP ${res.statusCode}`) as Error & { statusCode?: number; fromPrimary?: boolean };
+    error.statusCode = res.statusCode;
+    error.fromPrimary = message.length > 0;
+    reject(error);
+  });
+  res.on('error', reject);
+}
+
 function httpGet(url: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        res.resume();
+        readError(res, reject);
         return;
       }
       const chunks: Buffer[] = [];
@@ -159,8 +185,7 @@ function httpPost(url: string, body: string, timeoutMs: number): Promise<string>
 
     const req = http.request(options, (res) => {
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        res.resume();
+        readError(res, reject);
         return;
       }
       const chunks: Buffer[] = [];

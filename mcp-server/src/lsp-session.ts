@@ -298,6 +298,20 @@ export async function handleLspTool(
   const rawPath = String(args.path ?? '').trim();
   if (!rawPath) return { ok: false, error: "Missing 'path'" };
 
+  // The language server parses whatever it is handed as GDScript. Given a
+  // .tscn it answered with a wall of "Unexpected \"[\" in class body" — one
+  // error per scene section, severity "error" — which reads as a broken scene
+  // and is nothing of the kind.
+  if (!rawPath.toLowerCase().endsWith('.gd')) {
+    return {
+      ok: false,
+      error: `The language server only reads GDScript, and '${rawPath}' is not a .gd file. Handed anything else it parses it as a script and reports errors that say nothing about the file.`,
+      hint: rawPath.toLowerCase().endsWith('.tscn')
+        ? 'For a scene, use validate_scene_integrity, or read_scene to inspect it.'
+        : undefined,
+    };
+  }
+
   let uri: string;
   try {
     const absPath = resolveProjectPath(rawPath, projectPath);
