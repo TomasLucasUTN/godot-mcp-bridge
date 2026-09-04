@@ -16,7 +16,8 @@ export const scriptTools: ToolDefinition[] = [
         edit: {
           type: 'object',
           description: 'Edit spec: {type: "snippet_replace", file: "res://path.gd", old_snippet: "old code", new_snippet: "new code", context_before: "line above", context_after: "line below"}. Keep old_snippet SMALL (1-10 lines).'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview the edit without writing it: the snippet is located and the new content built, so you learn whether it would match and what it would produce, and the file is left alone. Default false.' }
       },
       required: ['edit']
     }
@@ -92,7 +93,8 @@ export const scriptTools: ToolDefinition[] = [
         force: {
           type: 'boolean',
           description: 'If true, bypass the "file is open in editor" guard. Use ONLY if you know the file is not the active scene. The guard exists because deleting the active scene tab from under the editor can crash Godot.'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview without deleting: reports the file it would remove. Default false. Note this is separate from `confirm`, which is the gate — a preview needs no confirmation because it changes nothing.' }
       },
       required: ['path', 'confirm']
     }
@@ -115,7 +117,8 @@ export const scriptTools: ToolDefinition[] = [
         update_references: {
           type: 'boolean',
           description: 'Update references in other files (default: true)'
-        }
+        },
+        dry_run: { type: 'boolean', description: 'Preview without renaming: checks the source exists and the target does not, then reports what it would do. Default false.' }
       },
       required: ['old_path', 'new_path']
     }

@@ -20,7 +20,12 @@ import { allTools } from '../tools/index.js';
 const ADDON = resolve(dirname(fileURLToPath(import.meta.url)), '../../../addons/godot_mcp');
 const TOOLS_DIR = join(ADDON, 'tools');
 
-/** Tools whose handler writes a scene through the shared save helpers. */
+/**
+ * Tools that really do preview, by either mechanism:
+ *  - a scene tool writing through SceneToolBase's guarded save helpers, or
+ *  - a handler that reads `_dry_run` itself, which is how the file-writing
+ *    tools do it (they are not scene tools and have no shared save point).
+ */
 function toolsCoveredByCentralDryRun(): Set<string> {
   const executor = readFileSync(join(ADDON, 'tool_executor.gd'), 'utf8');
 
@@ -39,10 +44,15 @@ function toolsCoveredByCentralDryRun(): Set<string> {
   for (const [, tool, handlerVar, method] of executor.matchAll(
     /&"([a-z_0-9]+)": \[(_[a-z_0-9]+), &"([a-z_0-9]+)"\]/g)) {
     const file = varToFile.get(handlerVar);
-    if (!file || !sceneToolFiles.has(file)) continue;
+    if (!file) continue;
     const src = readFileSync(join(TOOLS_DIR, file), 'utf8');
     const body = new RegExp(`func ${method}\\(args: Dictionary\\)[\\s\\S]*?(?=\\nfunc |$)`).exec(src)?.[0] ?? '';
-    if (body.includes('_save_scene(') || body.includes('_finish_scene_edit(')) covered.add(tool);
+    const guardedSave = sceneToolFiles.has(file)
+      && (body.includes('_save_scene(') || body.includes('_finish_scene_edit('));
+    // The file-writing tools are not scene tools and have no shared save
+    // point, so they read the flag themselves. Both count as covered.
+    const honoursItself = body.includes('_dry_run');
+    if (guardedSave || honoursItself) covered.add(tool);
   }
   return covered;
 }

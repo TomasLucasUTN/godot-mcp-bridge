@@ -6,6 +6,13 @@ class_name ScriptTools
 ##          create_folder, delete_file, rename_file,
 ##          generate_property_forwarder
 
+## Set by the ToolExecutor for one call when the caller passed dry_run, and
+## read at every point below that would write. The scene tools inherit this
+## from SceneToolBase; these write FILES, which is the more irreversible half
+## of the surface and had no preview at all.
+var _dry_run := false
+var _dry_run_skipped_write := false
+
 const PathGuard = preload("res://addons/godot_mcp/utils/path_guard.gd")
 
 var _editor_plugin: EditorPlugin = null
@@ -127,12 +134,18 @@ func edit_script(args: Dictionary) -> Dictionary:
 	var original_content := content
 	var new_content := content.substr(0, pos) + effective_new_snippet + content.substr(pos + matched_len)
 
-	# Write back
-	file = FileAccess.open(path, FileAccess.WRITE)
-	if not file:
-		return {&"ok": false, &"error": "Cannot write file: " + path}
-	file.store_string(new_content)
-	file.close()
+	# Write back — unless this is a preview, in which case everything above
+	# (finding the snippet, disambiguating it, building the new content) has
+	# already answered the question the caller actually has: would it match,
+	# and what would it produce.
+	if _dry_run:
+		_dry_run_skipped_write = true
+	else:
+		file = FileAccess.open(path, FileAccess.WRITE)
+		if not file:
+			return {&"ok": false, &"error": "Cannot write file: " + path}
+		file.store_string(new_content)
+		file.close()
 
 	# Count changes
 	var old_lines := old_snippet.split("\n")
@@ -140,15 +153,17 @@ func edit_script(args: Dictionary) -> Dictionary:
 	var added := maxi(0, new_lines.size() - old_lines.size())
 	var removed := maxi(0, old_lines.size() - new_lines.size())
 
-	_refresh_filesystem()
+	if not _dry_run:
+		_refresh_filesystem()
 
 	var result := {
 		&"ok": true,
 		&"path": path,
 		&"added": added,
 		&"removed": removed,
-		&"auto_applied": true,
-		&"message": "Applied edit to %s (+%d -%d lines)" % [path, added, removed]
+		&"auto_applied": not _dry_run,
+		&"message": ("Would apply edit to %s (+%d -%d lines); nothing written." if _dry_run
+			else "Applied edit to %s (+%d -%d lines)") % [path, added, removed]
 	}
 
 	# If the script is open in the editor, its unsaved buffer will overwrite this
@@ -682,6 +697,11 @@ func delete_file(args: Dictionary) -> Dictionary:
 		if backup_err != OK:
 			return {&"ok": false, &"error": "Backup failed (%s); file NOT deleted: %s" % [str(backup_err), path]}
 
+	if _dry_run:
+		_dry_run_skipped_write = true
+		return {&"ok": true, &"path": path, &"existed": true,
+			&"message": "Would delete %s." % path}
+
 	var err := DirAccess.remove_absolute(path)
 	if err != OK:
 		return {&"ok": false, &"error": "Failed to delete file: " + str(err)}
@@ -757,6 +777,13 @@ func rename_file(args: Dictionary) -> Dictionary:
 	var dir_path := new_path.get_base_dir()
 	if not DirAccess.dir_exists_absolute(dir_path):
 		DirAccess.make_dir_recursive_absolute(dir_path)
+
+	if _dry_run:
+		# Checked above that the source exists and the target does not, which is
+		# what a preview of a rename is for.
+		_dry_run_skipped_write = true
+		return {&"ok": true, &"old_path": old_path, &"new_path": new_path,
+			&"message": "Would rename %s to %s." % [old_path, new_path]}
 
 	var err := DirAccess.rename_absolute(old_path, new_path)
 	if err != OK:

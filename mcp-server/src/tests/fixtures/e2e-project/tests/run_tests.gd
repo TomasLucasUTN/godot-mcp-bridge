@@ -27,6 +27,7 @@ func _initialize() -> void:
 	_test_every_advertised_tool_is_dispatchable()
 	_test_tools_do_not_claim_work_they_did_not_do()
 	await _test_dry_run_writes_nothing()
+	await _test_dry_run_on_file_writes()
 	_test_detached_pid_bookkeeping()
 	_test_path_guard_holds_against_traversal()
 	_test_read_scene_subtree()
@@ -493,6 +494,74 @@ func _test_read_scene_subtree() -> void:
 
 	st.free()
 	_rm(scene)
+
+# The scene tools preview through SceneToolBase. These write FILES — the more
+# irreversible half of the surface, and the half that had no preview at all.
+# Same proof as the scene one: the bytes must not move, and the control case
+# (the same call without dry_run) must move them.
+func _test_dry_run_on_file_writes() -> void:
+	print("
+[dry run: files]")
+	var ex = preload("res://addons/godot_mcp/tool_executor.gd").new()
+	root.add_child(ex)
+	ex._init_tools()
+
+	var path := "res://__gdtest_dryrun.gd"
+	_write_text(path, "extends Node
+
+func _ready():
+	print(\"before\")
+")
+	var before := FileAccess.get_md5(path)
+
+	var edit_args := {"edit": {"file": path, "type": "snippet_replace",
+		"old_snippet": "print(\"before\")", "new_snippet": "print(\"after\")"}}
+	var preview = await ex.execute_tool("edit_script", edit_args.duplicate(true))
+	_check(preview.get("ok", false), "edit_script previews ok")
+	_check(FileAccess.get_md5(path) != before, "control: a real edit does change the file")
+
+	# Back to a known state, then preview.
+	_write_text(path, "extends Node
+
+func _ready():
+	print(\"before\")
+")
+	var settled := FileAccess.get_md5(path)
+	var dry_args := edit_args.duplicate(true)
+	dry_args["dry_run"] = true
+	var dry = await ex.execute_tool("edit_script", dry_args)
+	_check(dry.get("ok", false), "edit_script dry run answers ok")
+	_check(dry.get("written", true) == false, "and reports nothing written")
+	_check(FileAccess.get_md5(path) == settled, "and the file is byte-for-byte unchanged")
+	_check("Would apply" in str(dry.get("message", "")), "and does not claim it applied the edit")
+
+	# rename: the file must still be where it was.
+	var moved := "res://__gdtest_dryrun_moved.gd"
+	var rename_preview = await ex.execute_tool("rename_file", {"old_path": path, "new_path": moved, "dry_run": true})
+	_check(rename_preview.get("ok", false), "rename_file dry run answers ok")
+	_check(FileAccess.file_exists(path) and not FileAccess.file_exists(moved), "and nothing moved")
+
+	# delete: the file must survive.
+	var delete_preview = await ex.execute_tool("delete_file", {"path": path, "confirm": true, "dry_run": true})
+	_check(delete_preview.get("ok", false), "delete_file dry run answers ok")
+	_check(FileAccess.file_exists(path), "and the file is still there")
+
+	# create: nothing appears.
+	var fresh := "res://__gdtest_dryrun_new.gd"
+	var create_preview = await ex.execute_tool("create_script", {"path": fresh, "content": "extends Node
+"})
+	_check(create_preview.get("ok", false), "control: create_script really creates")
+	_check(FileAccess.file_exists(fresh), "and the file exists")
+	_rm(fresh)
+	var create_dry = await ex.execute_tool("create_script", {"path": fresh, "content": "extends Node
+", "dry_run": true})
+	_check(create_dry.get("ok", false), "create_script dry run answers ok")
+	_check(not FileAccess.file_exists(fresh), "and no file appears")
+
+	ex.queue_free()
+	_rm(path)
+	_rm(moved)
+	_rm(fresh)
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two

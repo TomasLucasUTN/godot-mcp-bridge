@@ -4,6 +4,11 @@ class_name FileTools
 ## File operation tools for MCP.
 ## Handles: list_dir, read_file, search_project, create_script
 
+## See ScriptTools: set by the ToolExecutor for one call when the caller passed
+## dry_run, honoured at the write below.
+var _dry_run := false
+var _dry_run_skipped_write := false
+
 const PathGuard = preload("res://addons/godot_mcp/utils/path_guard.gd")
 
 const DEFAULT_MAX_BYTES := 200_000
@@ -323,16 +328,21 @@ func create_script(args: Dictionary) -> Dictionary:
 		if err != OK:
 			return {&"ok": false, &"error": "Could not create directory: " + dir_path}
 
-	# Write file
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
-		return {&"ok": false, &"error": "Could not create file: " + path}
+	# Write file — a preview stops here, having already checked the path is
+	# inside the sandbox, that nothing is there to overwrite, and that the
+	# parent directory exists.
+	if _dry_run:
+		_dry_run_skipped_write = true
+	else:
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		if file == null:
+			return {&"ok": false, &"error": "Could not create file: " + path}
 
-	file.store_string(content)
-	file.close()
+		file.store_string(content)
+		file.close()
 
-	# Refresh filesystem so Godot sees the new file
-	_refresh_filesystem()
+		# Refresh filesystem so Godot sees the new file
+		_refresh_filesystem()
 
 	return {
 		&"ok": true,
