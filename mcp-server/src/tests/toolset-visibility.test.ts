@@ -48,6 +48,22 @@ describe('toolset visibility', () => {
     expect(after.filter((t) => t.name !== 'core').some((t) => t.enabled)).toBe(false);
   });
 
+  it('leaves the tool names out of list_toolsets unless asked', () => {
+    // ~2,000 tokens of names on a call whose usual question is "which toolset
+    // do I turn on". find_tools answers "what is this called" for less.
+    const lean = parse(handleToolsetTool('list_toolsets', {}));
+    const full = parse(handleToolsetTool('list_toolsets', { include_tools: true }));
+
+    const leanSets = lean.toolsets as Array<Record<string, unknown>>;
+    const fullSets = full.toolsets as Array<Record<string, unknown>>;
+    expect(leanSets.every((t) => t.tools === undefined)).toBe(true);
+    expect(fullSets.every((t) => Array.isArray(t.tools))).toBe(true);
+    expect(leanSets.every((t) => typeof t.tool_count === 'number')).toBe(true);
+    expect(String(lean.hint)).toMatch(/include_tools/);
+
+    expect(JSON.stringify(lean).length).toBeLessThan(JSON.stringify(full).length / 2);
+  });
+
   it('refuses an unknown name and says "all" is available', () => {
     const bad = handleToolsetTool('enable_toolset', { name: 'nope' });
     expect(bad?.isError).toBe(true);

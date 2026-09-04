@@ -383,6 +383,11 @@ export function handleToolsetTool(
   toolArgs: Record<string, unknown>,
 ): ToolCallResult | null {
   if (name === 'list_toolsets') {
+    // Every tool name, in every toolset, measured at ~2,000 tokens — paid on a
+    // call whose usual question is "which toolset do I turn on". The names are
+    // still one argument away, and find_tools answers "what is this called"
+    // for a quarter of the cost.
+    const withNames = toolArgs.include_tools === true;
     return {
       content: [{
         type: 'text',
@@ -392,11 +397,11 @@ export function handleToolsetTool(
             tool_count: tools.length,
             enabled: activeToolsets.has(toolsetName),
             description: TOOLSET_DESCRIPTIONS[toolsetName] ?? '',
-            // Names only (not full schemas) so a client can find the tool it
-            // needs and enable exactly one toolset, without paying for every
-            // definition up front.
-            tools: tools.map(t => t.name),
+            ...(withNames ? { tools: tools.map(t => t.name) } : {}),
           })),
+          ...(withNames ? {} : {
+            hint: 'Tool names omitted. Pass include_tools: true for them, or find_tools to search by what you want to do.',
+          }),
         }),
       }],
     };
@@ -942,8 +947,17 @@ function createMcpServer(handleTool: ToolHandler): Server {
 
     const listToolsetsTool = {
       name: 'list_toolsets',
-      description: `List every toolset with what it is for and the names of the tools it holds, plus whether it is currently enabled. Only "core" is on by default; if the tool you need is not in list_tools, find it here and enable that one toolset. Optional toolsets: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.`,
-      inputSchema: { type: 'object' as const, properties: {}, required: [] as string[] },
+      description: `List every toolset with what it is for, how many tools it holds, and whether it is enabled. Only "core" is on by default; if the tool you need is not in list_tools, find its toolset here and enable that one. Optional toolsets: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.`,
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          include_tools: {
+            type: 'boolean',
+            description: 'Also list every tool name in each toolset. Off by default: that is ~2,000 tokens, and find_tools answers "what is this called" for a quarter of it.',
+          },
+        },
+        required: [] as string[],
+      },
       annotations: { readOnlyHint: true, openWorldHint: false }
     };
 
