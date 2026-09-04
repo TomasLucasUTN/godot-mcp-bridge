@@ -221,6 +221,20 @@ export async function handleDebugTool(
 
     case 'debug_attach': {
       await c.start('attach', { project: projectPath ?? undefined, noDebug: false });
+      // The adapter can refuse the attach after start() has already returned —
+      // "not_running" when there is no game to attach to. Reporting
+      // attached:true there claims a session that does not exist.
+      const refused = c.takeStartError();
+      if (refused) {
+        return {
+          ok: false,
+          error: `The debug adapter refused the attach: ${refused}`,
+          hint: refused.includes('not_running')
+            ? 'Nothing is running to attach to. Start the game with run_scene, or use debug_launch, which starts it under the debugger itself.'
+            : undefined,
+          ...stateSummary(c),
+        };
+      }
       return { attached: true, ...stateSummary(c) };
     }
 

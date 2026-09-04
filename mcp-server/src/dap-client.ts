@@ -230,6 +230,8 @@ export class DapClient extends EventEmitter {
    * launch request is still outstanding — so launch is fired without awaiting,
    * and its failure is surfaced via the 'error' event instead.
    */
+  private startError: string | null = null;
+
   async start(mode: 'launch' | 'attach', args: Record<string, unknown>): Promise<void> {
     this.lastStart = { mode, args };
     const initialized = this.waitForEvent('initialized', Math.min(this.timeoutMs, 5000));
@@ -245,7 +247,25 @@ export class DapClient extends EventEmitter {
     });
     this.state = 'initialized';
 
+    // The handler goes on NOW, not after the awaits below. Godot's adapter
+    // rejects `attach` almost immediately when no game is running, and with no
+    // catch attached yet that became an unhandled rejection — which takes the
+    // whole MCP server down: the bridge, every session's connection and the
+    // visualizer, from one debug_attach with nothing to attach to.
+    //
+    // emit('error') is only safe with a listener; without one an EventEmitter
+    // throws, which is the same crash by another route. Keep the reason instead
+    // so the caller can be told why.
+    this.startError = null;
     const startRequest = this.request(mode, args);
+    startRequest.catch((err: unknown) => {
+      this.startError = err instanceof Error ? err.message : String(err);
+      // start() marches on to state 'running' regardless; leaving it there
+      // after a refused attach reports a session that was never established.
+      this.state = 'terminated';
+      if (this.listenerCount('error') > 0) this.emit('error', err);
+    });
+
     await initialized;
     for (const path of this.breakpoints.keys()) {
       // Do NOT swallow this. A rejected setBreakpoints is the difference
@@ -257,8 +277,18 @@ export class DapClient extends EventEmitter {
     }
     await this.request('configurationDone', {}).catch(() => undefined);
     this.configured = true;
-    this.state = 'running';
-    startRequest.catch((err) => this.emit('error', err));
+    // Only if the adapter did not refuse us on the way here. It rejects
+    // `attach` with not_running before these awaits finish, and claiming
+    // 'running' afterwards had debug_status reporting a live session with
+    // nothing attached to it.
+    if (this.startError === null) this.state = 'running';
+  }
+
+  /** Why the last launch/attach was refused by the adapter, if it was. */
+  takeStartError(): string | null {
+    const e = this.startError;
+    this.startError = null;
+    return e;
   }
 
   threadId(): number {
