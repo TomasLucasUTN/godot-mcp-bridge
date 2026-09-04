@@ -18,10 +18,12 @@ reports how long it held the editor's main thread.
 
 Also: `get_errors` returning 0 with a full panel (#4, it was picking the wrong
 Tree and caching it), validation no longer leaves `__mcp_snippet_*.gd` in your
-addons folder, and five new capabilities — `analyze_2d_layout`, `texture_info`,
-`find_tools`, `monitor_properties({setup_code})`, and collision-shape rendering
-on `run_scene` / `render_scene_preview`. The scene tree now also ships as an MCP
-App, and `diagnose_connection` catches an addon older than the server.
+addons folder, and a run of new capability — `analyze_2d_layout`, `texture_info`,
+`find_tools`, `monitor_properties({setup_code})`, `read_scene({node_path})`,
+`batch_runtime`, collision-shape rendering, and `dry_run` on 67 tools instead of
+seven. `run_scene({attach_debugger:false})` closes the oldest bug in the backlog:
+a `game_eval` runtime error no longer halts the game. Two MCP Apps ship with it,
+and `diagnose_connection` catches an addon older than the server.
 
 ## [1.1.6] - 2026-07-28
 
