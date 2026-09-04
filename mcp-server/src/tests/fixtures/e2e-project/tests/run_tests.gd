@@ -116,6 +116,7 @@ func _initialize() -> void:
 	_test_input_map_is_the_projects_own()
 	_test_wire_text_survives_subprocess_output()
 	_test_vectors_take_the_array_form_everywhere()
+	_test_shader_param_lands_or_says_why_not()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1284,6 +1285,42 @@ func _test_vectors_take_the_array_form_everywhere() -> void:
 		var pose = bones[0].get("pose_position", {})
 		_check(absf(float(pose.get("y", 0.0)) - 1.0) < 0.001, "and the pose landed where the array said")
 	_rm(scene)
+
+# set_shader_param parsed its value without a type, so "#ff0000" stayed a
+# String, set_shader_parameter dropped it without a word, and reading back gave
+# the uniform's default — with the call answering ok throughout.
+func _test_shader_param_lands_or_says_why_not() -> void:
+	print("\n[shader param lands, or says why not]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var sh = preload("res://addons/godot_mcp/tools/shader_tools.gd").new()
+	var scene := "res://__gdtest_shader.tscn"
+	var shader := "res://__gdtest_tint.gdshader"
+	_rm(scene)
+	_rm(shader)
+	_write_text(shader, "shader_type canvas_item;\nuniform vec4 tint : source_color = vec4(1.0);\nvoid fragment() { COLOR *= tint; }\n")
+
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Spr", "node_type": "Sprite2D", "parent_path": "."})
+	_check(sh.assign_shader_material({"scene_path": scene, "node_path": "Spr", "shader_path": shader}).get("ok", false), "shader material assigned")
+
+	var set_hex = sh.set_shader_param({"scene_path": scene, "node_path": "Spr", "param_name": "tint", "value": "#ff0000"})
+	_check(set_hex.get("ok", false), "a hex colour is accepted for a vec4 uniform")
+	_check(not set_hex.has("warning"), "and reports no mismatch")
+
+	var params = sh.get_shader_params({"scene_path": scene, "node_path": "Spr"}).get("params", [])
+	var tint_value = null
+	for p in params:
+		if str(p.get("name", "")) == "tint":
+			tint_value = p.get("value", {})
+	_check(tint_value != null, "the uniform is reported back")
+	if tint_value != null:
+		_check(float(tint_value.get("r", 0.0)) > 0.99 and float(tint_value.get("g", 1.0)) < 0.01,
+			"and it holds the red that was asked for, not the shader default")
+
+	var bogus = sh.set_shader_param({"scene_path": scene, "node_path": "Spr", "param_name": "not_declared", "value": 1})
+	_check("declares no uniform" in str(bogus.get("warning", "")), "a uniform the shader does not declare is called out")
+	_rm(scene)
+	_rm(shader)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

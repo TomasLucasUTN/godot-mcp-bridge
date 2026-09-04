@@ -231,7 +231,12 @@ func set_shader_param(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' has no ShaderMaterial with a shader assigned" % node_path}
 
-	var parsed = VariantCodec.parse_value(value)
+	# Parsed against the type the SHADER declares, not guessed from the value's
+	# shape. Untyped, "#ff0000" stayed a String, set_shader_parameter dropped it
+	# without a word, and the read-back showed the uniform's default — the call
+	# answering ok the whole time.
+	var declared_type := _uniform_type(material.get_shader(), param_name)
+	var parsed = VariantCodec.parse_typed_value(value, declared_type)
 	var prev_value = material.get_shader_parameter(StringName(param_name))
 	var ctx := _begin_edit(is_live, "MCP: set shader param '%s'" % param_name, root)
 	material.set_shader_parameter(StringName(param_name), parsed)
@@ -243,8 +248,27 @@ func set_shader_param(args: Dictionary) -> Dictionary:
 	if not err.is_empty():
 		return err
 
-	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path, &"param_name": param_name,
+	# Read it back. A uniform the shader does not declare accepts the write and
+	# holds nothing; one given the wrong type keeps its default. Both look like
+	# success from here otherwise.
+	var landed = material.get_shader_parameter(StringName(param_name))
+	var out := {&"ok": true, &"scene_path": scene_path, &"node_path": node_path, &"param_name": param_name,
+		&"value": VariantCodec.serialize_value(landed),
 		&"message": "Set shader param '%s' on '%s'" % [param_name, node_path]}
+	if declared_type == -1:
+		out[&"warning"] = "The shader declares no uniform named '%s', so nothing reads this value. Call get_shader_params for the ones it does declare." % param_name
+	elif not _values_match(landed, parsed):
+		out[&"warning"] = "Asked for %s, the material holds %s." % [str(parsed), str(landed)]
+	return out
+
+## The Variant type a shader declares for one uniform, or -1 when it has none.
+func _uniform_type(shader: Shader, param_name: String) -> int:
+	if shader == null:
+		return -1
+	for uniform in shader.get_shader_uniform_list(true):
+		if str(uniform.get(&"name", "")) == param_name:
+			return int(uniform.get(&"type", -1))
+	return -1
 
 # =============================================================================
 # get_shader_params
