@@ -2323,7 +2323,7 @@ func _run_export_thread(job_id: String, temp_dir: String, preset_name: String, a
 		job["status"] = "done" if (exit_code == 0 and written) else "failed"
 		job["exit_code"] = exit_code
 		job["artifact_written"] = written
-		job["log"] = _tail_text(log_text, 4000)
+		job["log"] = _tail_text(_condense_export_log(log_text), 4000)
 		_export_jobs[job_id] = job
 	_export_mutex.unlock()
 
@@ -2441,11 +2441,41 @@ func _rm_dir_recursive(path: String) -> void:
 ## thread finishes and the Node bridge logs the parse failure and drops the
 ## message, so the request just sits until its own client-side timeout fires.
 func _sanitize_log_text(s: String) -> String:
+	# Drop the WHOLE colour sequence, escape byte and all. Removing only the
+	# control character left the rest behind as literal text, so a log line came
+	# back reading "[90m[1msavepack[22m | ..." — noise no terminal will ever
+	# render, permanently baked into the payload and paid for in context.
+	var ansi := RegEx.new()
+	ansi.compile("\\x1b\\[[0-9;]*[A-Za-z]|\\[[0-9;]+m")
+	var stripped := ansi.sub(s, "", true)
 	var out := ""
-	for i in range(s.length()):
-		var c: int = s.unicode_at(i)
+	for i in range(stripped.length()):
+		var c: int = stripped.unicode_at(i)
 		if c == 9 or c == 10 or (c >= 32 and c != 127):
-			out += s[i]
+			out += stripped[i]
+	return out
+
+## The export log minus its per-file progress, which is most of it and says
+## nothing: a successful export spent 40 of its 45 lines naming each packed
+## file. Anything that looks like a problem is kept whatever it says.
+func _condense_export_log(s: String) -> String:
+	var kept: PackedStringArray = []
+	var dropped := 0
+	for line in s.split("
+"):
+		var text := String(line)
+		var lower := text.to_lower()
+		var noisy := "savepack" in lower or "storing file" in lower or "almacenando archivo" in lower
+		var interesting := "error" in lower or "warning" in lower or "fail" in lower
+		if noisy and not interesting:
+			dropped += 1
+			continue
+		kept.append(text)
+	var out := "
+".join(kept)
+	if dropped > 0:
+		out += "
+(%d per-file progress line(s) omitted)" % dropped
 	return out
 
 func _tail_text(s: String, n: int) -> String:

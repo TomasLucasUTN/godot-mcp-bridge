@@ -110,6 +110,7 @@ func _initialize() -> void:
 	_test_validate_meshes_names_what_it_dropped()
 	_test_search_skips_addons()
 	_test_input_map_round_trips()
+	_test_export_log_is_readable()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1102,6 +1103,27 @@ func _test_input_map_round_trips() -> void:
 
 	pt.configure_input_map({"operation": "remove", "action": "__gdtest_jump"})
 	pt.configure_input_map({"operation": "remove", "action": "__gdtest_broken"})
+
+# The sanitizer dropped the escape byte and left the rest of the colour sequence
+# behind as literal text, so a log line read "[90m[1msavepack[22m | ..." — noise
+# baked into the payload for good. And a successful export spent most of its
+# lines naming each packed file.
+func _test_export_log_is_readable() -> void:
+	print("\n[export log is readable]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+
+	var coloured := "\u001b[90m\u001b[1msavepack\u001b[22m | Storing File: res://a.gd\u001b[0m"
+	var clean: String = pt._sanitize_log_text(coloured)
+	_check(not ("[90m" in clean), "the colour sequence is gone, not just its escape byte")
+	_check(not ("[0m" in clean), "including the reset at the end")
+	_check("savepack | Storing File: res://a.gd" in clean, "and the text it wrapped survives")
+
+	var noisy := "Storing File: res://a.gd\nStoring File: res://b.gd\nERROR: something broke\nDone"
+	var condensed: String = pt._condense_export_log(noisy)
+	_check("ERROR: something broke" in condensed, "an error line is kept")
+	_check("Done" in condensed, "and so is the outcome")
+	_check(not ("res://a.gd" in condensed), "while per-file progress is dropped")
+	_check("2 per-file progress line(s) omitted" in condensed, "and the count is reported, not hidden")
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:
