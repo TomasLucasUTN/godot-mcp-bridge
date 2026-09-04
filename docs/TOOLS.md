@@ -218,7 +218,25 @@ The MCPRuntime autoload (registered automatically when the godot_mcp plugin is e
 6. `take_screenshot({})` — visual confirmation.
 7. `stop_scene()` before editing code, or `get_errors` again to confirm clean shutdown.
 
-### Driving a non-input-driven game (cutscene, idle simulation)
+### Cutting the round trips
+
+Each of those steps is a WebSocket round trip while the game keeps running. When
+several of them need no waiting in between, send them as one:
+
+```
+batch_runtime({ operations: [
+  { tool: 'send_input', args: { event: { type: 'action', action: 'jump', pressed: true } } },
+  { tool: 'query_runtime_node', args: { node_path: '/root/Main/Player', properties: ['position'] } },
+] })
+```
+
+Measured on a live game: six calls, 43ms one at a time against 6ms batched. It
+takes synchronous runtime tools only; anything that answers later (`wait`,
+`step_frames`, `await_condition`, `await_signal_runtime`, `monitor_properties`,
+`replay_input_sequence`) is refused by name, with a pointer to the tool that
+already covers that shape.
+
+## Driving a non-input-driven game (cutscene, idle simulation)
 
 Skip step 3 and use `wait` + `query_runtime_node` + `take_screenshot` to sample the simulation at intervals.
 

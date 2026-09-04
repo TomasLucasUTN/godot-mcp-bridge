@@ -57,7 +57,7 @@ export const shaderTools: ToolDefinition[] = [
         node_path: { type: 'string', description: 'Path to the node (. for root)' },
         shader_path: { type: 'string', description: 'Path to the Shader resource to assign' },
         surface_index: { type: 'number', description: 'For MeshInstance3D, the surface index to override (omit for material_override)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'shader_path']
     }
@@ -74,7 +74,7 @@ export const shaderTools: ToolDefinition[] = [
         param_name: { type: 'string', description: 'Name of the shader uniform' },
         value: { description: 'Value to set. Primitives pass through directly; typed values (Vector2/Vector3/Color/etc.) use {type, ...} dicts.' },
         surface_index: { type: 'number', description: 'For MeshInstance3D, the surface index whose override material to target' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'param_name', 'value']
     }

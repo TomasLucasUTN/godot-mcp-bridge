@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
-[![230 tools](https://img.shields.io/badge/tools-230-brightgreen)](#-what-can-it-do)
+[![231 tools](https://img.shields.io/badge/tools-231-brightgreen)](#-what-can-it-do)
 [![Last commit](https://img.shields.io/github/last-commit/TomasLucasUTN/godot-mcp-bridge)](https://github.com/TomasLucasUTN/godot-mcp-bridge/commits/main)
 [![Stars](https://img.shields.io/github/stars/TomasLucasUTN/godot-mcp-bridge?style=social)](https://github.com/TomasLucasUTN/godot-mcp-bridge/stargazers)
 
@@ -18,7 +18,7 @@ Every Godot MCP server lets an AI drive the editor. **This one also tells the AI
 *you* just did** — the scene you opened, the node you selected, the file you saved —
 so you can both work in the same project at the same time without stepping on each
 other. Add a real step-debugger, scope-aware refactoring through Godot's language
-server, live-tree edits that never clobber your unsaved work, and 230 tools that were
+server, live-tree edits that never clobber your unsaved work, and 231 tools that were
 each verified against a running editor rather than just written.
 
 Started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (MIT
@@ -210,15 +210,17 @@ re-run it:
 
 | | tools | ~tokens |
 |---|---:|---:|
-| **`core`** — what loads by default | 38 | **8,665** |
-| Everything, every toolset on | 230 | 47,211 |
+| **`core`** — what loads by default | 38 | **9,467** |
+| Everything, every toolset on | 231 | 50,180 |
 
-So the default surface is **18.4% of the full one**, and turning everything on
-costs roughly **38,500 extra tokens on every request**. That is the reason the
+So the default surface is **18.9% of the full one**, and turning everything on
+costs roughly **40,700 extra tokens on every request**. That is the reason the
 default is small and the rest is opt-in per toolset (or preset once via
 `GODOT_MCP_TOOLSETS`), rather than a judgement that the other 192 tools do not
-matter. `find_tools` searches all 230 by what you want to do, so a tool being
-unloaded never means it is unfindable.
+matter. `find_tools` searches all 231 by what you want to do, so a tool being
+unloaded never means it is unfindable. The default grew by ~800 tokens when
+previews (`dry_run`), subtree reads and the detached launch mode were added to
+core tools — measured rather than assumed, which is the point of publishing it.
 
 The estimate is chars ÷ 4, which is close enough to compare sets and honest about
 being an estimate. The most expensive definitions inside `core` are
@@ -234,7 +236,7 @@ mostly tracks how early a project shipped, so it's listed last rather than first
 
 | | **godot-mcp-bridge** (this repo) | [yurineko73/Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native) (most active) | [tomyud1/godot-mcp](https://github.com/tomyud1/godot-mcp) (fork origin) | [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp) (most-starred) |
 |---|---|---|---|---|
-| Tools | 230 (38 loaded by default) | 155 | 42 | ~14 |
+| Tools | 231 (38 loaded by default) | 155 | 42 | ~14 |
 | Live-tree editing + undo | ✅ | ✅ | ❌ (overwrites open scenes on disk) | ❌ |
 | Step-debugger | ✅ | ✅ | ❌ | ❌ |
 | Drives the running game (input, `game_eval`) | ✅ | ✅ | ❌ | ❌ |
@@ -393,7 +395,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 ## 🧰 What Can It Do?
 
-### 230 Tools, 38 Loaded by Default
+### 231 Tools, 38 Loaded by Default
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
@@ -508,14 +510,14 @@ Numbers rather than adjectives, all from 2026-09-03 against a 24,880-file projec
 
 | | |
 |---|---|
-| Default tool surface | 38 tools, **8,665 tokens** of schema (everything on: 230 / 47,211) |
+| Default tool surface | 38 tools, **9,467 tokens** of schema (everything on: 231 / 50,180) |
 | Slowest read-only tool | `get_project_statistics` at **2,012 ms** — it answers in the MCP server; the in-editor version took 120,685 ms |
 | Largest answer | `map_project` at **7,744 chars** — it used to return 151,159 |
 | Runtime helper connect | **1.6-1.7 s**, attached or detached |
 | `game_eval` runtime error, detached | **18 ms**, connection survives |
 | Mutating tools pointed at a target that cannot exist | 70 editor-side + 11 runtime, **none reports success** |
 | Path-traversal attempts against the sandbox | 16 refused, 11 odd-but-contained inputs checked by where they resolve, **zero escapes** |
-| Tests | 217 Node, 634 GDScript |
+| Tests | 224 Node unit, 44 live against a real editor, 685 GDScript — green on Godot 4.5 and 4.7 |
 
 Every one of those is re-runnable: `mcp-server/scripts/measure-tools.mjs` for the
 schema cost, `scripts/measure-runtime-cost.gd` for per-tool time and payload, and the

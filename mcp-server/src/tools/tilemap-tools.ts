@@ -28,7 +28,7 @@ export const tilemapTools: ToolDefinition[] = [
         source_id: { type: 'number', description: 'Tile source ID in the TileSet' },
         atlas_coords: coordsSchema,
         alternative_tile: { type: 'number', description: 'Alternative tile ID (default: 0)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'coords', 'source_id']
     }
@@ -47,7 +47,7 @@ export const tilemapTools: ToolDefinition[] = [
         source_id: { type: 'number', description: 'Tile source ID in the TileSet' },
         atlas_coords: coordsSchema,
         alternative_tile: { type: 'number', description: 'Alternative tile ID (default: 0)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'from_coords', 'to_coords', 'source_id']
     }
@@ -77,7 +77,7 @@ export const tilemapTools: ToolDefinition[] = [
         node_path: { type: 'string', description: 'Path to the TileMapLayer node' },
         from_coords: coordsSchema,
         to_coords: coordsSchema,
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }
@@ -130,7 +130,7 @@ export const tilemapTools: ToolDefinition[] = [
         terrain_set: { type: 'number', description: 'Terrain set index (must already exist on the TileSet)' },
         terrain: { type: 'number', description: 'Terrain index within the terrain set (must already exist)' },
         ignore_empty_terrains: { type: 'boolean', description: 'Whether empty cells count as a distinct terrain for matching purposes (default: true)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'cells', 'terrain_set', 'terrain']
     }
@@ -152,7 +152,7 @@ export const tilemapTools: ToolDefinition[] = [
         },
         neighbours: { type: 'string', enum: ['4', '8'], description: '"4" = edges only (default), "8" = edges + corners' },
         include_existing: { type: 'boolean', description: 'Count tiles already on the layer as filled neighbours so the region connects to them (default true)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'cells', 'mask_to_atlas']
     }

@@ -59,9 +59,51 @@ The MCPRuntime autoload (registered automatically when the godot_mcp plugin is e
 6. \`take_screenshot({})\` — visual confirmation.
 7. \`stop_scene()\` before editing code, or \`get_errors\` again to confirm clean shutdown.
 
+## Cutting the round trips
+
+Each of those steps is a WebSocket round trip while the game keeps running. When
+several of them need no waiting in between, send them as one:
+
+\`\`\`
+batch_runtime({ operations: [
+  { tool: 'send_input', args: { event: { type: 'action', action: 'jump', pressed: true } } },
+  { tool: 'query_runtime_node', args: { node_path: '/root/Main/Player', properties: ['position'] } },
+  { tool: 'send_input', args: { event: { type: 'action', action: 'jump', pressed: false } } },
+] })
+\`\`\`
+
+Measured on a live game: six calls, 43ms one at a time against 6ms batched.
+
+It takes SYNCHRONOUS runtime tools only. Anything that answers later — \`wait\`,
+\`step_frames\`, \`await_condition\`, \`await_signal_runtime\`, \`monitor_properties\`,
+\`replay_input_sequence\` — is refused by name, because one request cannot fan out
+into several deferred answers. For the shapes those cover, the right tool already
+exists and is one call by itself:
+
+- trigger something and watch it: \`monitor_properties({ setup_code, properties, frames })\`
+- a timed sequence of inputs: \`replay_input_sequence({ sequence, settle_frames })\`
+
 ## Driving a non-input-driven game (cutscene, idle simulation)
 
 Skip step 3 and use \`wait\` + \`query_runtime_node\` + \`take_screenshot\` to sample the simulation at intervals.
+
+## When a game_eval typo kills the connection
+
+Under the editor's Play the game runs with the remote debugger attached, and a
+GDScript runtime error — a method that does not exist, a freed node — HALTS the
+process. The call times out and it reads as a lost connection; recovering costs
+a stop_scene/run_scene cycle per typo.
+
+\`run_scene({ attach_debugger: false })\` runs the game as its own process with no
+debugger. Measured: the same bad snippet answers in 107ms with the connection
+intact. What you give up, stated plainly:
+
+- no \`debug_*\` stepping (there is nothing to attach to)
+- \`get_errors\` loses its Debugger>Errors source; \`get_runtime_log\` and
+  \`get_console_log\` still work
+- \`is_playing()\` reports false, because the editor genuinely is not playing
+
+\`stop_scene\` still ends it — by pid, since the editor never knew about it.
 
 ## Common pitfalls
 

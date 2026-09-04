@@ -55,7 +55,7 @@ export const fileTools: ToolDefinition[] = [
   {
     name: 'search_project',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: "Search the Godot project for a substring and return file hits with line numbers. Useful for finding usages of functions, variables, or any text pattern. Returns at most max_results matches (default 50) and each matched line is cut at 200 characters, because the answer goes into the model's context: a common query at the old default of 200 measured 31,145 characters. When it stops early it says `truncated: true` and reports `returned` rather than a total it did not finish counting.",
+    description: "Search the Godot project for a substring and return file hits with line numbers. At most max_results matches (default 50), each line cut at 200 chars, because the answer costs context. When it stops early it says `truncated: true` and reports `returned` rather than a total it never finished counting.",
     inputSchema: {
       type: 'object',
       properties: {

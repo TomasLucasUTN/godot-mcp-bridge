@@ -20,7 +20,7 @@ export const particleTools: ToolDefinition[] = [
         amount: { type: 'number', description: 'Number of particles (default: 8)' },
         lifetime: { type: 'number', description: 'Particle lifetime in seconds (default: 1.0)' },
         one_shot: { type: 'boolean', description: 'Emit once instead of looping (default: false)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'parent_path', 'dimension']
     }
@@ -39,7 +39,7 @@ export const particleTools: ToolDefinition[] = [
         initial_velocity_min: { type: 'number', description: 'Minimum initial velocity' },
         initial_velocity_max: { type: 'number', description: 'Maximum initial velocity' },
         gravity: { type: 'object', description: 'Gravity vector {x,y,z}' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path']
     }
@@ -58,7 +58,7 @@ export const particleTools: ToolDefinition[] = [
           description: 'Gradient stops',
           items: { type: 'object', description: '{offset: float 0..1, color: {r,g,b,a}}' }
         },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'stops']
     }
@@ -73,7 +73,7 @@ export const particleTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the GPUParticles2D/3D node' },
         preset: { type: 'string', enum: ['fire', 'smoke', 'rain', 'snow', 'sparks'], description: 'Particle preset.' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_path', 'preset']
     }

@@ -281,11 +281,11 @@ export const projectTools: ToolDefinition[] = [
         },
         startup_timeout_ms: {
           type: 'number',
-          description: 'Max time in ms to wait for the above signals, not an expected wait. Measured 2026-09-03: MCPRuntime connects in about 1.6-1.7s, attached or detached. The default stays generous for a cold-cache import on a large project; it costs nothing when the connection is fast. If wait_for_runtime still reports false, poll get_runtime_status shortly after — the connection is often about to land, not actually broken.'
+          description: 'A cap, not an expected wait: MCPRuntime connects in about 1.6-1.7s (measured). Default 20000, generous for a cold-cache import. If wait_for_runtime reports false, poll get_runtime_status — the connection is usually about to land.'
         },
         attach_debugger: {
           type: 'boolean',
-          description: "Default true, which is the editor's own Play. Set false to run the game as its own process with NO debugger attached, which changes one thing that matters: a GDScript runtime error inside a game_eval snippet comes back as a result instead of halting the process (a debugger-attached game stops dead on any runtime error, which reads as a lost connection and costs a stop/run cycle per typo). Measured detached: the same bad snippet answers in 107ms and the next call still works. The cost, stated plainly: no debug_* stepping, get_errors loses its Debugger>Errors source, and is_playing() reports false because the editor genuinely is not playing anything. stop_scene still ends it."
+          description: "Default true (the editor's Play). Set false to run the game as its own process with no debugger: a game_eval runtime error then answers as a result instead of halting the game, at the cost of debug_* stepping and get_errors' Debugger>Errors source. See guide 'troubleshooting'."
         },
         debug_collisions: {
           type: 'boolean',

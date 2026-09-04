@@ -20,7 +20,7 @@ export const audioTools: ToolDefinition[] = [
         stream_path: { type: 'string', description: 'Optional res:// path to an audio stream (e.g. .ogg/.wav import) to assign' },
         bus: { type: 'string', description: 'Optional audio bus name to route this player through' },
         autoplay: { type: 'boolean', description: 'Whether the player starts automatically (default: false)' },
-        dry_run: { type: 'boolean', description: 'Preview the change without writing it: the tool does its work on a copy loaded from disk, reports what it would produce, and never touches the file or the open scene. Default false.' }
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'parent_path']
     }
