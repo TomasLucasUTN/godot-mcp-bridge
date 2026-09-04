@@ -315,7 +315,7 @@ export const projectTools: ToolDefinition[] = [
   {
     name: 'get_runtime_status',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Combined editor + runtime status snapshot. Returns playing, playing_scene, last_launched ("current"|"main"|res-path), uptime_ms since the most recent run_scene, and runtime_helper_connected (true once the in-game MCPRuntime autoload is talking to the MCP server).',
+    description: 'Combined editor + runtime status snapshot. Returns playing, playing_scene, last_launched ("current"|"main"|res-path), uptime_ms since the most recent run_scene (counted for a detached game too, which reports playing:false), detached_pid when one is running, and runtime_helper_connected (true once the in-game MCPRuntime autoload is talking to the MCP server).',
     inputSchema: { type: 'object', properties: {} }
   },
   {
@@ -524,7 +524,8 @@ export const projectTools: ToolDefinition[] = [
           description: 'Ordered list of {tool, args}, max 50. e.g. [{"tool":"send_input","args":{...}}, {"tool":"query_runtime_node","args":{"node_path":"/root/Main/Player"}}]',
           items: { type: 'object', description: '{ tool: string, args: object }' }
         },
-        stop_on_error: { type: 'boolean', description: 'Stop at the first operation that fails. Default false (run them all).' }
+        stop_on_error: { type: 'boolean', description: 'Stop at the first operation that fails. Default false (run them all).' },
+        settle_frames: { type: 'number', description: 'Let this many physics frames pass after the operations before answering. This is what makes "press, let the game move, look" one call: `wait` and `step_frames` answer later and so cannot be operations inside a batch. Default 0 (answer immediately).' }
       },
       required: ['operations']
     }

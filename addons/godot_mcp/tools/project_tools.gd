@@ -44,6 +44,15 @@ var _last_run_scene_target: String = ""
 ## as the editor is concerned.
 var _detached_pid: int = -1
 
+## Where the detached game's pid outlives this editor session.
+##
+## restart_editor (and any crash) resets _detached_pid to -1 while the game it
+## named keeps running: run_scene then starts a second one, stop_scene can no
+## longer reach the first, and every runtime tool talks to whichever helper
+## connected — usually the orphan. Writing the pid down makes the next session
+## able to adopt it.
+const _DETACHED_PID_FILE := "user://mcp_detached_pid.txt"
+
 # Cached reference to the editor Output panel's RichTextLabel.
 var _editor_log_rtl: RichTextLabel = null
 
@@ -1316,9 +1325,10 @@ func run_scene(args: Dictionary) -> Dictionary:
 	# land rather than broken.
 	var startup_timeout_ms: int = int(args.get(&"startup_timeout_ms", 20000))
 
+	_recover_detached_pid()
 	if ei.is_playing_scene():
 		return {&"ok": false, &"error": "A scene is already running. Call stop_scene first."}
-	if _detached_pid != -1 and OS.is_process_running(_detached_pid):
+	if _detached_pid != -1 and _process_alive(_detached_pid):
 		return {&"ok": false, &"error": "A detached game (pid %d) is already running. Call stop_scene first." % _detached_pid}
 
 	if not attach_debugger:
@@ -1417,11 +1427,12 @@ func stop_scene(_args: Dictionary) -> Dictionary:
 	#
 	# A detached game is not "playing" as far as the editor is concerned, so it
 	# has to be ended by pid or it outlives the session in the background.
+	_recover_detached_pid()
 	if _detached_pid != -1:
 		var pid := _detached_pid
-		_detached_pid = -1
-		if OS.is_process_running(pid):
-			OS.kill(pid)
+		_forget_detached_pid()
+		if _process_alive(pid):
+			_kill_pid(pid)
 			return {&"ok": true, &"detached": true, &"pid": pid, &"message": "Detached game (pid %d) stopped." % pid}
 		return {&"ok": true, &"detached": true, &"pid": pid, &"message": "Detached game (pid %d) had already exited." % pid}
 
@@ -1468,7 +1479,7 @@ func _run_scene_detached(scene: String, wait_for_runtime: bool, startup_timeout_
 	if pid <= 0:
 		return {&"ok": false, &"error": "Could not start a detached Godot process (create_process returned %d)." % pid}
 
-	_detached_pid = pid
+	_remember_detached_pid(pid)
 	_last_run_scene_target = target
 	_last_run_scene_started_at_ms = Time.get_ticks_msec()
 
@@ -1505,19 +1516,78 @@ func is_playing(_args: Dictionary) -> Dictionary:
 	var scene_path := ei.get_playing_scene() if playing else ""
 	return {&"ok": true, &"playing": playing, &"scene": scene_path}
 
+## Is this pid still alive, including one this process did not spawn?
+##
+## OS.is_process_running only knows the handles create_process opened in THIS
+## process, so a game adopted from a previous editor session always reads as
+## dead — which is precisely the case the pid file exists to cover. Fall back to
+## asking the OS directly.
+func _process_alive(pid: int) -> bool:
+	if pid <= 0:
+		return false
+	if OS.is_process_running(pid):
+		return true
+	var out: Array = []
+	if OS.get_name() == "Windows":
+		OS.execute("tasklist", ["/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], out, true)
+		return out.size() > 0 and ("\"%d\"" % pid) in str(out[0])
+	return OS.execute("kill", ["-0", str(pid)], out, true) == 0
+
+## Kill by pid, including one this process did not spawn (see _process_alive).
+func _kill_pid(pid: int) -> void:
+	if OS.kill(pid) == OK:
+		return
+	var out: Array = []
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/PID", str(pid), "/F"], out, true)
+	else:
+		OS.execute("kill", ["-9", str(pid)], out, true)
+
+func _remember_detached_pid(pid: int) -> void:
+	_detached_pid = pid
+	var f := FileAccess.open(_DETACHED_PID_FILE, FileAccess.WRITE)
+	if f:
+		f.store_string(str(pid))
+		f.close()
+
+func _forget_detached_pid() -> void:
+	_detached_pid = -1
+	if FileAccess.file_exists(_DETACHED_PID_FILE):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(_DETACHED_PID_FILE))
+
+## Adopt a detached game left running by a previous editor session.
+func _recover_detached_pid() -> void:
+	if _detached_pid != -1 or not FileAccess.file_exists(_DETACHED_PID_FILE):
+		return
+	var f := FileAccess.open(_DETACHED_PID_FILE, FileAccess.READ)
+	if not f:
+		return
+	var pid := int(f.get_as_text().strip_edges())
+	f.close()
+	if _process_alive(pid):
+		_detached_pid = pid
+	else:
+		_forget_detached_pid()
+
 ## Combined editor-side and runtime-side status snapshot.
 func get_runtime_status(_args: Dictionary) -> Dictionary:
 	if not _editor_plugin:
 		return {&"ok": false, &"error": "Editor plugin not available"}
 	var ei := _editor_plugin.get_editor_interface()
 	var playing := ei.is_playing_scene()
+	# A detached game is not "playing" as far as the editor is concerned, but it
+	# is running and the helper is talking to us — reporting uptime 0 for it made
+	# the field useless exactly where it is most wanted.
+	_recover_detached_pid()
+	var detached_running := _detached_pid != -1 and _process_alive(_detached_pid)
 	var uptime_ms := 0
-	if playing and _last_run_scene_started_at_ms > 0:
+	if (playing or detached_running) and _last_run_scene_started_at_ms > 0:
 		uptime_ms = Time.get_ticks_msec() - _last_run_scene_started_at_ms
 
 	return {
 		&"ok": true,
 		&"playing": playing,
+		&"detached_pid": _detached_pid if detached_running else null,
 		&"playing_scene": ei.get_playing_scene() if playing else "",
 		&"last_launched": _last_run_scene_target,
 		&"uptime_ms": uptime_ms,
