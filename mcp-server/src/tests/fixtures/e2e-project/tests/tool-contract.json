@@ -80,16 +80,6 @@
   "destructive": true
  },
  {
-  "name": "modify_node_property",
-  "required": [
-   "scene_path",
-   "property_name",
-   "value"
-  ],
-  "read_only": false,
-  "destructive": true
- },
- {
   "name": "set_node_properties",
   "required": [
    "scene_path",
@@ -1131,6 +1121,16 @@
  {
   "name": "debug_disconnect",
   "required": [],
+  "read_only": false,
+  "destructive": true
+ },
+ {
+  "name": "modify_node_property",
+  "required": [
+   "scene_path",
+   "property_name",
+   "value"
+  ],
   "read_only": false,
   "destructive": true
  },

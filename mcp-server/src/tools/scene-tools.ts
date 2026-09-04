@@ -582,7 +582,7 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'set_node_properties',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    description: 'Set SEVERAL properties on ONE node in a single call and a single save. Use this instead of repeating modify_node_property. NOT for the same property across many nodes — that is batch_set_property. Non-atomic: each property is applied independently; the response separates "applied" from "failed" so partial success surfaces clearly. Saves the scene once at the end. Resource-typed properties must use set_resource_property / set_sprite_texture / etc.',
+    description: "Set properties on ONE node \u2014 one or many, in a single call and a single save. For the same property across many nodes use batch_set_property. Non-atomic: each property is applied independently and the response separates \"applied\" from \"failed\", so partial success is visible. Never edit a .tscn as text. To set a script use attach_script, NOT a \"script\" property here: that only rewrites the file, leaving the editor's in-memory node scriptless, which makes connect_signal fail. Resource-typed properties need set_resource_property / set_sprite_texture / etc.",
     inputSchema: {
       type: 'object',
       properties: {

@@ -143,7 +143,7 @@ More of what it does:
   AI exactly why the editor isn't connecting.
 - **Fast + robust** — `batch_execute` / `batch_scene_edit` cut N calls to one; heavy reads
   (`read_scene`, `scene_tree_dump`, `classdb_query`) take `max_depth`/`filter` to stay
-  token-cheap; only 38 tools load by default so the agent stays focused. **Measured, not
+  token-cheap; only 37 tools load by default so the agent stays focused. **Measured, not
   claimed** — see below.
 - **Symbol-accurate refactoring** — `gd_rename` and `gd_references` go through Godot's
   language server, so they understand scope: renaming a local `speed` won't touch an
@@ -210,16 +210,16 @@ re-run it:
 
 | | tools | ~tokens |
 |---|---:|---:|
-| **What a client sees by default** | 45 | **9,859** |
+| **What a client sees by default** | 44 | **9,533** |
 | of which: the 7 the server answers itself | 7 | 1,096 |
-| Everything, every toolset on | 238 | 50,907 |
+| Everything, every toolset on | 238 | 50,934 |
 
-The 45 is 38 Godot tools plus seven the server answers on its own (status,
+The 44 is 37 Godot tools plus seven the server answers on its own (status,
 guides, `find_tools`, the toolset controls). They are not Godot tools, but they
 ride in every request, so counting only the 38 published a number 1,100 tokens
 below what a request actually costs — the script counts them now.
 
-So the default surface is **19.4% of the full one**, and turning everything on
+So the default surface is **18.7% of the full one**, and turning everything on
 costs roughly **41,000 extra tokens on every request**. That is the reason the
 default is small and the rest is opt-in per toolset (or preset once via
 `GODOT_MCP_TOOLSETS`), rather than a judgement that the other 192 tools do not
@@ -405,7 +405,7 @@ Hit **Restart Project** in the Godot editor. Check the **top-right corner** — 
 
 A big always-on tool list makes an AI agent wander between unrelated
 capabilities and burns context on definitions it never uses. So only **`core`
-(38 tools)** is visible by default — the smallest set that carries a normal
+(37 tools)** is visible by default — the smallest set that carries a normal
 session end to end: look around, edit scenes and scripts, run the game, read the
 errors.
 
@@ -494,7 +494,7 @@ everything goes through Godot's undo history and Ctrl+Z works, including over a 
 `batch_scene_edit`. When it is closed there is no history to write to — use version
 control. Many destructive tools take `dry_run: true` to preview first.
 
-**Enabling a toolset mid-session may not reach your client.** Only `core` (38 tools) is
+**Enabling a toolset mid-session may not reach your client.** Only `core` (37 tools) is
 on by default. `enable_toolset` flips it server-side and the server does send
 `notifications/tools/list_changed`, but several clients cache the tool list for the
 whole session and never re-fetch — and then the newly enabled tools stay invisible until
@@ -516,7 +516,7 @@ Numbers rather than adjectives, all from 2026-09-03 against a 24,880-file projec
 
 | | |
 |---|---|
-| Default tool surface | 45 tools, **9,859 tokens** of schema (everything on: 238 / 50,907) |
+| Default tool surface | 44 tools, **9,533 tokens** of schema (everything on: 238 / 50,934) |
 | Slowest read-only tool | `get_project_statistics` at **2,012 ms** — it answers in the MCP server; the in-editor version took 120,685 ms |
 | Largest answer | `map_project` at **7,744 chars** — it used to return 151,159 |
 | Runtime helper connect | **1.6-1.7 s**, attached or detached |

@@ -45,7 +45,7 @@ truth — the registry test uses them to exempt those tools, so a new one that s
 them fails the build.
 
 **Toolsets are by intent, not by file.** `mcp-server/src/tools/index.ts` builds them:
-`CORE_TOOL_NAMES` (38 tools, the only set on by default) and `SEMANTIC_GROUPS`
+`CORE_TOOL_NAMES` (37 tools, the only set on by default) and `SEMANTIC_GROUPS`
 (runtime, scaffolding, analysis, editor, project_config, export, refactor) pick tools
 **by name**; anything unclaimed falls back to its source file's group. The builder
 throws if a tool ends up in no toolset, so an unreachable tool breaks the build instead

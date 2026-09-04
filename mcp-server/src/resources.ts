@@ -116,7 +116,7 @@ intact. What you give up, stated plainly:
     uri: 'godot-mcp://guide/scene-editing',
     slug: 'scene-editing',
     name: 'Scene editing patterns',
-    description: 'When to use add_node vs modify_node_property vs set_node_properties vs set_resource_property vs the specialized resource tools.',
+    description: 'When to use add_node vs set_node_properties vs set_resource_property vs the specialized resource tools.',
     mimeType: 'text/markdown',
     text: `# Scene editing in MCP
 
@@ -127,8 +127,7 @@ intact. What you give up, stated plainly:
 | Create scene with several nodes in one shot     | \`create_scene\` with \`nodes\` tree                         |
 | Add ONE node                                    | \`add_node\` (now supports \`script\`, \`groups\`, \`children\`) |
 | Add a SUBTREE                                   | \`add_node\` with \`children\`                                |
-| Change ONE simple value (position, modulate)    | \`modify_node_property\`                                     |
-| Change MANY values on one node                  | \`set_node_properties\`                                      |
+| Change values on one node (one or many)         | \`set_node_properties\`                                      |
 | Change a Resource value (e.g. radius of a Shape, albedo of a Material) | \`set_resource_property\`         |
 | Replace the entire Resource (different mesh, different texture) | \`set_mesh\` / \`set_sprite_texture\` / \`set_material\` / \`set_collision_shape\` |
 | Persist a node-attached resource as a .tres     | \`save_resource_to_file\`                                    |
@@ -140,7 +139,7 @@ intact. What you give up, stated plainly:
 
 ## Variant value formats
 
-For any tool that takes a typed value (\`modify_node_property.value\`, \`set_node_properties.properties\`, \`set_resource_property.value\`), pass either a primitive or a discriminated object:
+For any tool that takes a typed value (\`set_node_properties.properties\`, \`set_resource_property.value\`, \`modify_node_property.value\`), pass either a primitive or a discriminated object:
 
 - \`{type:"Vector2", x:1, y:2}\`, \`{type:"Vector3", x, y, z}\`
 - \`{type:"Color", r, g, b, a}\`
@@ -324,7 +323,7 @@ the same rule the addon's tools follow.
 ## Scenes
 - Create / read / hierarchy: \`create_scene\`, \`read_scene\`, \`scene_tree_dump\`
 - Add / remove / move / rename / duplicate nodes: \`add_node\`, \`remove_node\`, \`move_node\`, \`rename_node\`, \`duplicate_node\` — \`move_node\` also sets position among siblings
-- Properties on a node: \`modify_node_property\` (one), \`set_node_properties\` (many), \`read_scene\` (read them back)
+- Properties on a node: \`set_node_properties\` (one or many), \`batch_set_property\` (one property across many nodes), \`read_scene\` (read them back)
 - Class-level property metadata: \`get_node_properties\` (with \`node_type\`)
 - Groups: \`set_node_groups\`, \`get_node_groups\`, \`find_nodes_in_group\`
 - Scripts on nodes: \`attach_script\`, \`detach_script\`

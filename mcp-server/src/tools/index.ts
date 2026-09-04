@@ -48,7 +48,7 @@ const CORE_TOOL_NAMES: string[] = [
   'list_dir', 'read_file', 'search_project', 'scene_tree_dump', 'read_scene',
   'classdb_query', 'get_project_settings',
   // Scenes and nodes
-  'create_scene', 'add_node', 'remove_node', 'modify_node_property',
+  'create_scene', 'add_node', 'remove_node',
   'set_node_properties', 'set_node_reference', 'rename_node', 'move_node', 'duplicate_node',
   'instance_scene', 'attach_script', 'connect_signal', 'batch_scene_edit',
   // Scripts
