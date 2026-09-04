@@ -676,7 +676,7 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 
 		var ctx := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
 		if position != null:
-			var p = _parse_value(position)
+			var p = _parse_typed_value(position, TYPE_VECTOR3) if position is Array else _parse_value(position)
 			if not (p is Vector3):
 				_abort_edit(ctx, root, is_live)
 				return {&"ok": false, &"error": "'position' must be a {x,y,z} Vector3 for a 3D skeleton"}
@@ -691,7 +691,7 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 				_abort_edit(ctx, root, is_live)
 				return {&"ok": false, &"error": "'rotation' must be a Vector3 (euler radians) or a Quaternion"}
 		if scale != null:
-			var s = _parse_value(scale)
+			var s = _parse_typed_value(scale, TYPE_VECTOR3) if scale is Array else _parse_value(scale)
 			if not (s is Vector3):
 				_abort_edit(ctx, root, is_live)
 				return {&"ok": false, &"error": "'scale' must be a {x,y,z} Vector3"}
@@ -717,7 +717,7 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 
 		var ctx2 := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
 		if position != null:
-			var p2 = _parse_value(position)
+			var p2 = _parse_typed_value(position, TYPE_VECTOR2) if position is Array else _parse_value(position)
 			if not (p2 is Vector2):
 				_abort_edit(ctx2, root, is_live)
 				return {&"ok": false, &"error": "'position' must be a {x,y} Vector2 for a 2D skeleton"}
@@ -725,7 +725,7 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 		if rotation != null:
 			_edit_set(ctx2, bone, &"rotation", float(rotation))
 		if scale != null:
-			var s2 = _parse_value(scale)
+			var s2 = _parse_typed_value(scale, TYPE_VECTOR2) if scale is Array else _parse_value(scale)
 			if not (s2 is Vector2):
 				_abort_edit(ctx2, root, is_live)
 				return {&"ok": false, &"error": "'scale' must be a {x,y} Vector2"}

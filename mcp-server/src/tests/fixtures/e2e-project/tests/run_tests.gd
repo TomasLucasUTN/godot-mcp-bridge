@@ -115,6 +115,7 @@ func _initialize() -> void:
 	_test_enum_errors_name_their_options()
 	_test_input_map_is_the_projects_own()
 	_test_wire_text_survives_subprocess_output()
+	_test_vectors_take_the_array_form_everywhere()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1255,6 +1256,34 @@ func _test_wire_text_survives_subprocess_output() -> void:
 	var raw := JSON.stringify(payload)
 	_check("\u001b" in raw, "stringify leaves the control character raw in the wire text")
 	_check(JSON.parse_string(raw) != null, "and Godot reads it back, which is why this went unnoticed")
+
+# [x, y] is the form set_node_properties and the tilemap coords both take, and
+# the one a caller writes next. Several tools parsed their vector arguments
+# without a type hint, so the array stayed an Array and was refused.
+func _test_vectors_take_the_array_form_everywhere() -> void:
+	print("\n[vectors take the array form everywhere]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var pt = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var s3 = preload("res://addons/godot_mcp/tools/scene3d_tools.gd").new()
+	var scene := "res://__gdtest_vectors.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node3D", "root_node_name": "World"})
+	st.add_node({"scene_path": scene, "node_name": "Body", "node_type": "CharacterBody3D", "parent_path": "."})
+	st.add_node({"scene_path": scene, "node_name": "Skel", "node_type": "Skeleton3D", "parent_path": "."})
+
+	_check(pt.setup_collision({"scene_path": scene, "node_path": "Body", "shape_type": "box", "size": [2, 2, 2], "offset": [0, 1, 0]}).get("ok", false), "setup_collision takes size and offset as arrays")
+
+	s3.add_bone({"scene_path": scene, "node_path": "Skel", "bone_name": "root"})
+	var posed = s3.set_bone_pose({"scene_path": scene, "node_path": "Skel", "bone_name": "root", "position": [0, 1, 0], "scale": [1, 1, 1]})
+	_check(posed.get("ok", false), "set_bone_pose takes position and scale as arrays")
+
+	var info = s3.get_skeleton_info({"scene_path": scene, "node_path": "Skel"})
+	var bones: Array = info.get("bones", [])
+	_check(bones.size() == 1, "the bone is there to read back")
+	if bones.size() == 1:
+		var pose = bones[0].get("pose_position", {})
+		_check(absf(float(pose.get("y", 0.0)) - 1.0) < 0.001, "and the pose landed where the array said")
+	_rm(scene)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

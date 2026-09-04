@@ -54,7 +54,7 @@ func add_raycast(args: Dictionary) -> Dictionary:
 		# that set_node_properties and tilemap coords both accept was refused here.
 		var parsed = VariantCodec.parse_typed_value(
 			target_position, TYPE_VECTOR2 if dimension == "2D" else TYPE_VECTOR3
-		)
+		) if target_position is Array else _parse_value(target_position)
 		if dimension == "2D":
 			if not (parsed is Vector2):
 				raycast.free()
@@ -134,7 +134,7 @@ func setup_collision(args: Dictionary) -> Dictionary:
 		match shape_type:
 			"box":
 				var box := BoxShape3D.new()
-				box.size = _parse_value(size) if size != null else Vector3(1, 1, 1)
+				box.size = _parse_typed_value(size, TYPE_VECTOR3) if size is Array else (_parse_value(size) if size != null else Vector3(1, 1, 1))
 				shape3d = box
 			"sphere":
 				var sphere := SphereShape3D.new()
@@ -153,7 +153,7 @@ func setup_collision(args: Dictionary) -> Dictionary:
 		match shape_type:
 			"rectangle":
 				var rect := RectangleShape2D.new()
-				rect.size = _parse_value(size) if size != null else Vector2(32, 32)
+				rect.size = _parse_typed_value(size, TYPE_VECTOR2) if size is Array else (_parse_value(size) if size != null else Vector2(32, 32))
 				shape = rect
 			"circle":
 				var circle := CircleShape2D.new()
@@ -206,7 +206,7 @@ func setup_collision(args: Dictionary) -> Dictionary:
 	# old centred behaviour.
 	var offset = args.get(&"offset")
 	if offset != null:
-		collision_node.set(&"position", _parse_value(offset))
+		collision_node.set(&"position", _parse_typed_value(offset, TYPE_VECTOR3 if is_3d else TYPE_VECTOR2) if offset is Array else _parse_value(offset))
 	elif not is_3d and target.is_class("CollisionObject2D"):
 		var half: float = 0.0
 		if shape is RectangleShape2D:
