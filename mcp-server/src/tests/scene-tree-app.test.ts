@@ -16,6 +16,7 @@ import {
   parseSceneTreeText,
 } from '../apps/scene-tree-app.js';
 import { allTools } from '../tools/index.js';
+import { LAYOUT_APP_HTML, LAYOUT_APP_RESOURCE, LAYOUT_APP_URI } from '../apps/layout-app.js';
 
 const SAMPLE = [
   'Level (Node2D) [level_bounds.gd]',
@@ -80,13 +81,31 @@ describe('MCP App wiring', () => {
     expect(SCENE_TREE_APP_HTML).toContain('ui/notifications/tool-result');
   });
 
-  it('binds a tool to a resource that is actually served', () => {
+  // A ui:// URI no resource serves renders nothing, and the protocol does not
+  // complain — so the binding is checked against what is actually registered.
+  it('binds every tool to a resource that is actually served', () => {
+    const served = new Set([SCENE_TREE_APP_URI, LAYOUT_APP_URI]);
     const bound = allTools.filter(t => t._meta?.ui?.resourceUri);
-    expect(bound.length).toBeGreaterThan(0);
+    expect(bound.length).toBeGreaterThan(1);
     for (const tool of bound) {
-      expect(tool._meta!.ui!.resourceUri).toBe(SCENE_TREE_APP_URI);
+      expect(served, `${tool.name} points at an unserved app`).toContain(tool._meta!.ui!.resourceUri);
     }
     expect(SCENE_TREE_APP_RESOURCE.uri).toBe(SCENE_TREE_APP_URI);
+    expect(LAYOUT_APP_RESOURCE.uri).toBe(LAYOUT_APP_URI);
+  });
+
+  it('gives the layout panel the same handshake and no network grant', () => {
+    expect(LAYOUT_APP_RESOURCE.mimeType).toBe('text/html;profile=mcp-app');
+    expect(LAYOUT_APP_HTML).toContain('ui/initialize');
+    expect(LAYOUT_APP_HTML).toContain('ui/notifications/tool-result');
+    expect(LAYOUT_APP_RESOURCE._meta.ui.csp.connectDomains).toEqual([]);
+    expect(LAYOUT_APP_HTML).not.toMatch(/src="https?:/);
+  });
+
+  // "Nothing found" and "nothing sent" look identical on a canvas, so the
+  // panel has to tell them apart rather than draw an empty scene.
+  it('says when the analysis arrived without geometry', () => {
+    expect(LAYOUT_APP_HTML).toContain('include_rects: true');
   });
 
   it('needs no network grant, so the CSP stays empty', () => {

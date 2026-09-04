@@ -23,6 +23,7 @@ import {
   SCENE_TREE_APP_RESOURCE,
   SCENE_TREE_APP_URI,
 } from './apps/scene-tree-app.js';
+import { LAYOUT_APP_HTML, LAYOUT_APP_RESOURCE, LAYOUT_APP_URI } from './apps/layout-app.js';
 
 export interface Guide {
   uri: string;
@@ -442,6 +443,7 @@ export function registerResources(server: Server, feed?: ActivityFeed): void {
       })),
       ...(feed ? [ACTIVITY_RESOURCE] : []),
       SCENE_TREE_APP_RESOURCE,
+      LAYOUT_APP_RESOURCE,
     ],
   }));
 
@@ -458,6 +460,19 @@ export function registerResources(server: Server, feed?: ActivityFeed): void {
             mimeType: MCP_APP_MIME,
             text: SCENE_TREE_APP_HTML,
             _meta: SCENE_TREE_APP_RESOURCE._meta,
+          },
+        ],
+      };
+    }
+
+    if (uri === LAYOUT_APP_URI) {
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: MCP_APP_MIME,
+            text: LAYOUT_APP_HTML,
+            _meta: LAYOUT_APP_RESOURCE._meta,
           },
         ],
       };

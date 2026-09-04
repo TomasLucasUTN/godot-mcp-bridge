@@ -100,6 +100,10 @@ export const analysisTools: ToolDefinition[] = [
   {
     name: 'analyze_2d_layout',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // Drawn as a panel in a host that supports MCP Apps; ignored everywhere
+    // else. The findings are geometric, and geometry read as numbers is the
+    // format that let these bugs ship in the first place.
+    _meta: { ui: { resourceUri: 'ui://godot-mcp-bridge/layout' } },
     description: "Where a 2D scene's pieces actually sit, in world space — the questions a property read cannot answer. Reports decoration floating above the surface under it (with the gap in px), decoration standing over a hole in the floor, decoration whose silhouette runs into a solid so the two read as one hovering chunk, and every gap in the floor with its width so a jump arc can be checked against a number. Resolves world transforms, CollisionShape2D extents, sprite `centered`/`offset`/`region_rect` and hframes, so it sees what the screen shows rather than what the .tscn says. 'Resting' is a tolerance convention, not an engine rule: every finding carries the numbers it was judged on. Reads the scene open in the editor when there is one — `read_from` says which copy was measured, because an answer about unsaved edits and one about the last save can differ.",
     inputSchema: {
       type: 'object',
@@ -107,6 +111,7 @@ export const analysisTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Scene to analyse (res://path/to/scene.tscn)' },
         tolerance_px: { type: 'number', description: 'How far a base may sit from the surface under it and still count as resting on it. Default 2 — art is normally seated a pixel or two into the ground.' },
         max_items: { type: 'number', description: 'Cap per finding list (default 40, max 500).' },
+        include_rects: { type: 'boolean', description: "Also return every solid and decoration as a world-space rectangle, so the answer can be drawn rather than read. Off by default: it is the bulky half of the payload. In a host that supports MCP Apps this is what the panel renders." },
         jump_reach_px: { type: 'number', description: 'How far the player can carry themselves horizontally across a hole. Given it, each floor gap comes back with clearable true/false and the margin in px — so "can the player get past this" is answered by arithmetic instead of by playing it. Omit if you do not know the number.' }
       },
       required: ['scene_path']
