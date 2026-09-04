@@ -37,6 +37,7 @@ import { allTools, toolExists, TOOLSETS, TOOLSET_DESCRIPTIONS, toolsetOf } from 
 import type { ToolDefinition } from './types.js';
 import { GodotBridge } from './godot-bridge.js';
 import { registerResources, GUIDES } from './resources.js';
+import { metaTools } from './meta-tools.js';
 import { ActivityFeed, type ActivityEvent } from './activity-feed.js';
 import { serveVisualization, stopVisualizationServer, setGodotBridge } from './visualizer-server.js';
 import { PrimaryHttpServer, type ToolCallResult } from './primary-http.js';
@@ -864,6 +865,7 @@ async function executeToolCall(
 
 type ToolHandler = (name: string, args: Record<string, unknown>) => Promise<ToolCallResult>;
 
+
 function createMcpServer(handleTool: ToolHandler): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -896,106 +898,14 @@ function createMcpServer(handleTool: ToolHandler): Server {
   registerResources(server, activityFeed);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const connectionStatusTool = {
-      name: 'get_godot_status',
-      description: 'Check if Godot editor is connected to the MCP server.',
-      inputSchema: {
-        type: 'object' as const,
-        properties: {},
-        required: []
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false }
-    };
-
-    const diagnoseConnectionTool = {
-      name: 'diagnose_connection',
-      description: 'Diagnose why the Godot editor is (or is not) connected — the #1 setup frustration. Works even when nothing is connected (runs entirely in the MCP server). Returns a pass/fail checklist plus, when disconnected, an ordered list of concrete remedies (enable the plugin, wrong port, Godot version, the _console.exe stub, etc.). Call this first when tools report "Godot editor is not connected".',
-      inputSchema: { type: 'object' as const, properties: {}, required: [] as string[] },
-      annotations: { readOnlyHint: true, openWorldHint: false }
-    };
-
-    const getGuideTool = {
-      name: 'get_guide',
-      description: `Read a short markdown guide from the server. Same content as the MCP resources/read protocol, exposed as a tool so it works in MCP clients that do not support resources (e.g. Claude Desktop, Cursor chat). Call with no args to list available guides: ${GUIDES.map((g) => g.slug).join(', ')}. Call with {slug: "..."} to get the full markdown. Useful when a workflow is non-obvious (testing a running game, choosing between scene-editing tools, troubleshooting "Runtime helper not connected", etc.).`,
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          slug: {
-            type: 'string',
-            description: `Guide slug. Omit to list all available guides. Known slugs: ${GUIDES.map((g) => g.slug).join(', ')}.`,
-          },
-        },
-        required: [] as string[],
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false }
-    };
-
-    const findToolsTool = {
-      name: 'find_tools',
-      description: `Find a tool by what you want to do, across all ${allTools.length} of them — including the ones whose toolset is currently off. Only "core" (${TOOLSETS.core.length} tools) is loaded by default, because handing a model every schema costs tokens before it reads your message and measurably degrades which tool it picks. This is the cheap way back: ask "autotile a tilemap" or "record input", get the matching names with a one-line summary and the toolset each lives in, then enable_toolset that one. Prefer this over list_toolsets when you know what you want to DO but not what it is called.`,
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          query: { type: 'string', description: 'What you are trying to do, in your own words (e.g. "bake a navmesh", "read the player position while the game runs").' },
-          limit: { type: 'number', description: 'How many matches to return (1-40, default 8).' },
-          include_schema: { type: 'boolean', description: "Also return each match's full inputSchema. Default false — the names and summaries are usually enough to pick one." },
-        },
-        required: ['query'] as string[],
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false }
-    };
-
-    const listToolsetsTool = {
-      name: 'list_toolsets',
-      description: `List every toolset with what it is for, how many tools it holds, and whether it is enabled. Only "core" is on by default; if the tool you need is not in list_tools, find its toolset here and enable that one. Optional toolsets: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.`,
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          include_tools: {
-            type: 'boolean',
-            description: 'Also list every tool name in each toolset. Off by default: that is ~2,000 tokens, and find_tools answers "what is this called" for a quarter of it.',
-          },
-        },
-        required: [] as string[],
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false }
-    };
-
-    const enableToolsetTool = {
-      name: 'enable_toolset',
-      description: `Enable an optional toolset so its tools appear in the next list_tools call. "core" (look around, edit scenes/scripts, run the game, read errors) is always visible; everything else is opt-in to keep the active tool surface small. Call list_toolsets first if you are unsure which one holds the tool you need. Available toolsets: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.`,
-      inputSchema: {
-        type: 'object' as const,
-        properties: { name: { type: 'string', description: `Toolset name. One of: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.` } },
-        required: ['name'],
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-    };
-
-    const disableToolsetTool = {
-      name: 'disable_toolset',
-      description: 'Disable a previously-enabled toolset so its tools stop appearing in list_tools. Does not affect already-known tool names — see enable_toolset.',
-      inputSchema: {
-        type: 'object' as const,
-        properties: { name: { type: 'string', description: `Toolset name. One of: ${OPTIONAL_TOOLSET_NAMES.join(', ')}.` } },
-        required: ['name'],
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-    };
-
+    const meta = metaTools();
     const visibleTools = Object.entries(TOOLSETS)
       .filter(([toolsetName]) => activeToolsets.has(toolsetName))
       .flatMap(([, tools]) => tools);
 
     return {
       tools: [
-        connectionStatusTool,
-        diagnoseConnectionTool,
-        getGuideTool,
-        findToolsTool,
-        listToolsetsTool,
-        enableToolsetTool,
-        disableToolsetTool,
+        ...meta,
         ...visibleTools.map(tool => ({
           name: tool.name,
           description: tool.description,
