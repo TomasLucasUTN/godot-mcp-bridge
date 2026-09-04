@@ -66,7 +66,14 @@ export class LspClient extends EventEmitter {
   /** Latest diagnostics per document URI, from publishDiagnostics notifications. */
   private diagnostics = new Map<string, Diagnostic[]>();
   /** Documents we've sent didOpen for, so we only do it once each. */
-  private openDocuments = new Set<string>();
+  /**
+   * What we last told the server each document contains. Not a Set: didOpen once
+   * and never again left the server on version 1 for the rest of the session, so
+   * every later request answered about text that no longer existed on disk — and
+   * gd_rename computed its edit ranges from it. Renaming twice in a row turned
+   * `keys_counted` into `keys_seented`, silently, in a file that still parsed.
+   */
+  private openDocuments = new Map<string, { version: number; text: string }>();
 
   capabilities: Record<string, unknown> = {};
 
@@ -189,11 +196,26 @@ export class LspClient extends EventEmitter {
    * return anything at all.
    */
   async openDocument(uri: string, text: string): Promise<void> {
-    if (this.openDocuments.has(uri)) return;
+    const known = this.openDocuments.get(uri);
+    if (known) {
+      if (known.text === text) return;
+      // Full-content sync: one change covering the whole document. Godot's
+      // server accepts it and it cannot drift the way incremental ranges can.
+      const version = known.version + 1;
+      await this.notify('textDocument/didChange', {
+        textDocument: { uri, version },
+        contentChanges: [{ text }],
+      });
+      this.openDocuments.set(uri, { version, text });
+      // The cached set describes the text we just replaced, and
+      // waitForDiagnostics hands back whatever is cached without asking again.
+      this.diagnostics.delete(uri);
+      return;
+    }
     await this.notify('textDocument/didOpen', {
       textDocument: { uri, languageId: 'gdscript', version: 1, text },
     });
-    this.openDocuments.add(uri);
+    this.openDocuments.set(uri, { version: 1, text });
   }
 
   getDiagnostics(uri: string): Diagnostic[] | undefined {
