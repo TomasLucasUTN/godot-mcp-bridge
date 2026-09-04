@@ -640,6 +640,22 @@ func _ready() -> void:
 		return {&"ok": false, &"error": "Could not write " + script_path}
 	w.store_string(new_source)
 	w.close()
+
+	# `node` is an EXPRESSION, and a wrong one only shows up as a parse error in
+	# a file this tool just rewrote — the call answering ok with the script left
+	# broken. Check what was written and put the original back if it does not
+	# compile: a tool must not hand back a file that no longer parses.
+	var check := GDScript.new()
+	check.source_code = new_source
+	if check.reload() != OK:
+		var restore := FileAccess.open(script_path, FileAccess.WRITE)
+		if restore != null:
+			restore.store_string(source)
+			restore.close()
+		_refresh_filesystem()
+		return {&"ok": false,
+			&"error": "The generated code does not compile, so %s was left unchanged. `node` is an expression, not a node name: pass \"self\", or \"$%s\" to reach a child." % [script_path, node_expr],
+			&"node": node_expr}
 	_refresh_filesystem()
 
 	return {

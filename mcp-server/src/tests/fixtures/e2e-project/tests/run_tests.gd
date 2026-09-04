@@ -117,6 +117,7 @@ func _initialize() -> void:
 	_test_wire_text_survives_subprocess_output()
 	_test_vectors_take_the_array_form_everywhere()
 	_test_shader_param_lands_or_says_why_not()
+	_test_authority_write_is_checked()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1321,6 +1322,32 @@ func _test_shader_param_lands_or_says_why_not() -> void:
 	_check("declares no uniform" in str(bogus.get("warning", "")), "a uniform the shader does not declare is called out")
 	_rm(scene)
 	_rm(shader)
+
+# `node` is an expression, and a wrong one only surfaced as a parse error in a
+# file this tool had just rewritten — with the call answering ok and the script
+# left broken.
+func _test_authority_write_is_checked() -> void:
+	print("\n[authority write is checked]")
+	var nt = preload("res://addons/godot_mcp/tools/netcode_tools.gd").new()
+	var script_path := "res://__gdtest_authority.gd"
+	_rm(script_path)
+	var original := "extends Node2D\n\nfunc _ready() -> void:\n	pass\n"
+	_write_text(script_path, original)
+
+	# A node NAME rather than an expression: "Blob" is not declared in scope.
+	var bad = nt.mp_set_authority({"script_path": script_path, "peer_id": "owner", "node": "Blob"})
+	_check(not bad.get("ok", true), "a node name that is not an expression is refused")
+	_check(FileAccess.get_file_as_string(script_path) == original, "and the script is left exactly as it was")
+
+	var good = nt.mp_set_authority({"script_path": script_path, "peer_id": "owner", "node": "self"})
+	_check(good.get("ok", false), "a real expression is accepted")
+	var written := FileAccess.get_file_as_string(script_path)
+	_check("self.set_multiplayer_authority" in written, "and the assignment is written")
+
+	var check := GDScript.new()
+	check.source_code = written
+	_check(check.reload() == OK, "what it wrote compiles")
+	_rm(script_path)
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:
