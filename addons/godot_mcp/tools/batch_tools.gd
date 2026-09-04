@@ -36,14 +36,16 @@ func _refresh_and_reload(scene_path: String) -> void:
 func _ensure_res_path(path: String) -> String:
 	var guarded := PathGuard.sanitize(path)
 	if not guarded[&"ok"]:
+		if path.strip_edges().is_empty():
+			return PathGuard.MISSING
 		push_warning("[MCP] Rejected path outside project sandbox: %s (%s)" % [path, guarded[&"error"]])
-		return "res://__mcp_rejected_path__"
+		return PathGuard.REJECTED
 	return guarded[&"path"]
 
 func _load_scene(scene_path: String) -> Array:
 	"""Returns [scene_root, error_dict]. If error_dict is not empty, scene_root is null."""
-	if scene_path == "res://__mcp_rejected_path__":
-		return [null, {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}]
+	if PathGuard.is_bad(scene_path):
+		return [null, PathGuard.error_for(scene_path, "scene_path")]
 	if not FileAccess.file_exists(scene_path):
 		return [null, {&"ok": false, &"error": "Scene does not exist: " + scene_path}]
 
@@ -69,9 +71,9 @@ func _instantiate_packed_scene_for_edit(packed: PackedScene) -> Node:
 
 func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
 	"""Pack and save a scene. Returns error dict or empty on success."""
-	if scene_path == "res://__mcp_rejected_path__":
+	if PathGuard.is_bad(scene_path):
 		scene_root.queue_free()
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+		return PathGuard.error_for(scene_path, "scene_path")
 	var packed = PackedScene.new()
 	var pack_result = packed.pack(scene_root)
 	if pack_result != OK:
@@ -217,8 +219,8 @@ func rename_symbol_project_wide(args: Dictionary) -> Dictionary:
 
 	if old_name.strip_edges().is_empty() or new_name.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'old_name' or 'new_name'"}
-	if root_path == "res://__mcp_rejected_path__":
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if PathGuard.is_bad(root_path):
+		return PathGuard.error_for(root_path, "root")
 
 	var ident_check := RegEx.new()
 	ident_check.compile(_IDENTIFIER_RE)

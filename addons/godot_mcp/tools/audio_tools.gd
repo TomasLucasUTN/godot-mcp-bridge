@@ -51,7 +51,7 @@ func add_audio_player(args: Dictionary) -> Dictionary:
 
 	if not stream_path.is_empty():
 		var guarded_stream_path: String = _ensure_res_path(stream_path)
-		if guarded_stream_path == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(guarded_stream_path):
 			player.free()
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Stream path escapes the project sandbox (rejected): " + stream_path}

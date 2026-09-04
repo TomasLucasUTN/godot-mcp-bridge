@@ -60,8 +60,8 @@ func create_shader(args: Dictionary) -> Dictionary:
 
 	if shader_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'shader_path'"}
-	if shader_path == "res://__mcp_rejected_path__":
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if PathGuard.is_bad(shader_path):
+		return PathGuard.error_for(shader_path, "shader_path")
 	if not _TEMPLATES.has(shader_type):
 		return {&"ok": false, &"error": "Invalid 'shader_type': %s. Use one of: %s" % [shader_type, ", ".join(_TEMPLATES.keys())]}
 

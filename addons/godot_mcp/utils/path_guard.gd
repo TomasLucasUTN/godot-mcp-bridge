@@ -9,6 +9,21 @@ class_name PathGuard
 ## NOT stop "res://../../../../Windows/System32/...", since Godot resolves
 ## res:// relative to the project dir and ".." walks back out of it).
 
+## What a tool holds instead of a path once sanitize() refused it. Two markers,
+## not one: an empty argument is a missing argument, and answering it with
+## "Path escapes the project sandbox" sent callers hunting for a traversal bug
+## in a call whose real problem was that they never passed the path at all.
+const REJECTED := "res://__mcp_rejected_path__"
+const MISSING := "res://__mcp_missing_path__"
+
+static func is_bad(path: String) -> bool:
+	return path == REJECTED or path == MISSING
+
+static func error_for(path: String, label: String = "path") -> Dictionary:
+	if path == MISSING:
+		return {&"ok": false, &"error": "Missing '%s': the argument was empty or not provided." % label}
+	return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+
 ## Returns {ok: true, path: String} on success, {ok: false, error: String} on
 ## a rejected path. `path` in the result is the normalized, safe res:///user://
 ## path — callers should use THAT value, not the original argument.

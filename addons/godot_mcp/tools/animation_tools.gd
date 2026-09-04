@@ -492,7 +492,7 @@ func create_sprite_animation(args: Dictionary) -> Dictionary:
 	var texture: Texture2D = null
 	if not texture_path.strip_edges().is_empty():
 		var guarded := _ensure_res_path(texture_path)
-		if guarded == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(guarded):
 			return {&"ok": false, &"error": "'texture' path escapes the project sandbox: " + texture_path}
 		if not FileAccess.file_exists(guarded):
 			return {&"ok": false, &"error": "Texture not found: " + guarded}
@@ -581,7 +581,7 @@ func create_sprite_animation(args: Dictionary) -> Dictionary:
 ## all, which meant the AnimatedSprite2D route was simply unavailable.
 func create_sprite_frames(args: Dictionary) -> Dictionary:
 	var res_path: String = _ensure_res_path(str(args.get(&"path", "")))
-	if res_path == "res://__mcp_rejected_path__" or res_path.strip_edges() == "res://":
+	if PathGuard.is_bad(res_path) or res_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing or rejected 'path' (where to save the .tres, e.g. res://player_frames.tres)"}
 	if not res_path.ends_with(".tres") and not res_path.ends_with(".res"):
 		return {&"ok": false, &"error": "'path' must end in .tres or .res (got %s)" % res_path}
@@ -607,7 +607,7 @@ func create_sprite_frames(args: Dictionary) -> Dictionary:
 			wants_default = true
 
 		var tex_path: String = _ensure_res_path(str(spec.get("texture", "")))
-		if tex_path == "res://__mcp_rejected_path__" or not FileAccess.file_exists(tex_path):
+		if PathGuard.is_bad(tex_path) or not FileAccess.file_exists(tex_path):
 			return {&"ok": false, &"error": "Animation '%s': texture not found: %s" % [name, str(spec.get("texture", ""))]}
 		var sheet := load(tex_path) as Texture2D
 		if sheet == null:

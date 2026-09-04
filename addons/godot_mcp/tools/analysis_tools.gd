@@ -519,7 +519,7 @@ func compare_screenshots(args: Dictionary) -> Dictionary:
 	var path_a: String = _ensure_res_path(raw_a)
 	var path_b: String = _ensure_res_path(raw_b)
 	for pair in [[path_a, raw_a, "baseline"], [path_b, raw_b, "current"]]:
-		if pair[0] == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(pair[0]):
 			return {&"ok": false, &"error": "'%s' path was rejected by the project sandbox: '%s'. Paths must stay inside res:// or user://." % [pair[2], pair[1]]}
 
 	var img_a := _load_image(path_a)
@@ -951,7 +951,7 @@ func texture_info(args: Dictionary) -> Dictionary:
 	if raw_path.is_empty():
 		return {&"ok": false, &"error": "Missing 'path' (res:// or user:// to a texture)"}
 	var path: String = _ensure_res_path(raw_path)
-	if path == "res://__mcp_rejected_path__":
+	if PathGuard.is_bad(path):
 		return {&"ok": false, &"error": "'path' was rejected by the project sandbox: '%s'. Must stay inside res:// or user://." % raw_path}
 
 	var img := _load_image(path)
@@ -1302,8 +1302,8 @@ func _line_of(text: String, index: int) -> int:
 
 func validate_references(args: Dictionary) -> Dictionary:
 	var root_path: String = _ensure_res_path(str(args.get(&"root", "res://")))
-	if root_path == "res://__mcp_rejected_path__":
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if PathGuard.is_bad(root_path):
+		return PathGuard.error_for(root_path, "root")
 	var include_addons: bool = bool(args.get(&"include_addons", false))
 
 	var groups := _project_groups()

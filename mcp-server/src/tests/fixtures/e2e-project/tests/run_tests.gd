@@ -104,6 +104,7 @@ func _initialize() -> void:
 	_test_mp_authority()
 	_test_root_name_resolves_as_root()
 	_test_shape_and_vector_forms()
+	_test_missing_path_is_not_an_escape()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -957,6 +958,27 @@ func _test_shape_and_vector_forms() -> void:
 	_rm(theme_path)
 	_check(not pt.setup_collision({"scene_path": scene, "node_path": "Body", "shape_type": "triangle"}).get("ok", true), "an unsupported shape is still refused")
 	_rm(scene)
+
+# An empty path argument is a missing argument. Answering it with "Path escapes
+# the project sandbox" sent callers hunting a traversal bug in a call whose real
+# problem was that the path was never passed.
+func _test_missing_path_is_not_an_escape() -> void:
+	print("
+[missing path reads as missing]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var bt = preload("res://addons/godot_mcp/tools/batch_tools.gd").new()
+	var tt = preload("res://addons/godot_mcp/tools/theme_tools.gd").new()
+
+	var empty = st.read_scene({"scene_path": ""})
+	_check(not empty.get("ok", true), "an empty scene_path is refused")
+	_check("Missing 'scene_path'" in str(empty.get("error", "")), "and names the argument that was missing")
+
+	var escaped = st.read_scene({"scene_path": "res://../../../windows/system32/x.tscn"})
+	_check(not escaped.get("ok", true), "a traversal is still refused")
+	_check("escapes the project sandbox" in str(escaped.get("error", "")), "and still reads as an escape")
+
+	_check("Missing 'scene_path'" in str(bt.find_nodes_by_type({"node_type": "Node2D"}).get("error", "")), "batch tools report a missing scene_path the same way")
+	_check("Missing 'theme_path'" in str(tt.get_theme_info({"theme_path": ""}).get("error", "")), "theme tools too")
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

@@ -41,7 +41,7 @@ func mp_add_spawner(args: Dictionary) -> Dictionary:
 	var validated: Array = []
 	for s in spawnable_scenes:
 		var p: String = _ensure_res_path(str(s))
-		if p == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(p):
 			return {&"ok": false, &"error": "Spawnable scene path escapes the project sandbox: " + str(s)}
 		if not ResourceLoader.exists(p):
 			return {&"ok": false, &"error": "Spawnable scene not found: " + p}

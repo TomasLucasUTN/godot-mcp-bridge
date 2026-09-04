@@ -97,7 +97,7 @@ func create_scene(args: Dictionary) -> Dictionary:
 
 	if not attach_script_path.is_empty():
 		attach_script_path = _ensure_res_path(attach_script_path)
-		if attach_script_path == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(attach_script_path):
 			root.queue_free()
 			return {&"ok": false, &"error": "attach_script escapes the project sandbox"}
 		var script_res = load(attach_script_path)
@@ -177,7 +177,7 @@ func _create_node_recursive(data: Dictionary, parent: Node, owner: Node) -> Arra
 	# these tools and wondering why a boss had 100 HP instead of 400.
 	if not n_script.is_empty():
 		n_script = _ensure_res_path(n_script)
-		if n_script == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(n_script):
 			node.free()
 			return [null, "Child script for '%s' escapes the project sandbox" % n_name]
 		var s = load(n_script)
@@ -363,7 +363,7 @@ func add_node(args: Dictionary) -> Dictionary:
 	# script is on the node. See _create_node_recursive for the incident.
 	if not script_path.is_empty():
 		script_path = _ensure_res_path(script_path)
-		if script_path == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(script_path):
 			root.queue_free()
 			return {&"ok": false, &"error": "script escapes the project sandbox"}
 		var s := load(script_path)
@@ -718,7 +718,7 @@ func _add_node_live(root: Node, scene_path: String, node_name: String, node_type
 	# Script before properties — see _create_node_recursive.
 	if not script_path.is_empty():
 		var sp := _ensure_res_path(script_path)
-		if sp == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(sp):
 			new_node.free()
 			return {&"ok": false, &"error": "script escapes the project sandbox"}
 		var s = load(sp)
@@ -947,7 +947,7 @@ func _apply_op(root: Node, op: Dictionary, ctx: Dictionary) -> Dictionary:
 			var script_path := str(op.get(&"script", ""))
 			if not script_path.is_empty():
 				var sp := _ensure_res_path(script_path)
-				var s = load(sp) if sp != "res://__mcp_rejected_path__" else null
+				var s = load(sp) if not PathGuard.is_bad(sp) else null
 				if s:
 					n.set_script(s)
 				else:
@@ -1143,7 +1143,7 @@ func attach_script(args: Dictionary) -> Dictionary:
 	if script_path.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'script_path'"}
 	script_path = _ensure_res_path(script_path)
-	if script_path == "res://__mcp_rejected_path__":
+	if PathGuard.is_bad(script_path):
 		return {&"ok": false, &"error": "script_path escapes the project sandbox"}
 
 	# _acquire_scene, not _load_scene: when the target scene is OPEN, loading a
@@ -1315,7 +1315,7 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Missing 'path' in texture_params for %s" % texture_type}
 			tex_path = _ensure_res_path(tex_path)
-			if tex_path == "res://__mcp_rejected_path__":
+			if PathGuard.is_bad(tex_path):
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "texture path escapes the project sandbox"}
 			texture = load(tex_path)
@@ -1331,7 +1331,7 @@ func set_sprite_texture(args: Dictionary) -> Dictionary:
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Missing 'path' in texture_params for NewImageTexture"}
 			src_path = _ensure_res_path(src_path)
-			if src_path == "res://__mcp_rejected_path__":
+			if PathGuard.is_bad(src_path):
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "image path escapes the project sandbox"}
 			var img := Image.new()
@@ -1401,7 +1401,7 @@ func instance_scene(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 	if instance_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'instance_path'"}
-	if instance_path == "res://__mcp_rejected_path__":
+	if PathGuard.is_bad(instance_path):
 		return {&"ok": false, &"error": "instance_path escapes the project sandbox"}
 
 	if scene_path == instance_path:
@@ -1598,7 +1598,7 @@ func set_mesh(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Missing 'path' in mesh_params for file type"}
 		file_path = _ensure_res_path(file_path)
-		if file_path == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(file_path):
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "mesh path escapes the project sandbox"}
 		var loaded = load(file_path)
@@ -1700,7 +1700,7 @@ func set_material(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Missing 'path' in material_params for file type"}
 		file_path = _ensure_res_path(file_path)
-		if file_path == "res://__mcp_rejected_path__":
+		if PathGuard.is_bad(file_path):
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "material path escapes the project sandbox"}
 		var loaded = load(file_path)

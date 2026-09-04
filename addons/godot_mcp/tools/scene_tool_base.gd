@@ -42,8 +42,10 @@ func _refresh_and_reload(scene_path: String) -> void:
 func _ensure_res_path(path: String) -> String:
 	var guarded := PathGuard.sanitize(path)
 	if not guarded[&"ok"]:
+		if path.strip_edges().is_empty():
+			return PathGuard.MISSING
 		push_warning("[MCP] Rejected path outside project sandbox: %s (%s)" % [path, guarded[&"error"]])
-		return "res://__mcp_rejected_path__"
+		return PathGuard.REJECTED
 	return guarded[&"path"]
 
 ## If `scene_path` is the scene currently open in the editor, return its LIVE root
@@ -73,8 +75,8 @@ func _get_undo_redo() -> EditorUndoRedoManager:
 ## The instantiated tree is a disk copy the caller owns and must free (or hand to
 ## _save_scene / _finish_scene_edit, which free it).
 func _load_scene(scene_path: String) -> Array:
-	if scene_path.begins_with("res://__mcp_rejected_path__"):
-		return [null, {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}]
+	if PathGuard.is_bad(scene_path):
+		return [null, PathGuard.error_for(scene_path, "scene_path")]
 	if not FileAccess.file_exists(scene_path):
 		return [null, {&"ok": false, &"error": "Scene does not exist: " + scene_path}]
 	var packed = load(scene_path) as PackedScene
@@ -115,9 +117,9 @@ var _dry_run_skipped_write := false
 
 
 func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
-	if scene_path.begins_with("res://__mcp_rejected_path__"):
+	if PathGuard.is_bad(scene_path):
 		scene_root.queue_free()
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+		return PathGuard.error_for(scene_path, "scene_path")
 	if _dry_run:
 		# The mutation already happened in memory, on a copy loaded from disk;
 		# throwing it away here is what makes the preview free. The scene file

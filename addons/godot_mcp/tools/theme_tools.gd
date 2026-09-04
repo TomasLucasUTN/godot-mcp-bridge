@@ -23,8 +23,10 @@ func set_editor_plugin(plugin: EditorPlugin) -> void:
 func _ensure_res_path(path: String) -> String:
 	var guarded := PathGuard.sanitize(path)
 	if not guarded[&"ok"]:
+		if path.strip_edges().is_empty():
+			return PathGuard.MISSING
 		push_warning("[MCP] Rejected path outside project sandbox: %s (%s)" % [path, guarded[&"error"]])
-		return "res://__mcp_rejected_path__"
+		return PathGuard.REJECTED
 	return guarded[&"path"]
 
 func _refresh_filesystem() -> void:
@@ -33,8 +35,8 @@ func _refresh_filesystem() -> void:
 
 func _load_theme(theme_path: String) -> Array:
 	"""Returns [theme_or_null, error_dict]."""
-	if theme_path == "res://__mcp_rejected_path__":
-		return [null, {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}]
+	if PathGuard.is_bad(theme_path):
+		return [null, PathGuard.error_for(theme_path, "theme_path")]
 	if not FileAccess.file_exists(theme_path):
 		return [null, {&"ok": false, &"error": "Theme resource does not exist: " + theme_path}]
 	var theme := load(theme_path) as Theme
@@ -43,8 +45,8 @@ func _load_theme(theme_path: String) -> Array:
 	return [theme, {}]
 
 func _save_theme(theme: Theme, theme_path: String) -> Dictionary:
-	if theme_path == "res://__mcp_rejected_path__":
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if PathGuard.is_bad(theme_path):
+		return PathGuard.error_for(theme_path, "theme_path")
 	var save_result := ResourceSaver.save(theme, theme_path)
 	if save_result != OK:
 		return {&"ok": false, &"error": "Failed to save theme: " + str(save_result)}
@@ -59,8 +61,8 @@ func create_theme(args: Dictionary) -> Dictionary:
 
 	if theme_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'theme_path'"}
-	if theme_path == "res://__mcp_rejected_path__":
-		return {&"ok": false, &"error": "Path escapes the project sandbox (rejected)"}
+	if PathGuard.is_bad(theme_path):
+		return PathGuard.error_for(theme_path, "theme_path")
 	if FileAccess.file_exists(theme_path):
 		return {&"ok": false, &"error": "File already exists: " + theme_path}
 
