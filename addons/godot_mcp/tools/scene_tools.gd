@@ -2637,7 +2637,10 @@ func _collect_nodes_in_group(node: Node, group_name: String, path: String, match
 func set_resource_property(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var node_path: String = str(args.get(&"node_path", "."))
-	var resource_path: String = str(args.get(&"resource_path", ""))
+	# get_resource_info calls this same slot `resource_property`, which is the
+	# accurate name — the value is a property on the node ("texture"), not a
+	# path. Both are taken so the two tools can be used with one vocabulary.
+	var resource_path: String = str(args.get(&"resource_path", args.get(&"resource_property", "")))
 	var property_name: String = str(args.get(&"property_name", ""))
 	var value = args.get(&"value")
 

@@ -656,6 +656,7 @@ export const sceneTools: ToolDefinition[] = [
         scene_path: { type: 'string', description: 'Path to the .tscn scene file' },
         node_path: { type: 'string', description: 'Path to the node owning the resource' },
         resource_path: { type: 'string', description: 'Path from node to the target resource via property names. Examples: "shape", "material", "material/next_pass"' },
+        resource_property: { type: 'string', description: 'Same thing as resource_path, under the name get_resource_info uses for it. Either is accepted.' },
         property_name: { type: 'string', description: 'Property on the target resource to set (e.g. "radius", "albedo_color")' },
         value: { description: 'New value (same shape as modify_node_property.value)' },
         dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
