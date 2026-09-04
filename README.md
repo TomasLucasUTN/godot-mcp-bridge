@@ -210,11 +210,11 @@ re-run it:
 
 | | tools | ~tokens |
 |---|---:|---:|
-| **`core`** — what loads by default | 38 | **9,467** |
-| Everything, every toolset on | 231 | 50,180 |
+| **`core`** — what loads by default | 38 | **9,516** |
+| Everything, every toolset on | 231 | 50,563 |
 
-So the default surface is **18.9% of the full one**, and turning everything on
-costs roughly **40,700 extra tokens on every request**. That is the reason the
+So the default surface is **18.8% of the full one**, and turning everything on
+costs roughly **41,000 extra tokens on every request**. That is the reason the
 default is small and the rest is opt-in per toolset (or preset once via
 `GODOT_MCP_TOOLSETS`), rather than a judgement that the other 192 tools do not
 matter. `find_tools` searches all 231 by what you want to do, so a tool being
@@ -510,14 +510,14 @@ Numbers rather than adjectives, all from 2026-09-03 against a 24,880-file projec
 
 | | |
 |---|---|
-| Default tool surface | 38 tools, **9,467 tokens** of schema (everything on: 231 / 50,180) |
+| Default tool surface | 38 tools, **9,516 tokens** of schema (everything on: 231 / 50,563) |
 | Slowest read-only tool | `get_project_statistics` at **2,012 ms** — it answers in the MCP server; the in-editor version took 120,685 ms |
 | Largest answer | `map_project` at **7,744 chars** — it used to return 151,159 |
 | Runtime helper connect | **1.6-1.7 s**, attached or detached |
 | `game_eval` runtime error, detached | **18 ms**, connection survives |
 | Mutating tools pointed at a target that cannot exist | 70 editor-side + 11 runtime, **none reports success** |
 | Path-traversal attempts against the sandbox | 16 refused, 11 odd-but-contained inputs checked by where they resolve, **zero escapes** |
-| Tests | 224 Node unit, 44 live against a real editor, 685 GDScript — green on Godot 4.5 and 4.7 |
+| Tests | 243 Node unit, 44 live against a real editor, 786 GDScript — green on Godot 4.5 and 4.7 |
 
 Every one of those is re-runnable: `mcp-server/scripts/measure-tools.mjs` for the
 schema cost, `scripts/measure-runtime-cost.gd` for per-tool time and payload, and the
@@ -552,7 +552,7 @@ Then point your AI client at `mcp-server/dist/index.js` instead of using `npx`.
 
 ## 📖 Release notes
 
-Narrative write-ups of each release live in [`release-notes/`](./release-notes/) — latest is [v1.1.0](./release-notes/v1.1.0.md). For the full change history, see [`CHANGELOG.md`](./CHANGELOG.md).
+Narrative write-ups of each release live in [`release-notes/`](./release-notes/) — latest is [v1.2.0](./release-notes/v1.2.0.md). For the full change history, see [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 

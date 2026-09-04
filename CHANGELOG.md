@@ -5,6 +5,32 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.2.0] - 2026-09-04
+
+See [`release-notes/v1.2.0.md`](./release-notes/v1.2.0.md).
+
+1.1.7 was written but never tagged, so this release carries it and everything a
+tool-by-tool pass over all 231 tools found afterwards — driven by hand against a
+real editor, which is where most of these came from.
+
+The one that hid longest: Godot's `JSON.stringify` leaves control characters
+raw, and a single escape byte in captured subprocess output makes the message
+unparseable at the server, which drops it — the call then hangs to its timeout
+with the answer already computed. GUT printed its summary in colour, so the GUT
+runner had never worked. Both send paths now clean the payload.
+
+Also fixed: `enable_toolset` did nothing for any client but the first (a proxy
+flipped the primary's set and served its own list); two `gd_rename` calls in a
+row corrupted the source, because the language server was never told the file
+had changed; `set_shader_param` dropped values it could not type and answered
+ok; a detached game outlived `restart_editor` and could not be stopped;
+`mp_set_authority` left a script that no longer compiled. Plus a long tail of
+refusals that said the wrong thing — a missing argument reported as a sandbox
+escape, an unknown tool name reported as a dead server.
+
+`list_toolsets` went from 2,006 tokens to 855, and `search_project` stopped
+returning addon source and `.bak` files by default.
+
 ## [1.1.7] - 2026-09-03
 
 See [`release-notes/v1.1.7.md`](./release-notes/v1.1.7.md).

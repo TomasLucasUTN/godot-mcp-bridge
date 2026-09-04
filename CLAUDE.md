@@ -1,7 +1,7 @@
 # godot-mcp-bridge — project guide
 
 Godot 4 MCP server: a GDScript editor addon (`addons/godot_mcp/`) talking over a
-WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 228 tools.
+WebSocket (port 6505) to a TypeScript MCP server (`mcp-server/`). 231 tools.
 Architecture is the converged standard for the space (Node stdio ↔ WS ↔ editor plugin).
 
 ## Two rules that keep the codebase healthy (apply these first)

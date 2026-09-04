@@ -323,7 +323,7 @@ the same rule the addon's tools follow.
 
 ## Scenes
 - Create / read / hierarchy: \`create_scene\`, \`read_scene\`, \`scene_tree_dump\`
-- Add / remove / move / rename / duplicate / reorder nodes: \`add_node\`, \`remove_node\`, \`move_node\`, \`rename_node\`, \`duplicate_node\`, \`reorder_node\`
+- Add / remove / move / rename / duplicate nodes: \`add_node\`, \`remove_node\`, \`move_node\`, \`rename_node\`, \`duplicate_node\` — \`move_node\` also sets position among siblings
 - Properties on a node: \`modify_node_property\` (one), \`set_node_properties\` (many), \`read_scene\` (read them back)
 - Class-level property metadata: \`get_node_properties\` (with \`node_type\`)
 - Groups: \`set_node_groups\`, \`get_node_groups\`, \`find_nodes_in_group\`

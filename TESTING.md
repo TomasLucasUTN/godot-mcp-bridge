@@ -18,78 +18,43 @@ Tests use [Vitest](https://vitest.dev/) and run against real servers on high por
 
 ## Automated tests
 
-### GodotBridge (`src/tests/godot-bridge.test.ts`)
+`cd mcp-server && npm test` runs the Node suite; `pwsh scripts/test-gd.ps1` runs
+the GDScript one. Current: **243 Node**, **44 live** (skipped without an editor),
+**786 GDScript**.
 
-**Lifecycle**
-- [ ] `isListening()` is false before start
-- [ ] `isListening()` is true after start
-- [ ] `isListening()` is false after stop
-- [ ] `isListening()` is false after failed start (port occupied)
-- [ ] `stop()` is idempotent
-- [ ] `isConnected()` is false when no client is connected
-- [ ] `getStatus()` reflects initial state (port, connected, pendingRequests)
+The checklists that used to live here went stale as soon as a test was added, so
+this is an index instead — each file is the authority on what it asserts, and
+most of them exist because something specific went wrong once.
 
-**Connection management**
-- [ ] Accepts a WebSocket connection and reports `isConnected()`
-- [ ] `onConnectionChange(true)` fires when a client connects
-- [ ] `onConnectionChange(false)` fires when a client disconnects
-- [ ] `offConnectionChange` removes the callback
-- [ ] Rejects a second simultaneous connection (close code 4000)
+| File | What it holds the line on |
+|---|---|
+| `godot-bridge.test.ts` | WebSocket lifecycle, the `tool_invoke` protocol, and that a pending call is rejected rather than lost on disconnect |
+| `primary-http.test.ts` | The primary's HTTP surface and the proxy-client census behind the editor's "Agents (N)" |
+| `proxy-client.test.ts` | Probing for an existing primary, forwarding a call, and register/unregister surviving a server that is not there |
+| `tool-registry.test.ts` | Every advertised tool is wired, uniquely named, and reachable — a new tool that skips a step fails the build |
+| `schema-handler-parity.test.ts` | A schema and its GDScript handler agree on argument names |
+| `tool-annotations.test.ts` | Read-only and destructive hints match what the tool actually does |
+| `mcp-surface.test.ts` | The MCP-level shape of what the server advertises |
+| `toolset-visibility.test.ts` | enable/disable changes the list of THIS process, and `list_toolsets` stays cheap by default |
+| `tool-search.test.ts`, `tool-search-quality.test.ts` | `find_tools` ranking, with a measured floor on top-1 and top-3 accuracy |
+| `lsp-path-guard.test.ts` | The `gd_*` tools cannot read or write outside the project, and refuse files that are not GDScript |
+| `lsp-document-sync.test.ts` | The language server is told when a file it has open changed — two renames in a row used to corrupt the source |
+| `dap-start-refusal.test.ts` | A debug session that cannot start fails the call instead of the server |
+| `dry-run-coverage.test.ts` | Every tool that claims `dry_run` actually previews |
+| `confirmation-gate.test.ts` | The destructive tools that require an explicit confirm still do |
+| `handshake-auth.test.ts` | Only an authorised client gets a connection |
+| `activity-feed.test.ts` | The editor-activity digest the developer's own edits ride back on |
+| `project-scan.test.ts`, `project-map.test.ts` | The two answers that used to be measured in the hundreds of thousands of characters |
+| `project-binding.test.ts` | A server answers about the project it is actually bound to |
+| `scene-tree-app.test.ts` | The MCP App's parser, injected into the page as source |
+| `cli.test.ts` | `install` / `doctor` behave on a real directory |
+| `sync-about.test.ts` | The published description matches the code |
+| `e2e-godot.test.ts` | The live suite: skipped without an editor on 6505, run against a real one |
 
-**WebSocket protocol**
-- [ ] Handles `godot_ready` message and sets `projectPath`
-- [ ] `invokeTool` sends `tool_invoke` and resolves on success result
-- [ ] `invokeTool` rejects on error result
-- [ ] `invokeTool` rejects on timeout
-- [ ] `invokeTool` throws if Godot is not connected
-- [ ] Pending requests are rejected on client disconnect
-- [ ] Pending requests are rejected on server stop
-- [ ] `sendClientStatus` sends `client_status` message to connected client
-
-### PrimaryHttpServer (`src/tests/primary-http.test.ts`)
-
-**Lifecycle**
-- [ ] `isListening()` is false before start
-- [ ] `isListening()` is true after start
-- [ ] `isListening()` is false after stop
-- [ ] `stop()` is idempotent
-- [ ] `proxyClientCount` starts at 0
-
-**HTTP endpoints**
-- [ ] `GET /health` returns `{ server, version }`
-- [ ] `GET /health` updates `lastActivityTime`
-- [ ] `POST /tool` calls the executor and returns result
-- [ ] `POST /tool` with missing `name` returns 400
-- [ ] `POST /tool` with no `args` defaults to empty object
-- [ ] `POST /client/register` increments proxy client count
-- [ ] `POST /client/unregister` decrements proxy client count
-- [ ] `POST /client/unregister` does not go below 0
-- [ ] Client count change callback fires on register/unregister
-- [ ] Unknown route returns 404
-- [ ] Executor error returns 500
-
-### Proxy client (`src/tests/proxy-client.test.ts`)
-
-**probeExistingServer**
-- [ ] Returns `alive:true` when a primary server is running
-- [ ] Returns `alive:false` when no server is running
-
-**proxyToolCall**
-- [ ] Forwards a tool call and returns the result
-- [ ] Rejects when no server is running
-
-**register / unregister**
-- [ ] Register increments and unregister decrements the count
-- [ ] Register does not throw when server is down
-- [ ] Unregister does not throw when server is down
-
-### Tool registry (`src/tests/tool-registry.test.ts`)
-
-- [ ] Exports a non-empty list of tools
-- [ ] Every tool has `name`, `description`, and `inputSchema`
-- [ ] Tool names are unique
-- [ ] `toolExists` returns true for known tools
-- [ ] `toolExists` returns false for unknown tools
+The GDScript suite (`mcp-server/src/tests/fixtures/e2e-project/tests/run_tests.gd`)
+instantiates the tool handlers directly and exercises their on-disk path. Add a
+case there when you change what a tool writes — it is the regression net a
+refactor needs, and every fix in the last few releases has one.
 
 ---
 
