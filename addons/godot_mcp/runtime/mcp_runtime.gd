@@ -42,6 +42,8 @@ const _AWAIT_CONDITION_MAX_MS := 60000
 
 var _step_jobs: Array = []
 var _condition_jobs: Array = []
+## Batches waiting out their settle_frames before answering.
+var _batch_jobs: Array = []
 
 # Activity the agent is told about as it happens, over the same push channel the
 # editor plugin uses. Scoped to what only the running game can see: the editor
@@ -131,6 +133,7 @@ func _process(_delta: float) -> void:
 func _physics_process(_delta: float) -> void:
 	_tick_step_jobs("physics")
 	_tick_condition_jobs()
+	_tick_batch_jobs()
 
 
 func _attempt_connect() -> void:
@@ -181,6 +184,12 @@ func _handle_message(json_string: String) -> void:
 				return
 			if tool_name == "await_condition":
 				_start_await_condition(rid, args)
+				return
+			# A batch asked to settle answers after those frames, so it takes the
+			# async path too. Without settle_frames it stays synchronous, which
+			# is the common case and the cheap one.
+			if tool_name == "batch_runtime" and int(args.get("settle_frames", 0)) > 0:
+				_start_batch_runtime(rid, args)
 				return
 			var result := _dispatch(tool_name, args)
 			var success: bool = bool(result.get("ok", false))
@@ -305,6 +314,35 @@ func _batch_runtime(args: Dictionary) -> Dictionary:
 		"all_ok": all_ok,
 		"results": results,
 	}
+
+
+## A batch that has to let the game move before it answers.
+##
+## "Press, let some frames pass, look" is the shape driving a game actually
+## takes, and it was the one thing a batch could not express: `wait` and
+## `step_frames` answer later, so they cannot be operations inside one. This
+## runs the operations now, lets `settle_frames` physics frames pass, and then
+## answers — one round trip for the whole shape.
+func _start_batch_runtime(rid: String, args: Dictionary) -> void:
+	var frames := clampi(int(args.get("settle_frames", 0)), 1, _STEP_FRAMES_MAX)
+	var out := _batch_runtime(args)
+	var ok: bool = bool(out.get("ok", false))
+	out.erase("ok")
+	out["settled_frames"] = frames
+	_batch_jobs.append({"rid": rid, "remaining": frames, "payload": out, "ok": ok})
+
+
+func _tick_batch_jobs() -> void:
+	if _batch_jobs.is_empty():
+		return
+	var still_running: Array = []
+	for job in _batch_jobs:
+		job["remaining"] = int(job["remaining"]) - 1
+		if int(job["remaining"]) > 0:
+			still_running.append(job)
+			continue
+		_send_async_result(str(job["rid"]), bool(job["ok"]), job["payload"])
+	_batch_jobs = still_running
 
 
 func _dispatch(tool_name: String, args: Dictionary) -> Dictionary:
