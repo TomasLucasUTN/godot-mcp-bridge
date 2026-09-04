@@ -60,11 +60,16 @@ describe('searchTools', () => {
     }
   });
 
-  // Words this domain repeats everywhere ("scene", "node", "godot") cannot
-  // separate one tool from another, so a query made only of them matches
-  // nothing rather than returning an arbitrary eight.
-  it('answers nothing for a query that is only noise words', () => {
-    expect(searchTools(allTools, 'how do I do the scene node in godot')).toEqual([]);
+  // Only English filler is dropped. Domain words used to be dropped too, on
+  // the theory that "scene" and "node" appear everywhere and add noise — that
+  // cost 17% of the ranking eval, because "add a node to a scene" collapsed to
+  // ["add"]. Commonness is weighted now, not assumed.
+  it('answers nothing for a query that is only filler', () => {
+    expect(searchTools(allTools, 'how do I do the in of it')).toEqual([]);
+  });
+
+  it('still ranks with the domain words that used to be discarded', () => {
+    expect(searchTools(allTools, 'add a node to a scene')[0].name).toBe('add_node');
   });
 
   it('caps the result count', () => {

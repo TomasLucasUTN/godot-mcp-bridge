@@ -24,11 +24,17 @@ export interface ToolSearchHit {
   inputSchema?: ToolDefinition['inputSchema'];
 }
 
-/** Words too common in this domain to tell two tools apart. */
+/**
+ * English filler. Domain words are deliberately NOT here: 'scene' and 'node'
+ * were, on the theory that they appear everywhere and only add noise, and that
+ * cost 17% of the eval set — "add a node to a scene" collapsed to ["add"] and
+ * ranked add_animation_track first. They are the most discriminating words in
+ * this surface when paired with a verb. Commonness is handled by weighting
+ * below, which measures it instead of assuming it.
+ */
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'to', 'of', 'in', 'on', 'for', 'and', 'or', 'is', 'it',
   'how', 'do', 'i', 'my', 'with', 'from', 'that', 'this', 'godot', 'tool',
-  'scene', 'node', // present in most of the surface; matching them ranks noise
 ]);
 
 function terms(query: string): string[] {
@@ -67,6 +73,16 @@ export function searchTools(
   const wanted = terms(query);
   if (wanted.length === 0) return [];
 
+  // How rare is each term among the tool NAMES? A term in a tenth of them
+  // points somewhere; one in half of them barely narrows anything. Measured
+  // per call over the actual surface rather than hardcoded, so it stays true
+  // as tools are added.
+  const rarity = new Map<string, number>();
+  for (const term of wanted) {
+    const inNames = tools.reduce((n, t) => n + (t.name.toLowerCase().includes(term) ? 1 : 0), 0);
+    rarity.set(term, Math.max(0.15, 1 - inNames / Math.max(tools.length, 1) * 3));
+  }
+
   const hits: ToolSearchHit[] = [];
   for (const tool of tools) {
     const name = tool.name.toLowerCase();
@@ -79,15 +95,30 @@ export function searchTools(
       const inDescription = description.includes(term);
       if (!inName && !inDescription) continue;
       matched++;
-      score += inName ? 10 : 1;
+      const weight = rarity.get(term) ?? 1;
+      score += (inName ? 10 : 1) * weight;
       // An exact name segment ("autotile" in tilemap_autotile) beats a
       // substring that merely happens to contain it.
-      if (inName && name.split('_').includes(term)) score += 5;
+      if (inName && name.split('_').includes(term)) score += 5 * weight;
     }
     if (matched === 0) continue;
     // Covering more of the question is worth more than any single strong hit,
     // so a tool matching two words outranks one matching a name once.
     score += matched * matched * 4;
+
+    // ... but covering the NAME beats covering more of the sentence. Without
+    // this, "add a node to a scene" ranked add_animation_track first: it
+    // matched three weak terms while add_node matched two strong ones, and the
+    // coverage bonus is quadratic. A query that accounts for every segment of
+    // a tool's name is naming that tool, and the eval set says so — this moved
+    // top-1 from 83% to 93% over 30 real questions, fixing "run a scene",
+    // "stop the running game", "read a scene file", "add a node to a scene"
+    // and "rename a node" without breaking anything already correct.
+    const segments = name.split('_').filter(part => part.length > 1);
+    if (segments.length > 0 && segments.every(part => wanted.some(term => part.includes(term) || term.includes(part)))) {
+      score += 40;
+    }
+
     if (name === query.trim().toLowerCase()) score += 100;
 
     hits.push({

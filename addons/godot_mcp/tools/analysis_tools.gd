@@ -653,10 +653,15 @@ func _load_image(path: String) -> Image:
 ## suggestion.
 func analyze_2d_layout(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
-	var loaded := _load_scene(scene_path)
-	var root: Node = loaded[0]
-	if root == null:
-		return loaded[1]
+	# The live tree when the scene is open, the disk copy otherwise — the same
+	# rule every other read here follows. Loading from disk while the developer
+	# has unsaved edits open answers about the last save, and the caller cannot
+	# tell: the geometry would look wrong for reasons that are not in the file.
+	var acq := _acquire_scene(scene_path)
+	if not acq[2].is_empty():
+		return acq[2]
+	var root: Node = acq[0]
+	var is_live: bool = acq[1]
 
 	# 2 px of overlap into the ground is how art is normally seated, so it is the
 	# default tolerance for "resting" in both directions.
@@ -672,8 +677,9 @@ func analyze_2d_layout(args: Dictionary) -> Dictionary:
 	_collect_2d(root, root, solids, decor)
 
 	if solids.is_empty() and decor.is_empty():
-		root.queue_free()
-		return {&"ok": true, &"scene_path": scene_path, &"note": "No 2D geometry found in this scene.",
+		_discard_scene(root, is_live)
+		return {&"ok": true, &"scene_path": scene_path, &"read_from": "open scene" if is_live else "disk",
+			&"note": "No 2D geometry found in this scene.",
 			&"floating": [], &"over_nothing": [], &"overlaps": [], &"floor_gaps": []}
 
 	var floating: Array = []
@@ -720,7 +726,7 @@ func analyze_2d_layout(args: Dictionary) -> Dictionary:
 				overlaps.append({&"decoration": d[&"path"], &"solid": s[&"path"],
 					&"overlap_px": {&"w": snappedf(hit.size.x, 0.01), &"h": snappedf(hit.size.y, 0.01)}})
 
-	return _finish_layout_report(root, scene_path, solids, decor, floating, over_nothing, overlaps, tolerance, max_items, jump_reach)
+	return _finish_layout_report(root, scene_path, solids, decor, floating, over_nothing, overlaps, tolerance, max_items, jump_reach, is_live)
 
 
 ## Merge the solid footprints along x and report the holes between them — the
@@ -756,7 +762,7 @@ func _floor_gaps(solids: Array) -> Array:
 
 func _finish_layout_report(root: Node, scene_path: String, solids: Array, decor: Array,
 		floating: Array, over_nothing: Array, overlaps: Array,
-		tolerance: float, max_items: int, jump_reach: float) -> Dictionary:
+		tolerance: float, max_items: int, jump_reach: float, is_live: bool) -> Dictionary:
 	var gaps := _floor_gaps(solids)
 	var unreachable := 0
 	if jump_reach > 0.0:
@@ -766,12 +772,17 @@ func _finish_layout_report(root: Node, scene_path: String, solids: Array, decor:
 			gap[&"margin_px"] = snappedf(jump_reach - float(gap[&"width_px"]), 0.01)
 			if not crossable:
 				unreachable += 1
-	root.queue_free()
+	# Never queue_free the live root — that would take the developer's open
+	# scene down with it. _discard_scene is the guard for exactly this.
+	_discard_scene(root, is_live)
 
 	var findings := floating.size() + over_nothing.size() + overlaps.size()
 	return {
 		&"ok": true,
 		&"scene_path": scene_path,
+		# Which copy was measured. An answer about the open scene and one about
+		# the last save can differ, and the caller has no other way to know.
+		&"read_from": "open scene" if is_live else "disk",
 		&"solids_checked": solids.size(),
 		&"decorations_checked": decor.size(),
 		&"tolerance_px": tolerance,

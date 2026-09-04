@@ -696,6 +696,10 @@ func _test_analyze_2d_layout() -> void:
 	var at = preload("res://addons/godot_mcp/tools/analysis_tools.gd").new()
 	var r = at.analyze_2d_layout({"scene_path": scene_path})
 	_check(r.get("ok", false), "analyze_2d_layout ok")
+	# Headless there is no editor, so the disk copy is the only one — but the
+	# answer must always say which it measured, or a caller cannot tell an
+	# analysis of unsaved edits from one of the last save.
+	_check(str(r.get("read_from", "")) == "disk", "says which copy of the scene it measured")
 	_check(int(r.get("solids_checked", 0)) == 3, "found the three collision shapes")
 	_check(int(r.get("decorations_checked", 0)) == 4, "found the four drawn nodes")
 
