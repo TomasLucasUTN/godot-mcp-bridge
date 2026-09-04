@@ -521,7 +521,7 @@ func _start_await_condition(rid: String, args: Dictionary) -> void:
 
 	var timeout_ms := clampi(int(args.get("timeout_ms", 5000)), 1, _AWAIT_CONDITION_MAX_MS)
 	_condition_jobs.append({
-		"rid": rid, "expression": expr, "node": node,
+		"rid": rid, "expression": expr, "node": node, "source": code,
 		"deadline_ms": Time.get_ticks_msec() + timeout_ms,
 		"timeout_ms": timeout_ms,
 		"started_ms": Time.get_ticks_msec(),
@@ -542,10 +542,18 @@ func _tick_condition_jobs() -> void:
 			# A parse-clean expression can still fail at runtime (a null node, a
 			# method that does not exist). Report it once and stop, rather than
 			# re-failing every frame until the timeout.
-			_send_async_result(str(job["rid"]), false, {
+			# `return x` parses cleanly — Expression reads `return` as an unknown
+			# identifier and only fails here, looking it up on a null self. The
+			# engine's message for that says nothing about the real mistake, and
+			# it is the mistake callers make, since every other snippet argument
+			# here IS a function body.
+			var failure := {
 				"error": "The condition failed while evaluating: %s" % expr.get_error_text(),
 				"frames_waited": int(job["frames"]),
-			})
+			}
+			if str(job.get("source", "")).strip_edges().begins_with("return"):
+				failure["hint"] = "Drop the `return`: this argument is an expression, not a function body. Write `node.is_on_floor()`, not `return node.is_on_floor()`. `tree` and `node` are in scope."
+			_send_async_result(str(job["rid"]), false, failure)
 			continue
 		job["last"] = value
 		if _is_truthy(value):
