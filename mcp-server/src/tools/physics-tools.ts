@@ -37,9 +37,9 @@ export const physicsTools: ToolDefinition[] = [
         offset: { type: 'object', description: "Where the shape sits relative to the body origin, e.g. {x:0,y:-23}. Default for a 2D body: the shape sits ON the origin (origin = the feet), so position places the character on the ground. Pass {x:0,y:0} to centre it on the origin instead." },
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_path: { type: 'string', description: 'Path to the physics body/area node' },
-        shape_type: { type: 'string', enum: ['rectangle', 'circle', 'box', 'sphere'], description: '"rectangle" or "circle" for 2D nodes; "box" or "sphere" for 3D nodes.' },
+        shape_type: { type: 'string', enum: ['rectangle', 'circle', 'capsule', 'box', 'sphere'], description: '"rectangle", "circle" or "capsule" for 2D nodes; "box", "sphere" or "capsule" for 3D nodes.' },
         size: {
-          description: 'Shape size: {x,y} for rectangle, a number (radius) for circle/sphere, {x,y,z} for box'
+          description: 'Shape size: {x,y} for rectangle, a number (radius) for circle/sphere, {x,y,z} for box, {x,y} as radius/height for capsule'
         },
         node_name: { type: 'string', description: 'Name for the new CollisionShape node (default: "CollisionShape")' },
         dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }

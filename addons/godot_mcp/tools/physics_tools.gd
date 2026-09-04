@@ -45,7 +45,11 @@ func add_raycast(args: Dictionary) -> Dictionary:
 	raycast.set(&"enabled", enabled)
 
 	if target_position != null:
-		var parsed = _parse_value(target_position)
+		# Typed, not bare: _parse_value leaves [0, 20] an Array, so the array form
+		# that set_node_properties and tilemap coords both accept was refused here.
+		var parsed = VariantCodec.parse_typed_value(
+			target_position, TYPE_VECTOR2 if dimension == "2D" else TYPE_VECTOR3
+		)
 		if dimension == "2D":
 			if not (parsed is Vector2):
 				raycast.free()
@@ -92,7 +96,7 @@ func setup_collision(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 	if shape_type.strip_edges().is_empty():
-		return {&"ok": false, &"error": "Missing 'shape_type'. Use 'rectangle' or 'circle' for 2D nodes, 'box' or 'sphere' for 3D nodes."}
+		return {&"ok": false, &"error": "Missing 'shape_type'. Use 'rectangle', 'circle' or 'capsule' for 2D nodes, 'box', 'sphere' or 'capsule' for 3D nodes."}
 
 	var result := _acquire_scene(scene_path)
 	if not result[2].is_empty():
@@ -131,9 +135,15 @@ func setup_collision(args: Dictionary) -> Dictionary:
 				var sphere := SphereShape3D.new()
 				sphere.radius = float(size) if size != null else 0.5
 				shape3d = sphere
+			"capsule":
+				var capsule3d := CapsuleShape3D.new()
+				var capsule_size3d: Vector2 = VariantCodec.parse_typed_value(size, TYPE_VECTOR2) if size != null else Vector2(0.5, 2.0)
+				capsule3d.radius = capsule_size3d.x
+				capsule3d.height = capsule_size3d.y
+				shape3d = capsule3d
 			_:
 				_discard_scene(root, is_live)
-				return {&"ok": false, &"error": "Invalid 'shape_type' for a 3D node: %s. Use 'box' or 'sphere'." % shape_type}
+				return {&"ok": false, &"error": "Invalid 'shape_type' for a 3D node: %s. Use 'box', 'sphere' or 'capsule'." % shape_type}
 	else:
 		match shape_type:
 			"rectangle":
@@ -144,9 +154,17 @@ func setup_collision(args: Dictionary) -> Dictionary:
 				var circle := CircleShape2D.new()
 				circle.radius = float(size) if size != null else 16.0
 				shape = circle
+			"capsule":
+				# The default body shape for a 2D platformer character, and the
+				# tool used to answer it with "use rectangle or circle".
+				var capsule := CapsuleShape2D.new()
+				var capsule_size: Vector2 = VariantCodec.parse_typed_value(size, TYPE_VECTOR2) if size != null else Vector2(16, 32)
+				capsule.radius = capsule_size.x
+				capsule.height = capsule_size.y
+				shape = capsule
 			_:
 				_discard_scene(root, is_live)
-				return {&"ok": false, &"error": "Invalid 'shape_type' for a 2D node: %s. Use 'rectangle' or 'circle'." % shape_type}
+				return {&"ok": false, &"error": "Invalid 'shape_type' for a 2D node: %s. Use 'rectangle', 'circle' or 'capsule'." % shape_type}
 
 	var collision_node_type: String = "CollisionShape3D" if is_3d else "CollisionShape2D"
 

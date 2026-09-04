@@ -103,6 +103,7 @@ func _initialize() -> void:
 	_test_skeleton_tools()
 	_test_mp_authority()
 	_test_root_name_resolves_as_root()
+	_test_shape_and_vector_forms()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -919,6 +920,32 @@ func _test_root_name_resolves_as_root() -> void:
 	_check(paths2.has("Root/Mine"), "alias does not shadow a child of the same name")
 
 	_check(not st.add_node({"scene_path": scene, "node_name": "Nope", "node_type": "Node2D", "parent_path": "Absent/Deep"}).get("ok", true), "a genuinely missing path still fails")
+	_rm(scene)
+
+# Forms a caller reasonably writes and the tools used to refuse: a capsule body,
+# a vector as [x, y], and a lowercase player_type.
+func _test_shape_and_vector_forms() -> void:
+	print("
+[shape and vector argument forms]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var pt = preload("res://addons/godot_mcp/tools/physics_tools.gd").new()
+	var at = preload("res://addons/godot_mcp/tools/audio_tools.gd").new()
+	var scene := "res://__gdtest_forms.tscn"
+	_rm(scene)
+	st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"})
+	st.add_node({"scene_path": scene, "node_name": "Body", "node_type": "CharacterBody2D", "parent_path": "."})
+
+	_check(pt.setup_collision({"scene_path": scene, "node_path": "Body", "shape_type": "capsule", "size": [16, 32]}).get("ok", false), "setup_collision accepts a 2D capsule")
+	var info = pt.get_collision_info({"scene_path": scene, "node_path": "Body"})
+	var shapes: Array = info.get("collision_shapes", [])
+	_check(shapes.size() == 1 and str(shapes[0].get("shape_type", "")) == "CapsuleShape2D", "and builds a CapsuleShape2D")
+
+	_check(pt.add_raycast({"scene_path": scene, "parent_path": "Body", "node_name": "Ray", "target_position": [0, 20]}).get("ok", false), "add_raycast accepts target_position as [x, y]")
+	var ray_paths := _all_paths(st.read_scene({"scene_path": scene}).get("root", {}))
+	_check(ray_paths.has("Body/Ray"), "and the raycast lands under the body")
+
+	_check(at.add_audio_player({"scene_path": scene, "parent_path": ".", "node_name": "Sfx", "player_type": "2d"}).get("ok", false), "add_audio_player accepts a lowercase player_type")
+	_check(not pt.setup_collision({"scene_path": scene, "node_path": "Body", "shape_type": "triangle"}).get("ok", true), "an unsupported shape is still refused")
 	_rm(scene)
 
 # Every node path in a read_scene tree, flattened.

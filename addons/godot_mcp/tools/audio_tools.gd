@@ -18,7 +18,8 @@ func add_audio_player(args: Dictionary) -> Dictionary:
 	var scene_path: String = _ensure_res_path(str(args.get(&"scene_path", "")))
 	var parent_path: String = str(args.get(&"parent_path", "."))
 	var node_name: String = str(args.get(&"node_name", "AudioStreamPlayer"))
-	var player_type: String = str(args.get(&"player_type", ""))
+	# Case-folded: the schema says "2D", and callers write "2d" about as often.
+	var player_type: String = str(args.get(&"player_type", "")).to_upper()
 	var stream_path: String = str(args.get(&"stream_path", ""))
 	var bus: String = str(args.get(&"bus", ""))
 	var autoplay: bool = bool(args.get(&"autoplay", false))
