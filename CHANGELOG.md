@@ -5,6 +5,28 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [1.2.1] - 2026-09-04
+
+See [`release-notes/v1.2.1.md`](./release-notes/v1.2.1.md).
+
+The default tool surface, which every request pays for, goes from 10,835 tokens
+to 9,533 without losing a capability — and the measurement that had been
+understating it is fixed. Seven tools the server answers itself ride in every
+tools/list but were defined inline in the handler, out of reach of the
+measuring script, so the published figure was 8,764 for a surface costing
+10,067.
+
+What came out was text that was already elsewhere: the Godot variant table the
+scene-editing guide lists word for word, run_scene's own response fields, the
+child key styles explained twice, and eight different wordings of dry_run. The
+22 toolset names and the guide slugs were repeated in prose; they are `enum`
+now, which is shorter and is what a client validates against.
+
+One behaviour change: `modify_node_property` is no longer in the default
+surface. It is `set_node_properties` with one entry in the map, and carrying
+both cost 354 tokens per request. It falls back to `scene_editing`, stays
+callable by name, and `set_node_properties` now carries the warning it held.
+
 ## [1.2.0] - 2026-09-04
 
 See [`release-notes/v1.2.0.md`](./release-notes/v1.2.0.md).
