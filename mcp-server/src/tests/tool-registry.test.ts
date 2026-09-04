@@ -155,3 +155,24 @@ describe('version consistency', () => {
     expect(server.packages[0].version).toBe(pkg.version);
   });
 });
+
+/**
+ * A tool's toolset decides who can see it, and an unnamed tool falls back to
+ * whichever file it happens to live in. batch_runtime drives the running game
+ * and is declared in project-tools.ts, so it landed in `editor` — invisible to
+ * anyone who enabled `runtime`, which is exactly the set of people who want it.
+ * The routing table already knows which tools are runtime tools; this checks
+ * the two agree.
+ */
+describe('runtime tools are in the runtime toolset', () => {
+  it('nothing routed to the game is filed under another area', async () => {
+    const { RUNTIME_ONLY_TOOLS } = await import('../godot-bridge.js');
+    const { toolsetOf } = await import('../tools/index.js');
+    const misfiled = [...RUNTIME_ONLY_TOOLS]
+      .map(name => [name, toolsetOf(name)] as const)
+      // `core` is fine: a few runtime tools are common enough to load by default.
+      .filter(([, set]) => set !== 'runtime' && set !== 'core')
+      .map(([name, set]) => `${name} -> ${set}`);
+    expect(misfiled).toEqual([]);
+  });
+});

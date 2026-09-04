@@ -102,6 +102,7 @@ const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
 // Tools that are ALWAYS handled by the runtime helper (the in-game autoload).
 // list_signal_connections is conditionally routed (see routeIsRuntime()).
 export const RUNTIME_ONLY_TOOLS = new Set<string>([
+  'batch_runtime',
   'take_screenshot',
   'send_input',
   'query_runtime_node',

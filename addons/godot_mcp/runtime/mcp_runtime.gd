@@ -189,7 +189,12 @@ func _handle_message(json_string: String) -> void:
 				"type": "tool_result",
 				"id": rid,
 				"success": success,
-				"result": result if success else null,
+				# The payload goes back on FAILURE too, which the editor side has
+				# always done and this side never did: everything a failed tool
+				# says beyond its error string — which operation of a batch broke,
+				# what it found instead, what was clamped — was being dropped, and
+				# the caller got a bare "Tool execution failed".
+				"result": result,
 				"error": str(result.get("error", "")) if not success else "",
 			})
 		_:
@@ -220,8 +225,92 @@ func _parse_stringified_args(args: Dictionary) -> void:
 					args[key] = parsed
 
 
+## Tools that answer LATER, through the async job queues (rid + tick), rather
+## than returning a Dictionary here. A batch cannot carry them: one request id
+## cannot fan out into several deferred answers, and pretending otherwise would
+## return "ok" for work that had not happened — the failure this surface is
+## most careful about.
+const _ASYNC_RUNTIME_TOOLS := {
+	"step_frames": "it answers after N frames",
+	"await_condition": "it answers when the condition holds",
+	"await_signal_runtime": "it answers when the signal fires",
+	"monitor_properties": "it answers after sampling N frames — and it takes setup_code, which is the one-call version of trigger-then-watch",
+	"replay_input_sequence": "it answers after playing the sequence — which is itself the batched form of send_input",
+	"wait": "it answers after the wait",
+}
+
+
+## Run several runtime tools in ONE round trip.
+##
+## Driving a running game is inherently several calls — press, look, press,
+## look — and each one is a WebSocket round trip through the bridge while the
+## game keeps running underneath. The editor side has had batch_execute for
+## this; the runtime side, where the round trips actually hurt, had nothing.
+##
+## Synchronous tools only, by construction (see _ASYNC_RUNTIME_TOOLS). Runs in
+## order, stops at the first failure when stop_on_error, and reports each
+## result positionally so a caller can tell which step went wrong.
+func _batch_runtime(args: Dictionary) -> Dictionary:
+	var ops = args.get("operations", [])
+	if ops is String:
+		var parsed = JSON.parse_string(ops)
+		if parsed is Array:
+			ops = parsed
+	if not (ops is Array) or (ops as Array).is_empty():
+		return {"ok": false, "error": "Missing 'operations' (non-empty array of {tool, args})"}
+	if (ops as Array).size() > 50:
+		return {"ok": false, "error": "Too many operations (max 50 per runtime batch)"}
+
+	var stop_on_error := bool(args.get("stop_on_error", false))
+	var results: Array = []
+	var all_ok := true
+
+	for i in range((ops as Array).size()):
+		var op_v = (ops as Array)[i]
+		if not (op_v is Dictionary) or not (op_v as Dictionary).has("tool"):
+			results.append({"ok": false, "error": "Operation %d must be an object with a 'tool' field" % i})
+			all_ok = false
+			if stop_on_error:
+				break
+			continue
+
+		var op: Dictionary = op_v
+		var op_tool := str(op.get("tool", ""))
+		if _ASYNC_RUNTIME_TOOLS.has(op_tool):
+			results.append({"ok": false, "error": "'%s' cannot be batched: %s. Call it on its own." % [op_tool, _ASYNC_RUNTIME_TOOLS[op_tool]]})
+			all_ok = false
+			if stop_on_error:
+				break
+			continue
+		if op_tool == "batch_runtime":
+			results.append({"ok": false, "error": "batch_runtime cannot be nested"})
+			all_ok = false
+			if stop_on_error:
+				break
+			continue
+
+		var op_args: Dictionary = op.get("args", {}) if op.get("args", {}) is Dictionary else {}
+		_parse_stringified_args(op_args)
+		var res := _dispatch(op_tool, op_args)
+		results.append(res)
+		if not res.get("ok", false):
+			all_ok = false
+			if stop_on_error:
+				break
+
+	return {
+		"ok": all_ok,
+		"count": results.size(),
+		"requested": (ops as Array).size(),
+		"all_ok": all_ok,
+		"results": results,
+	}
+
+
 func _dispatch(tool_name: String, args: Dictionary) -> Dictionary:
 	match tool_name:
+		"batch_runtime":
+			return _batch_runtime(args)
 		"take_screenshot":
 			return _take_screenshot(args)
 		"send_input":

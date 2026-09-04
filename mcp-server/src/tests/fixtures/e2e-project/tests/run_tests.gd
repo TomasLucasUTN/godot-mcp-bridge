@@ -28,6 +28,7 @@ func _initialize() -> void:
 	_test_tools_do_not_claim_work_they_did_not_do()
 	await _test_dry_run_writes_nothing()
 	await _test_dry_run_on_file_writes()
+	_test_runtime_batch()
 	_test_detached_pid_bookkeeping()
 	_test_path_guard_holds_against_traversal()
 	_test_read_scene_subtree()
@@ -562,6 +563,64 @@ func _ready():
 	_rm(path)
 	_rm(moved)
 	_rm(fresh)
+
+# batch_runtime runs several runtime tools in one round trip. Driving a game is
+# press-look-press-look and each call is a WebSocket round trip while the game
+# keeps running underneath; measured on a live game, six calls went from 43ms
+# one at a time to 6ms batched.
+#
+# The part that needs a test is what it REFUSES. Half the runtime surface
+# answers later through job queues, and one request id cannot fan out into
+# several deferred answers — running those inside a batch would return "ok"
+# for work that had not happened.
+func _test_runtime_batch() -> void:
+	print("
+[batch_runtime]")
+	var rt = preload("res://addons/godot_mcp/runtime/mcp_runtime.gd").new()
+	# Not added to the tree: _ready() would open a WebSocket, and none of what
+	# is checked here needs one.
+
+	var empty = rt._batch_runtime({})
+	_check(not empty.get("ok", true), "an empty batch is refused")
+
+	var too_many: Array = []
+	for i in range(51):
+		too_many.append({"tool": "seed_rng", "args": {"seed": i}})
+	_check(not rt._batch_runtime({"operations": too_many}).get("ok", true), "and so is one over the cap")
+
+	# Every async tool by name, because forgetting one is how a caller gets a
+	# silent lie rather than an error.
+	for tool_name in ["step_frames", "await_condition", "await_signal_runtime",
+			"monitor_properties", "replay_input_sequence", "wait"]:
+		var r = rt._batch_runtime({"operations": [{"tool": tool_name, "args": {}}]})
+		var first: Dictionary = (r.get("results", []) as Array)[0]
+		_check(not first.get("ok", true), "%s is refused inside a batch" % tool_name)
+		_check("cannot be batched" in str(first.get("error", "")), "and says why, by name")
+
+	var nested = rt._batch_runtime({"operations": [{"tool": "batch_runtime", "args": {"operations": []}}]})
+	_check("cannot be nested" in str(((nested.get("results", []) as Array)[0] as Dictionary).get("error", "")), "a batch cannot nest")
+
+	# Order and positional results: three ops in, three results out, in order.
+	var ran = rt._batch_runtime({"operations": [
+		{"tool": "seed_rng", "args": {"seed": 1}},
+		{"tool": "definitely_not_a_tool", "args": {}},
+		{"tool": "seed_rng", "args": {"seed": 2}},
+	]})
+	_check(int(ran.get("count", 0)) == 3, "every operation gets a result")
+	_check(not ran.get("all_ok", true), "and one failure makes the batch not ok")
+	var results: Array = ran.get("results", [])
+	_check((results[0] as Dictionary).get("ok", false), "the first succeeded")
+	_check(not (results[1] as Dictionary).get("ok", true), "the second is the one that failed")
+	_check((results[2] as Dictionary).get("ok", false), "and it kept going")
+
+	var stopped = rt._batch_runtime({"operations": [
+		{"tool": "definitely_not_a_tool", "args": {}},
+		{"tool": "seed_rng", "args": {"seed": 3}},
+	], "stop_on_error": true})
+	_check(int(stopped.get("count", 0)) == 1, "stop_on_error stops at the first failure")
+	_check(int(stopped.get("requested", 0)) == 2, "and still says how many were asked for")
+
+	rt.free()
 
 # The contract the TypeScript side declares, written by
 # scripts/export-tool-contract.mjs at build time. It is the join between the two

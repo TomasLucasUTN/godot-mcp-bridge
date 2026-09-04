@@ -67,7 +67,7 @@ const CORE_TOOL_NAMES: string[] = [
 const SEMANTIC_GROUPS: Record<string, string[]> = {
   // Drive and inspect the running game.
   runtime: [
-    'get_runtime_status', 'wait', 'send_input', 'query_runtime_node',
+    'get_runtime_status', 'wait', 'send_input', 'query_runtime_node', 'batch_runtime',
     'connect_signal_runtime', 'disconnect_signal_runtime', 'tween_property_runtime',
     'play_animation_runtime', 'dump_control_tree', 'click_control_runtime',
     'get_focused_control', 'assert_screen_text', 'monitor_properties', 'game_eval', 'replay_input_sequence',

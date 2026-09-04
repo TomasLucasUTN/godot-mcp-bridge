@@ -513,6 +513,23 @@ export const projectTools: ToolDefinition[] = [
     }
   },
   {
+    name: 'batch_runtime',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    description: "Run several RUNTIME tools inside the running game in ONE round trip. Driving a game is inherently several calls — press, look, press, look — and each one is a WebSocket round trip while the game keeps running underneath; batch_execute covers the editor side and could never reach these. Synchronous runtime tools only: step_frames, wait, await_condition, await_signal_runtime, monitor_properties and replay_input_sequence answer later through their own job queues and are refused by name, with a pointer to the tool that already does that shape (monitor_properties takes setup_code; replay_input_sequence IS batched input). Runs in order, returns one result per operation positionally. REQUIRES the game running with MCPRuntime connected.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operations: {
+          type: 'array',
+          description: 'Ordered list of {tool, args}, max 50. e.g. [{"tool":"send_input","args":{...}}, {"tool":"query_runtime_node","args":{"node_path":"/root/Main/Player"}}]',
+          items: { type: 'object', description: '{ tool: string, args: object }' }
+        },
+        stop_on_error: { type: 'boolean', description: 'Stop at the first operation that fails. Default false (run them all).' }
+      },
+      required: ['operations']
+    }
+  },
+  {
     name: 'game_eval',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     description: "Run a GDScript snippet inside the RUNNING game (like a REPL) and return the result. The snippet is a function body that receives `tree` (the SceneTree) and `node` (the node at node_path, or null); use `return X` to get a value back. Powerful for driving/inspecting live state (e.g. `return tree.get_nodes_in_group(\"enemies\").size()` or `node.velocity = Vector2(100,0)`). REQUIRES the game running with MCPRuntime. A runtime error inside the snippet cannot be caught and will time out the call — the compile step is guarded, execution is on you. Where its output lands, measured: print() goes to the game's own stdout, while push_error and push_warning travel the debugger channel and come back through get_errors - NOT through get_console_log, which is the EDITOR's Output panel.",

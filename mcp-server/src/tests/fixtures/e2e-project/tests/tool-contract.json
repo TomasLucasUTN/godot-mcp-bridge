@@ -331,6 +331,14 @@
   "destructive": false
  },
  {
+  "name": "batch_runtime",
+  "required": [
+   "operations"
+  ],
+  "read_only": false,
+  "destructive": false
+ },
+ {
   "name": "connect_signal_runtime",
   "required": [
    "from_node_path",
