@@ -102,6 +102,7 @@ func _initialize() -> void:
 	_test_sprite_animation()
 	_test_skeleton_tools()
 	_test_mp_authority()
+	_test_root_name_resolves_as_root()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -890,6 +891,42 @@ func _test_analyze_2d_layout() -> void:
 
 	at.free()
 	_rm(scene_path)
+
+# Callers write node paths the way a scene dump prints them — rooted at the root's
+# own name. Godot's get_node_or_null resolves neither "Root" nor "Root/Child", so
+# _find_node accepts both, without letting the alias shadow a real child.
+func _test_root_name_resolves_as_root() -> void:
+	print("
+[root name resolves as root]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var scene := "res://__gdtest_rootname.tscn"
+	_rm(scene)
+	_check(st.create_scene({"scene_path": scene, "root_node_type": "Node2D", "root_node_name": "Root"}).get("ok", false), "scene created")
+
+	var by_name = st.add_node({"scene_path": scene, "node_name": "Child", "node_type": "Node2D", "parent_path": "Root"})
+	_check(by_name.get("ok", false), "parent_path 'Root' resolves to the root")
+
+	var prefixed = st.add_node({"scene_path": scene, "node_name": "Grand", "node_type": "Marker2D", "parent_path": "Root/Child"})
+	_check(prefixed.get("ok", false), "parent_path 'Root/Child' resolves through the root prefix")
+
+	var grand_paths := _all_paths(st.read_scene({"scene_path": scene}).get("root", {}))
+	_check(grand_paths.has("Child/Grand"), "Grand landed under Child, not the root")
+
+	# A child that shares the root's name must still win the literal lookup.
+	_check(st.add_node({"scene_path": scene, "node_name": "Root", "node_type": "Node2D", "parent_path": "."}).get("ok", false), "homonym child added")
+	_check(st.add_node({"scene_path": scene, "node_name": "Mine", "node_type": "Marker2D", "parent_path": "Root"}).get("ok", false), "homonym parent accepted")
+	var paths2 := _all_paths(st.read_scene({"scene_path": scene}).get("root", {}))
+	_check(paths2.has("Root/Mine"), "alias does not shadow a child of the same name")
+
+	_check(not st.add_node({"scene_path": scene, "node_name": "Nope", "node_type": "Node2D", "parent_path": "Absent/Deep"}).get("ok", true), "a genuinely missing path still fails")
+	_rm(scene)
+
+# Every node path in a read_scene tree, flattened.
+func _all_paths(node: Dictionary) -> Array:
+	var out: Array = [str(node.get("path", ""))]
+	for child in node.get("children", []):
+		out.append_array(_all_paths(child))
+	return out
 
 func _add_solid(root: Node2D, node_name: String, centre: Vector2, size: Vector2) -> void:
 	var body := StaticBody2D.new()

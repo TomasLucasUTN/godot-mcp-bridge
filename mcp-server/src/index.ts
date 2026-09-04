@@ -279,16 +279,44 @@ export function unknownArgumentError(
   const unknown = Object.keys(args).filter((k) => !declared.includes(k) && !UNIVERSAL_ARGS.has(k));
   if (unknown.length === 0) return null;
 
-  const suggestions: Record<string, string> = {};
+  // Edit distance alone picks by accident. `to_node_path` is the same distance
+  // from `to_node` as from `scene_path`, and the tie went to whichever was
+  // declared first — so connect_signal answered "did you mean scene_path?" for
+  // an argument that plainly meant to_node, which is worse than saying nothing.
+  // Shared name parts break the tie: to_node_path and to_node share {to, node};
+  // scene_path shares only {path}.
+  const parts = (s: string) => new Set(s.toLowerCase().split('_').filter(Boolean));
+  // Not every shared part is equally telling. Almost every argument here ends in
+  // `_path`, so sharing "path" says close to nothing, while sharing "track" all
+  // but names the argument. Weight each part by how rare it is among the tool's
+  // own arguments, the way tool search ranks query terms: without this,
+  // set_animation_keyframe answered `track_path` with "did you mean node_path?"
+  // when the argument it wanted was track_index.
+  const partFrequency = new Map<string, number>();
+  for (const candidate of declared) {
+    for (const part of parts(candidate)) partFrequency.set(part, (partFrequency.get(part) ?? 0) + 1);
+  }
+  const suggestions: Record<string, string | string[]> = {};
   for (const key of unknown) {
-    let best: string | undefined;
-    let bestScore = Infinity;
-    for (const candidate of declared) {
-      const d = editDistance(key.toLowerCase(), candidate.toLowerCase());
-      if (d < bestScore) { bestScore = d; best = candidate; }
-    }
-    // Only suggest when it is plausibly a typo rather than a different idea.
-    if (best && bestScore <= Math.max(3, Math.ceil(best.length / 2))) suggestions[key] = best;
+    const keyParts = parts(key);
+    const ranked = declared
+      .map((candidate) => {
+        const overlap = [...parts(candidate)].filter((p) => keyParts.has(p));
+        const shared = overlap.reduce((sum, p) => sum + 1 / (partFrequency.get(p) ?? 1), 0);
+        return { candidate, shared, distance: editDistance(key.toLowerCase(), candidate.toLowerCase()) };
+      })
+      // Only plausible typos, not different ideas entirely.
+      .filter((c) => c.distance <= Math.max(3, Math.ceil(c.candidate.length / 2)) || c.shared > 0)
+      .sort((a, b) => (b.shared - a.shared) || (a.distance - b.distance));
+
+    if (ranked.length === 0) continue;
+    // When the top two are equally plausible, offer both rather than picking
+    // one with false confidence — a wrong single suggestion sends the caller
+    // to change the wrong key.
+    const [first, second] = ranked;
+    suggestions[key] = second && second.shared === first.shared && second.distance === first.distance
+      ? [first.candidate, second.candidate]
+      : first.candidate;
   }
 
   return {

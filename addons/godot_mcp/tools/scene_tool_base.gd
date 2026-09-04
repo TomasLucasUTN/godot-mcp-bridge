@@ -140,7 +140,19 @@ func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
 func _find_node(scene_root: Node, node_path: String) -> Node:
 	if node_path == "." or node_path.is_empty():
 		return scene_root
-	return scene_root.get_node_or_null(node_path)
+	var found := scene_root.get_node_or_null(node_path)
+	if found != null:
+		return found
+	# Callers routinely write the path the way a scene dump prints it, rooted at
+	# the root's own name ("Player" or "Player/Sprite2D") rather than relative to
+	# it. Godot resolves neither. Accept both, but only after the literal lookup
+	# missed, so a child that happens to share the root's name still wins.
+	var root_name := String(scene_root.name)
+	if node_path == root_name:
+		return scene_root
+	if node_path.begins_with(root_name + "/"):
+		return scene_root.get_node_or_null(node_path.substr(root_name.length() + 1))
+	return null
 
 ## Standard error for a node path that did not resolve.
 ##
