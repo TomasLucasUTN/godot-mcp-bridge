@@ -31,6 +31,10 @@ export const projectTools: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        include_builtin: {
+          type: 'boolean',
+          description: 'Include the engine and editor actions (ui_*, spatial_editor/*) the project did not define. Default false: on a real project they are almost the whole answer and none of it is yours.'
+        },
         include_deadzones: {
           type: 'boolean',
           description: 'Include the per-action "deadzone" field in each action object (default: true). When true, each action is {"deadzone": 0.5, "events": [...]}. When false, each action is {"events": [...]}.'

@@ -248,6 +248,7 @@ func set_main_scene(args: Dictionary) -> Dictionary:
 # =============================================================================
 func get_input_map(args: Dictionary) -> Dictionary:
 	var include_deadzones: bool = bool(args.get(&"include_deadzones", true))
+	var include_builtin: bool = bool(args.get(&"include_builtin", false))
 
 	# Merge action names from both sources:
 	# - InputMap.get_actions() covers built-ins (ui_*, spatial_editor/*, etc.)
@@ -266,8 +267,22 @@ func get_input_map(args: Dictionary) -> Dictionary:
 	sorted_names.sort()
 
 	var result: Dictionary = {}
+	var builtin_skipped := 0
 	for action_name: String in sorted_names:
 		var ps_key: String = "input/" + action_name
+		# The editor's InputMap carries every action the EDITOR uses — the whole
+		# ui_* set plus spatial_editor/* and friends. Measured on a project with
+		# one action of its own, they were 14,137 of the 14,300 characters this
+		# returned, on every call.
+		#
+		# Filtered by namespace rather than by ProjectSettings: the engine
+		# registers its ui_* defaults as project settings too, so has_setting()
+		# is true for them and cannot tell them apart. ui_* and anything with a
+		# "/" are the engine's reserved namespaces; what is left is what the
+		# game author wrote.
+		if not include_builtin and (action_name.begins_with("ui_") or "/" in action_name):
+			builtin_skipped += 1
+			continue
 		var events: Array = []
 		var deadzone: float = 0.5
 
@@ -292,7 +307,11 @@ func get_input_map(args: Dictionary) -> Dictionary:
 			action_data[&"deadzone"] = deadzone
 		result[action_name] = action_data
 
-	return {&"ok": true, &"actions": result, &"count": result.size()}
+	var out := {&"ok": true, &"actions": result, &"count": result.size()}
+	if builtin_skipped > 0:
+		out[&"builtin_skipped"] = builtin_skipped
+		out[&"note"] = "%d engine/editor action(s) (ui_*, spatial_editor/*, ...) omitted — they are not defined by this project. Pass include_builtin: true for the full map." % builtin_skipped
+	return out
 
 func _describe_input_event(e: InputEvent) -> Dictionary:
 	var item := {&"type": e.get_class()}

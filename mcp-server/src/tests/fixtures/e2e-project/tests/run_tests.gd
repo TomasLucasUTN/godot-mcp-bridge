@@ -113,6 +113,7 @@ func _initialize() -> void:
 	_test_export_log_is_readable()
 	_test_map_counts_only_drawable_edges()
 	_test_enum_errors_name_their_options()
+	_test_input_map_is_the_projects_own()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1195,6 +1196,31 @@ func _test_enum_errors_name_their_options() -> void:
 	_check(not tex.get("ok", true), "an unknown texture type is refused")
 	_check("GradientTexture2D" in str(tex.get("error", "")), "and that refusal lists its options too")
 	_rm(scene)
+
+# The editor's InputMap carries every action the EDITOR uses. Returning them
+# made the answer almost entirely actions the project never defined — measured
+# at 14,137 of 14,300 characters on a project with one action of its own.
+func _test_input_map_is_the_projects_own() -> void:
+	print("\n[input map is the project own]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+	pt.configure_input_map({"operation": "set", "action": "__gdtest_fire", "events": [{"type": "key", "keycode": 32}]})
+
+	var mine = pt.get_input_map({})
+	_check(mine.get("ok", false), "get_input_map answers ok")
+	_check(mine.get("actions", {}).has("__gdtest_fire"), "the project's own action is there")
+	var names: Array = mine.get("actions", {}).keys()
+	var strays: Array = []
+	for n in names:
+		if str(n).begins_with("ui_") or "/" in str(n):
+			strays.append(n)
+	_check(strays.is_empty(), "no engine or editor actions leak in (%s)" % str(strays))
+
+	var everything = pt.get_input_map({"include_builtin": true})
+	_check(everything.get("actions", {}).size() > mine.get("actions", {}).size(), "include_builtin returns more")
+	_check(not everything.has("builtin_skipped"), "and reports nothing skipped")
+	_check(int(mine.get("builtin_skipped", 0)) > 0, "while the default says how many it left out")
+
+	pt.configure_input_map({"operation": "remove", "action": "__gdtest_fire"})
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:
