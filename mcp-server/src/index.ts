@@ -285,7 +285,11 @@ export function unknownArgumentError(
   // an argument that plainly meant to_node, which is worse than saying nothing.
   // Shared name parts break the tie: to_node_path and to_node share {to, node};
   // scene_path shares only {path}.
-  const parts = (s: string) => new Set(s.toLowerCase().split('_').filter(Boolean));
+  // Singular and plural are the same part: validate_meshes takes `paths` while
+  // every tool around it takes `scene_path`, and without this the two share
+  // nothing and the caller is told nothing.
+  const stem = (p: string) => (p.length > 3 && p.endsWith('s') ? p.slice(0, -1) : p);
+  const parts = (s: string) => new Set(s.toLowerCase().split('_').filter(Boolean).map(stem));
   // Not every shared part is equally telling. Almost every argument here ends in
   // `_path`, so sharing "path" says close to nothing, while sharing "track" all
   // but names the argument. Weight each part by how rare it is among the tool's

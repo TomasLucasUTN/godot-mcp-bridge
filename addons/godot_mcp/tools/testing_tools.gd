@@ -300,13 +300,15 @@ func validate_scene_integrity(args: Dictionary) -> Dictionary:
 func validate_meshes(args: Dictionary) -> Dictionary:
 	var paths_arg = args.get(&"paths", [])
 	var targets: PackedStringArray = []
-	if paths_arg is Array and not paths_arg.is_empty():
+	var explicit: bool = paths_arg is Array and not (paths_arg as Array).is_empty()
+	if explicit:
 		for p in paths_arg:
 			targets.append(_ensure_res_path(str(p)))
 	else:
 		_collect_mesh_files("res://", targets)
 
 	var invalid: Array = []
+	var skipped: Array = []
 	var checked := 0
 	for path in targets:
 		if not FileAccess.file_exists(path):
@@ -317,19 +319,28 @@ func validate_meshes(args: Dictionary) -> Dictionary:
 			invalid.append({&"path": path, &"issues": ["Failed to load (corrupt or unreadable)"]})
 			continue
 		if not (res is Mesh):
-			continue  # a .tres/.res that isn't a mesh — skip, don't count it
+			# Silent in a project-wide sweep, where skipping non-meshes is the
+			# whole point. Named when the caller asked for this path by hand:
+			# passing a .tscn otherwise came back "Validated 0 mesh(es)" with
+			# nothing saying the file had been dropped.
+			if explicit:
+				skipped.append({&"path": path, &"reason": "Not a mesh resource (%s). This tool reads mesh files; a scene's meshes live inside its MeshInstance nodes." % [res.get_class()]})
+			continue
 		checked += 1
 		var issues := _mesh_issues(res)
 		if not issues.is_empty():
 			invalid.append({&"path": path, &"issues": issues})
 
-	return {
+	var out := {
 		&"ok": true,
 		&"total": checked,
 		&"invalid_count": invalid.size(),
 		&"invalid": invalid,
 		&"message": "Validated %d mesh(es): %d with issues." % [checked, invalid.size()],
 	}
+	if not skipped.is_empty():
+		out[&"skipped"] = skipped
+	return out
 
 ## Problems with a mesh, human-readable (empty array = healthy).
 func _mesh_issues(m: Mesh) -> Array:

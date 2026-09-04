@@ -65,7 +65,7 @@ export const testingTools: ToolDefinition[] = [
   {
     name: 'validate_meshes',
     annotations: { readOnlyHint: true, openWorldHint: false },
-    description: 'Sweep mesh resources for empty/degenerate geometry: a mesh with zero surfaces, a surface with zero vertices, or a file that fails to load. Catches "created/imported but empty" meshes that silently render nothing. Pass "paths" (res:// .mesh/.obj/.tres/.res files) to check a specific set, or omit to sweep every mesh in the project. The mesh analogue of validate_scripts. Returns {total, invalid_count, invalid:[{path, issues}]}.',
+    description: 'Sweep mesh resources for empty/degenerate geometry: a mesh with zero surfaces, a surface with zero vertices, or a file that fails to load. Catches "created/imported but empty" meshes that silently render nothing. Pass "paths" (res:// .mesh/.obj/.tres/.res files) to check a specific set, or omit to sweep every mesh in the project. The mesh analogue of validate_scripts. Returns {total, invalid_count, invalid:[{path, issues}]}, plus skipped:[] naming any path you passed that is not a mesh file.',
     inputSchema: {
       type: 'object',
       properties: {
