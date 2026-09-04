@@ -109,6 +109,7 @@ func _initialize() -> void:
 	_test_navigation_info_points_somewhere()
 	_test_validate_meshes_names_what_it_dropped()
 	_test_search_skips_addons()
+	_test_input_map_round_trips()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1077,6 +1078,30 @@ func _test_search_skips_addons() -> void:
 	var opted_in = ft.search_project({"query": query, "include_addons": true})
 	_check(int(opted_in.get("returned", 0)) > 0, "include_addons brings them back")
 	_check(not opted_in.has("skipped_addon_files"), "and then nothing is reported as skipped")
+
+# get_input_map reports key events as {"keycode": 83}; handing one straight back
+# to configure_input_map was rejected, and the action was created bound to
+# nothing while the call still answered ok.
+func _test_input_map_round_trips() -> void:
+	print("\n[input map round-trips its own output]")
+	var pt = preload("res://addons/godot_mcp/tools/project_tools.gd").new()
+
+	var numeric = pt.configure_input_map({"operation": "set", "action": "__gdtest_jump", "events": [{"type": "key", "keycode": 32}]})
+	_check(numeric.get("ok", false), "a numeric keycode is accepted")
+	_check(numeric.get("events", []).size() == 1, "and binds one event")
+
+	var named = pt.configure_input_map({"operation": "set", "action": "__gdtest_jump", "events": [{"type": "key", "key": "Space"}]})
+	_check(named.get("ok", false), "a key name still works")
+
+	var reported = pt.get_input_map({}).get("actions", {}).get("__gdtest_jump", {})
+	_check(reported.get("events", []).size() == 1, "and get_input_map reports the binding back")
+
+	var broken = pt.configure_input_map({"operation": "set", "action": "__gdtest_broken", "events": [{"type": "key"}]})
+	_check(not broken.get("ok", true), "an action whose every event failed is not reported as ok")
+	_check(broken.get("event_errors", []).size() == 1, "and says what went wrong")
+
+	pt.configure_input_map({"operation": "remove", "action": "__gdtest_jump"})
+	pt.configure_input_map({"operation": "remove", "action": "__gdtest_broken"})
 
 # Every node path in a read_scene tree, flattened.
 func _all_paths(node: Dictionary) -> Array:

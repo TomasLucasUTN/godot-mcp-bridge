@@ -404,6 +404,16 @@ func _input_map_set(action: String, args: Dictionary) -> Dictionary:
 	_save_and_refresh_settings()
 	_try_refresh_input_map_ui()
 
+	# Every event rejected means the action exists and is bound to nothing: the
+	# game reads it as never pressed, and answering ok let that pass for a
+	# working binding. Some events through is a partial success and stays ok.
+	if added_events.is_empty() and not event_errors.is_empty():
+		return {
+			&"ok": false,
+			&"error": "Action '%s' was created but none of its %d event(s) could be built, so it is bound to nothing and will never fire." % [action, event_errors.size()],
+			&"event_errors": event_errors,
+		}
+
 	var out: Dictionary = {&"ok": true, &"message": "Set action '%s' with %d event(s)" % [action, added_events.size()], &"events": added_events}
 	if event_errors.size() > 0:
 		out[&"event_errors"] = event_errors
@@ -414,10 +424,20 @@ func _create_input_event(desc: Dictionary) -> Dictionary:
 
 	match type:
 		"key":
+			var event := InputEventKey.new()
+			# get_input_map REPORTS events as {"type":"InputEventKey","keycode":83},
+			# so handing one straight back was the obvious move and the only
+			# accepted form was the key NAME — the tool did not take its own
+			# output. Both work now.
+			if desc.has(&"keycode"):
+				var numeric := int(desc.get(&"keycode", 0))
+				if numeric == 0:
+					return {&"error": "Invalid 'keycode' for key event (0 is not a key)"}
+				event.physical_keycode = numeric
+				return {&"event": event}
 			var key_string: String = str(desc.get(&"key", ""))
 			if key_string.is_empty():
-				return {&"error": "Missing 'key' for key event"}
-			var event := InputEventKey.new()
+				return {&"error": "Missing 'key' for key event — a key name like \"Space\" or \"A\", or a numeric 'keycode'"}
 			var keycode := OS.find_keycode_from_string(key_string)
 			if keycode == 0:
 				return {&"error": "Unknown key: " + key_string}

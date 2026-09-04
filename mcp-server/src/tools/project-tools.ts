@@ -253,7 +253,7 @@ export const projectTools: ToolDefinition[] = [
         },
         events: {
           type: 'array',
-          description: 'Input events to bind. Each object needs a "type" field: {"type":"key","key":"Space"} for keyboard, {"type":"mouse_button","button_index":1} for mouse (1=left,2=right,3=middle), {"type":"joypad_button","button_index":0} for gamepad, {"type":"joypad_motion","axis":0,"axis_value":1.0} for gamepad axis.',
+          description: 'Input events to bind. Each object needs a "type" field: {"type":"key","key":"Space"} or {"type":"key","keycode":32} for keyboard (the numeric form is what get_input_map reports back), {"type":"mouse_button","button_index":1} for mouse (1=left,2=right,3=middle), {"type":"joypad_button","button_index":0} for gamepad, {"type":"joypad_motion","axis":0,"axis_value":1.0} for gamepad axis.',
           items: { type: 'object', description: 'An input event descriptor with a "type" field and type-specific properties' }
         }
       },
