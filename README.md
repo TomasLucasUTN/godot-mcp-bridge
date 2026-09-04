@@ -494,11 +494,32 @@ you restart the client. If you know you want them, set
 `GODOT_MCP_TOOLSETS=runtime,debug` (or `all`) so they are in the *first* list.
 
 **`game_eval` runs your snippet inside the running game.** Code that does not compile is
-now caught in the editor before the game ever sees it, but a snippet that fails at
-*runtime* — dereferencing a freed node, dividing by zero — halts the game under the
-attached debugger, and the tool call times out instead of returning an error. Keep eval
-snippets defensive, or use `query_runtime_node` / `serialize_runtime_tree`, which cannot
-do this.
+caught in the editor before the game ever sees it. A snippet that fails at *runtime* —
+dereferencing a freed node, calling a method that does not exist — halts the game under
+the editor's attached debugger, and the call times out instead of returning an error.
+That is the debugger, not the bridge: launch with `run_scene({attach_debugger: false})`
+and the same bad snippet comes back as a result in ~18ms with the connection intact
+(measured). The trade is stated in the tool description — no step-debugging, and
+`get_errors` loses its Debugger>Errors source.
+
+### What has been measured, and when
+
+Numbers rather than adjectives, all from 2026-09-03 against a 24,880-file project:
+
+| | |
+|---|---|
+| Default tool surface | 38 tools, **8,665 tokens** of schema (everything on: 230 / 47,211) |
+| Slowest read-only tool | `get_project_statistics` at **2,012 ms** — it answers in the MCP server; the in-editor version took 120,685 ms |
+| Largest answer | `map_project` at **7,744 chars** — it used to return 151,159 |
+| Runtime helper connect | **1.6-1.7 s**, attached or detached |
+| `game_eval` runtime error, detached | **18 ms**, connection survives |
+| Mutating tools pointed at a target that cannot exist | 70 editor-side + 11 runtime, **none reports success** |
+| Path-traversal attempts against the sandbox | 16 refused, 11 odd-but-contained inputs checked by where they resolve, **zero escapes** |
+| Tests | 217 Node, 634 GDScript |
+
+Every one of those is re-runnable: `mcp-server/scripts/measure-tools.mjs` for the
+schema cost, `scripts/measure-runtime-cost.gd` for per-tool time and payload, and the
+rest are assertions in the suites.
 
 **C# is scaffolding only.** `create_csharp_script` writes a correctly-shaped file and
 `csharp_status` tells you honestly whether this editor can run C# at all (a standard,
