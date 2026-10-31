@@ -40,14 +40,15 @@ export const batchTools: ToolDefinition[] = [
   {
     name: 'batch_set_property',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Set ONE property to the SAME value across MANY nodes, in a single call and save. Pairs with find_nodes_by_type. NOT for several properties on one node (set_node_properties) and NOT for a single node (modify_node_property). Nodes that don\'t exist or lack the property are reported in "failed" without aborting the rest.',
+    description: 'Set ONE property to the SAME value across MANY nodes, in a single call; on the open scene it edits the live tree as one undoable step and keeps unsaved edits. Pairs with find_nodes_by_type. NOT for several properties on one node (set_node_properties) and NOT for a single node (modify_node_property). Nodes that don\'t exist or lack the property are reported in "failed" without aborting the rest.',
     inputSchema: {
       type: 'object',
       properties: {
         scene_path: { type: 'string', description: 'Path to the scene file' },
         node_paths: { type: 'array', items: { type: 'string' }, description: 'Node paths (relative to scene root) to update' },
         property_name: { type: 'string', description: 'Property to set, e.g. "visible" or "floor_snap_length"' },
-        value: { description: 'New value. Same shape as modify_node_property.value' }
+        value: { description: 'New value. Same shape as modify_node_property.value' },
+        dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'node_paths', 'property_name', 'value']
     }

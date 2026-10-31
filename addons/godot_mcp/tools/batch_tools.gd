@@ -1,98 +1,12 @@
 @tool
-extends Node
+extends SceneToolBase
 class_name BatchTools
 ## Batch/refactor/analysis tools for MCP.
 ## Handles: find_nodes_by_type, batch_set_property, get_scene_dependencies,
 ##          rename_symbol_project_wide
 
-const VariantCodec = preload("res://addons/godot_mcp/utils/variant_codec.gd")
-const PathGuard = preload("res://addons/godot_mcp/utils/path_guard.gd")
-
 const _SKIP_EXTENSIONS := {".import": true, ".uid": true, ".translation": true}
 const MAX_TRAVERSAL_DEPTH := 24
-
-var _editor_plugin: EditorPlugin = null
-
-func set_editor_plugin(plugin: EditorPlugin) -> void:
-	_editor_plugin = plugin
-
-# =============================================================================
-# Shared helpers (mirrors scene_tools.gd)
-# =============================================================================
-func _refresh_and_reload(scene_path: String) -> void:
-	if _editor_plugin:
-		_editor_plugin.get_editor_interface().get_resource_filesystem().scan()
-		var ei = _editor_plugin.get_editor_interface()
-		var edited = ei.get_edited_scene_root()
-		if edited and edited.scene_file_path == scene_path:
-			ei.reload_scene_from_path(scene_path)
-
-## Sanitizes a res://-relative path and blocks traversal outside the project
-## (e.g. "../../../Windows/System32"). On rejection returns a path that can
-## never resolve to a real file, so every downstream FileAccess/load() call
-## fails closed with a clear "does not exist"/"invalid" error instead of
-## silently escaping the project sandbox. See MERGE_NOTES.md for why this
-## exists — a plain "res://" prefix check does NOT stop "../" traversal.
-func _ensure_res_path(path: String) -> String:
-	var guarded := PathGuard.sanitize(path)
-	if not guarded[&"ok"]:
-		if path.strip_edges().is_empty():
-			return PathGuard.MISSING
-		push_warning("[MCP] Rejected path outside project sandbox: %s (%s)" % [path, guarded[&"error"]])
-		return PathGuard.REJECTED
-	return guarded[&"path"]
-
-func _load_scene(scene_path: String) -> Array:
-	"""Returns [scene_root, error_dict]. If error_dict is not empty, scene_root is null."""
-	if PathGuard.is_bad(scene_path):
-		return [null, PathGuard.error_for(scene_path, "scene_path")]
-	if not FileAccess.file_exists(scene_path):
-		return [null, {&"ok": false, &"error": "Scene does not exist: " + scene_path}]
-
-	var packed = load(scene_path) as PackedScene
-	if not packed:
-		return [null, {&"ok": false, &"error": "Failed to load scene: " + scene_path}]
-
-	var root = _instantiate_packed_scene_for_edit(packed)
-	if not root:
-		return [null, {&"ok": false, &"error": "Failed to instantiate scene: " + scene_path + ". It loaded as a PackedScene but produced no node — usually a scene whose root script fails to compile."}]
-
-	return [root, {}]
-
-func _instantiate_packed_scene_for_edit(packed: PackedScene) -> Node:
-	if not packed:
-		return null
-	if not Engine.is_editor_hint():
-		return packed.instantiate()
-	var state = packed.get_state()
-	if state and state.get_base_scene_state() != null:
-		return packed.instantiate(PackedScene.GEN_EDIT_STATE_MAIN_INHERITED)
-	return packed.instantiate(PackedScene.GEN_EDIT_STATE_MAIN)
-
-func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
-	"""Pack and save a scene. Returns error dict or empty on success."""
-	if PathGuard.is_bad(scene_path):
-		scene_root.queue_free()
-		return PathGuard.error_for(scene_path, "scene_path")
-	var packed = PackedScene.new()
-	var pack_result = packed.pack(scene_root)
-	if pack_result != OK:
-		scene_root.queue_free()
-		return {&"ok": false, &"error": "Failed to pack scene: " + str(pack_result)}
-
-	var save_result = ResourceSaver.save(packed, scene_path)
-	scene_root.queue_free()
-
-	if save_result != OK:
-		return {&"ok": false, &"error": "Failed to save scene: " + str(save_result)}
-
-	_refresh_and_reload(scene_path)
-	return {}
-
-func _find_node(scene_root: Node, node_path: String) -> Node:
-	if node_path == "." or node_path.is_empty():
-		return scene_root
-	return scene_root.get_node_or_null(node_path)
 
 # =============================================================================
 # find_nodes_by_type
@@ -107,14 +21,16 @@ func find_nodes_by_type(args: Dictionary) -> Dictionary:
 	if node_type.strip_edges().is_empty():
 		return {&"ok": false, &"error": "Missing 'node_type'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-	var root: Node = result[0]
+	# Read the open scene's live tree when there is one, so nodes the user added
+	# but has not saved yet are reported instead of silently missing.
+	var acquired := _acquire_scene(scene_path)
+	if not acquired[2].is_empty():
+		return acquired[2]
+	var root: Node = acquired[0]
 
 	var matches: Array = []
 	_find_nodes_by_type_recursive(root, root, node_type, exact_match, matches)
-	root.queue_free()
+	_discard_scene(root, acquired[1])
 
 	return {&"ok": true, &"scene_path": scene_path, &"node_type": node_type,
 		&"matches": matches, &"count": matches.size()}
@@ -145,14 +61,19 @@ func batch_set_property(args: Dictionary) -> Dictionary:
 	if not args.has(&"value"):
 		return {&"ok": false, &"error": "Missing 'value'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
-	var root: Node = result[0]
+	# Used to load from disk, save, and reload the open scene: every unsaved edit
+	# in that scene was lost, even with dry_run. The live tree keeps them, and the
+	# change lands as one undo entry.
+	var acquired := _acquire_scene(scene_path)
+	if not acquired[2].is_empty():
+		return acquired[2]
+	var root: Node = acquired[0]
+	var is_live: bool = acquired[1]
 
 	var parsed_value = VariantCodec.parse_value(value)
 	var applied: Array = []
 	var failed: Array = []
+	var ctx := _begin_edit(is_live, "MCP: batch set %s" % property_name, root)
 
 	for np in node_paths:
 		var node_path := str(np)
@@ -167,12 +88,18 @@ func batch_set_property(args: Dictionary) -> Dictionary:
 			failed.append({&"node_path": node_path, &"error": "No property '%s' on %s" % [property_name, target.get_class()]})
 			continue
 		var old_value = target.get(property_name)
-		target.set(property_name, parsed_value)
+		_edit_set(ctx, target, StringName(property_name), parsed_value)
 		applied.append({&"node_path": node_path, &"old": VariantCodec.serialize_value(old_value), &"new": VariantCodec.serialize_value(parsed_value)})
 
-	var err := _save_scene(root, scene_path)
-	if not err.is_empty():
-		return err
+	if applied.is_empty():
+		# Nothing changed: no undo entry, no dirty marker, no rewrite of the file.
+		_edit_abort(ctx)
+		_discard_scene(root, is_live)
+	else:
+		_edit_commit(ctx)
+		var err := _finish_scene_edit(root, scene_path, is_live)
+		if not err.is_empty():
+			return err
 
 	return {&"ok": true, &"scene_path": scene_path, &"property_name": property_name,
 		&"applied": applied, &"failed": failed,
