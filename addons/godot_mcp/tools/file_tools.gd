@@ -337,19 +337,15 @@ func create_script(args: Dictionary) -> Dictionary:
 	if FileAccess.file_exists(path):
 		return {&"ok": false, &"error": "File already exists: " + path}
 
-	# Ensure parent directory exists
-	var dir_path := path.get_base_dir()
-	if not DirAccess.dir_exists_absolute(dir_path):
-		var err := DirAccess.make_dir_recursive_absolute(dir_path)
-		if err != OK:
-			return {&"ok": false, &"error": "Could not create directory: " + dir_path}
-
-	# Write file — a preview stops here, having already checked the path is
-	# inside the sandbox, that nothing is there to overwrite, and that the
-	# parent directory exists.
 	if _dry_run:
 		_dry_run_skipped_write = true
 	else:
+		var dir_path := path.get_base_dir()
+		if not DirAccess.dir_exists_absolute(dir_path):
+			var err := DirAccess.make_dir_recursive_absolute(dir_path)
+			if err != OK:
+				return {&"ok": false, &"error": "Could not create directory: " + dir_path}
+
 		var file := FileAccess.open(path, FileAccess.WRITE)
 		if file == null:
 			return {&"ok": false, &"error": "Could not create file: " + path}

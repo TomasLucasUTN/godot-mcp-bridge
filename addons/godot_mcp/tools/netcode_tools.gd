@@ -189,6 +189,10 @@ func mp_wire_rpc(args: Dictionary) -> Dictionary:
 
 	if script_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'script_path'"}
+	if PathGuard.is_bad(script_path):
+		return PathGuard.error_for(script_path, "script_path")
+	if script_path.get_extension().to_lower() != "gd":
+		return {&"ok": false, &"error": "mp_wire_rpc only accepts .gd scripts: " + script_path}
 	if method.is_empty():
 		return {&"ok": false, &"error": "Missing 'method'"}
 	if not method.is_valid_identifier():
@@ -577,6 +581,10 @@ func mp_set_authority(args: Dictionary) -> Dictionary:
 
 	if script_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'script_path' (the script that should claim authority)"}
+	if PathGuard.is_bad(script_path):
+		return PathGuard.error_for(script_path, "script_path")
+	if script_path.get_extension().to_lower() != "gd":
+		return {&"ok": false, &"error": "mp_set_authority only accepts .gd scripts: " + script_path}
 	if not FileAccess.file_exists(script_path):
 		return {&"ok": false, &"error": "Script not found: " + script_path}
 	if peer_id == null:

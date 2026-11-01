@@ -675,6 +675,10 @@ func get_node_properties(args: Dictionary) -> Dictionary:
 	if not ClassDB.class_exists(node_type):
 		return {&"ok": false, &"error": "Unknown node type: " + node_type}
 
+	if node_type != "Node" and not ClassDB.is_parent_class(node_type, "Node"):
+		return {&"ok": false, &"error": "Expected a Node class; use classdb_query for non-Node types: " + node_type}
+	if not ClassDB.can_instantiate(node_type):
+		return {&"ok": false, &"error": "Cannot instantiate abstract Node class: " + node_type}
 	var temp = ClassDB.instantiate(node_type)
 	if not temp:
 		return {&"ok": false, &"error": "Cannot instantiate: " + node_type}
@@ -2172,18 +2176,20 @@ func create_resource(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Missing 'resource_type'"}
 	if not ClassDB.class_exists(resource_type):
 		return {&"ok": false, &"error": "Unknown resource type: " + resource_type}
+	if not ClassDB.is_parent_class(resource_type, "Resource"):
+		return {&"ok": false, &"error": "Not a Resource type: " + resource_type}
+	if ClassDB.is_parent_class(resource_type, "PackedScene"):
+		return {&"ok": false, &"error": "create_resource cannot create PackedScene assets; use create_scene"}
+	if not ClassDB.can_instantiate(resource_type):
+		return {&"ok": false, &"error": "Cannot instantiate: " + resource_type}
+	if FileAccess.file_exists(resource_path):
+		return {&"ok": false, &"error": "Refusing to overwrite an existing asset: " + resource_path}
 
 	var instance = ClassDB.instantiate(resource_type)
 	if not instance:
 		return {&"ok": false, &"error": "Cannot instantiate: " + resource_type}
-	if not (instance is Resource):
-		if instance is Node:
-			instance.free()
-		elif instance is RefCounted:
-			pass
-		else:
-			instance.free()
-		return {&"ok": false, &"error": "'%s' is not a Resource (it's a %s)" % [resource_type, instance.get_class()]}
+	if not ResourceSaver.get_recognized_extensions(instance).has(resource_path.get_extension().to_lower()):
+		return {&"ok": false, &"error": "Unsupported file extension for %s: %s" % [resource_type, resource_path]}
 
 	var save_result := ResourceSaver.save(instance, resource_path)
 	if save_result != OK:
@@ -2480,8 +2486,7 @@ func _sanitize_log_text(s: String) -> String:
 func _condense_export_log(s: String) -> String:
 	var kept: PackedStringArray = []
 	var dropped := 0
-	for line in s.split("
-"):
+	for line in s.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
 		var text := String(line)
 		var lower := text.to_lower()
 		var noisy := "savepack" in lower or "storing file" in lower or "almacenando archivo" in lower
@@ -2490,11 +2495,9 @@ func _condense_export_log(s: String) -> String:
 			dropped += 1
 			continue
 		kept.append(text)
-	var out := "
-".join(kept)
+	var out := "\n".join(kept)
 	if dropped > 0:
-		out += "
-(%d per-file progress line(s) omitted)" % dropped
+		out += "\n(%d per-file progress line(s) omitted)" % dropped
 	return out
 
 func _tail_text(s: String, n: int) -> String:

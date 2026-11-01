@@ -67,6 +67,8 @@ func edit_script(args: Dictionary) -> Dictionary:
 	var _err0 := []
 	path = _guard_path(path, _err0)
 	if _err0: return _err0[0]
+	if path.get_extension().to_lower() != "gd":
+		return {&"ok": false, &"error": "edit_script only accepts .gd scripts; use scene tools for scenes: " + path}
 
 	if not FileAccess.file_exists(path):
 		return {&"ok": false, &"error": "File not found: " + path}
@@ -725,11 +727,16 @@ func _file_is_open_in_editor(path: String) -> Dictionary:
 	# Scene tabs
 	if ei.has_method("get_open_scenes"):
 		var open_scenes: PackedStringArray = ei.get_open_scenes()
-		if open_scenes.has(path):
+		var absolute_path := ProjectSettings.globalize_path(path).simplify_path()
+		for scene_path: String in open_scenes:
+			var absolute_scene := ProjectSettings.globalize_path(scene_path).simplify_path()
+			var same_path := absolute_scene.nocasecmp_to(absolute_path) == 0 if OS.has_feature("windows") else absolute_scene == absolute_path
+			if not same_path:
+				continue
 			out[&"open"] = true
 			out[&"where"] = "scene tab"
 			var edited = ei.get_edited_scene_root()
-			if edited and edited.scene_file_path == path:
+			if edited and edited.scene_file_path == scene_path:
 				out[&"is_active"] = true
 				out[&"where"] = "active scene tab"
 			return out
@@ -773,10 +780,21 @@ func rename_file(args: Dictionary) -> Dictionary:
 	if FileAccess.file_exists(new_path):
 		return {&"ok": false, &"error": "Target already exists: " + new_path}
 
-	# Ensure target directory exists
-	var dir_path := new_path.get_base_dir()
-	if not DirAccess.dir_exists_absolute(dir_path):
-		DirAccess.make_dir_recursive_absolute(dir_path)
+	# Plan every reference rewrite before moving anything: a later open scene
+	# must reject the whole rename, not leave earlier files partially updated.
+	var plan := {&"ok": true, &"changes": {}}
+	if update_references:
+		plan = _plan_path_references(old_path, new_path)
+		if not plan[&"ok"]:
+			return plan
+	var changes: Dictionary = plan[&"changes"]
+	if not _dry_run:
+		var affected: Array = [old_path, new_path]
+		affected.append_array(changes.keys())
+		for path: String in affected:
+			var open_info := _file_is_open_in_editor(path)
+			if open_info[&"open"] and "scene tab" in open_info[&"where"]:
+				return {&"ok": false, &"error": "Refusing to rename or rewrite an open scene: %s. Close its scene tab first; no files changed." % path}
 
 	if _dry_run:
 		# Checked above that the source exists and the target does not, which is
@@ -785,13 +803,30 @@ func rename_file(args: Dictionary) -> Dictionary:
 		return {&"ok": true, &"old_path": old_path, &"new_path": new_path,
 			&"message": "Would rename %s to %s." % [old_path, new_path]}
 
+	var dir_path := new_path.get_base_dir()
+	if not DirAccess.dir_exists_absolute(dir_path):
+		var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
+		if mkdir_err != OK:
+			return {&"ok": false, &"error": "Failed to create directory: " + dir_path}
+
 	var err := DirAccess.rename_absolute(old_path, new_path)
 	if err != OK:
 		return {&"ok": false, &"error": "Failed to rename: " + str(err)}
 
 	var updated_files: Array = []
-	if update_references:
-		updated_files = _update_path_references(old_path, new_path)
+	for path: String in changes:
+		var write_path := new_path if path == old_path else path
+		var wf := FileAccess.open(write_path, FileAccess.WRITE)
+		if not wf:
+			return {&"ok": false, &"error": "Renamed file but failed to update reference: " + write_path,
+				&"updated_references": updated_files}
+		wf.store_string(changes[path])
+		var write_error := wf.get_error()
+		wf.close()
+		if write_error != OK:
+			return {&"ok": false, &"error": "Renamed file but failed to write reference: " + write_path,
+				&"updated_references": updated_files}
+		updated_files.append(write_path)
 
 	_refresh_filesystem()
 
@@ -821,17 +856,20 @@ func rename_file(args: Dictionary) -> Dictionary:
 ## substring: a plain replace would corrupt paths where old_path is a prefix
 ## of another (renaming res://player.gd must not touch res://player.gd.uid or
 ## res://player_data.gd).
-func _update_path_references(old_path: String, new_path: String) -> Array:
-	var updated: Array = []
+func _plan_path_references(old_path: String, new_path: String) -> Dictionary:
+	var changes: Dictionary = {}
 	var files: PackedStringArray = []
 	_collect_gd_tscn_tres_files("res://", files)
 
 	for file_path: String in files:
 		var f := FileAccess.open(file_path, FileAccess.READ)
 		if not f:
-			continue
+			return {&"ok": false, &"error": "Cannot preflight references in: " + file_path}
 		var content := f.get_as_text()
+		var read_error := f.get_error()
 		f.close()
+		if read_error != OK:
+			return {&"ok": false, &"error": "Failed to read references in: " + file_path}
 
 		if content.find(old_path) == -1:
 			continue
@@ -843,14 +881,9 @@ func _update_path_references(old_path: String, new_path: String) -> Array:
 		if new_content == content:
 			continue
 
-		var wf := FileAccess.open(file_path, FileAccess.WRITE)
-		if not wf:
-			continue
-		wf.store_string(new_content)
-		wf.close()
-		updated.append(file_path)
+		changes[file_path] = new_content
 
-	return updated
+	return {&"ok": true, &"changes": changes}
 
 func _collect_gd_tscn_tres_files(path: String, out: PackedStringArray, depth: int = 0) -> void:
 	if depth >= 24:
@@ -891,6 +924,8 @@ func generate_property_forwarder(args: Dictionary) -> Dictionary:
 	var _err5 := []
 	var script_path: String = _guard_path(script_path_raw, _err5)
 	if _err5: return _err5[0]
+	if script_path.get_extension().to_lower() != "gd":
+		return {&"ok": false, &"error": "generate_property_forwarder only accepts .gd scripts: " + script_path}
 	if property_name.is_empty():
 		return {&"ok": false, &"error": "Missing 'property_name'"}
 	if target_expression.is_empty():
