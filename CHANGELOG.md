@@ -7,6 +7,8 @@ over upstream's version numbers or issue/PR history.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-01
+
 `read_scene` optionally returns compact columns/rows with the same selected fields
 and pagination as tree output. `find_tools` recognizes common Spanish domain terms,
 normalizes accents and ignores repeated query terms when scoring.
