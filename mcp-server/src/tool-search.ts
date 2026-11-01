@@ -37,11 +37,29 @@ const STOPWORDS = new Set([
   'how', 'do', 'i', 'my', 'with', 'from', 'that', 'this', 'godot', 'tool',
 ]);
 
+const SPANISH_TERMS: Record<string, string[]> = {
+  crear: ['create', 'add'], agregar: ['add'], anadir: ['add'], leer: ['read'],
+  renombrar: ['rename'], duplicar: ['duplicate'], conectar: ['connect'],
+  adjuntar: ['attach'], reiniciar: ['restart'], ejecutar: ['run'], detener: ['stop'],
+  validar: ['validate'], buscar: ['find'], encontrar: ['find'], comparar: ['compare'],
+  exportar: ['export'], configurar: ['configure', 'setup'], cambiar: ['set'],
+  establecer: ['set'], medir: ['measure'], deshacer: ['undo'], rehacer: ['redo'],
+  eliminar: ['remove', 'delete'], borrar: ['remove', 'delete'], mover: ['move'],
+  listar: ['list'], escena: ['scene'], escenas: ['scene'], nodo: ['node'], nodos: ['node'],
+  senal: ['signal'], senales: ['signal'], juego: ['game', 'scene'],
+  recursos: ['resources'], recurso: ['resource'], captura: ['screenshot'], capturas: ['screenshots'],
+  pantalla: ['screenshot'], animacion: ['animation'], animaciones: ['animations', 'animation'],
+  iluminacion: ['lighting'], luces: ['lighting'], parametro: ['param'], parametros: ['params'],
+  distancia: ['distance'], proyecto: ['project'], propiedades: ['properties'], propiedad: ['property'],
+};
+const SPANISH_FILLER = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'en', 'con', 'para', 'por', 'y', 'al', 'entre', 'como', 'quiero', 'que']);
+
 function terms(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/)
-    .filter(t => t.length > 1 && !STOPWORDS.has(t));
+  const normalized = query.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+    .replace(/\bsin usar\b/g, 'unused');
+  const words = normalized.split(/[^a-z0-9_]+/)
+    .filter(term => term.length > 1 && !STOPWORDS.has(term) && !SPANISH_FILLER.has(term));
+  return [...new Set(words.flatMap(term => SPANISH_TERMS[term] ?? [term]))];
 }
 
 /** First sentence of a description, capped — enough to choose between hits. */

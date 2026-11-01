@@ -64,7 +64,7 @@ export function metaTools(): ToolDefinition[] {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'What you are trying to do, in your own words (e.g. "bake a navmesh", "read the player position while the game runs").' },
+        query: { type: 'string', description: 'What you are trying to do in English or Spanish (e.g. "bake a navmesh", "read the player position while the game runs").' },
         limit: { type: 'number', description: 'How many matches to return (1-40, default 8).' },
         include_schema: { type: 'boolean', description: "Also return each match's full inputSchema. Default false — the names and summaries are usually enough to pick one." },
       },
