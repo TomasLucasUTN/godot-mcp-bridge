@@ -188,3 +188,23 @@ describe('GodotBridge — shared secret', () => {
     ws.close();
   });
 });
+
+
+describe('bound bridge waits for the ready handshake', () => {
+  let bridge: GodotBridge;
+  let client: WebSocket | null = null;
+  afterEach(() => { client?.close(); bridge?.stop(); });
+  it('never dispatches tools to a socket that has not proved its identity', async () => {
+    bridge = createBridge(0, SHORT_TIMEOUT, 'C:/games/proj', SECRET);
+    await bridge.start();
+    expect(bridge.getStatus().port).toBeGreaterThan(0);
+    client = await connectClient(bridge.getStatus().port);
+    expect(bridge.isConnected()).toBe(false);
+    await expect(bridge.invokeTool('read_scene', {})).rejects.toThrow('Godot is not connected');
+    expect(bridge.getStatus().pendingRequests).toBe(0);
+    sendReady(client, { secret: SECRET });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(bridge.isConnected()).toBe(true);
+    expect(bridge.getStatus().projectPath).toBe('C:/games/proj');
+  });
+});

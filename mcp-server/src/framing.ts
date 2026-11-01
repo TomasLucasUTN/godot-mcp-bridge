@@ -26,41 +26,64 @@ export function encodeFrame(msg: FramedMessage): Buffer {
 /**
  * Incremental frame decoder. TCP hands us arbitrary chunk boundaries, so one
  * frame can arrive split across reads and several frames can land in a single
- * read; this buffers until each body is complete. A header block we can't parse
- * is skipped rather than left to wedge the stream forever.
+ * read. Invalid or oversized frames fail explicitly so the connection can close
+ * and pending protocol requests fail instead of hanging until their timeouts.
  */
+export const MAX_FRAME_BYTES = 32 * 1024 * 1024;
+const MAX_HEADER_BYTES = 8192;
+
 export class FrameDecoder {
-  private buffer: Buffer = Buffer.alloc(0);
+  private header: number[] = [];
+  private body: Buffer | null = null;
+  private received = 0;
+  private readonly utf8 = new TextDecoder('utf-8', { fatal: true });
 
   constructor(private readonly onMessage: (msg: FramedMessage) => void) {}
 
   push(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    for (;;) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n');
-      if (headerEnd === -1) return;
-      const header = this.buffer.subarray(0, headerEnd).toString('ascii');
-      const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) {
-        this.buffer = this.buffer.subarray(headerEnd + 4);
-        continue;
+    let offset = 0;
+    while (offset < chunk.length) {
+      if (this.body === null) {
+        this.header.push(chunk[offset++]);
+        if (this.header.length > MAX_HEADER_BYTES) throw new Error('Frame header exceeds 8192 bytes');
+        const end = this.header.length;
+        if (end < 4 || this.header[end - 4] !== 13 || this.header[end - 3] !== 10 ||
+            this.header[end - 2] !== 13 || this.header[end - 1] !== 10) continue;
+        const lines = Buffer.from(this.header).toString('ascii').split('\r\n');
+        const lengths = lines.filter(line => /^content-length:/i.test(line));
+        const match = lengths.length === 1 ? /^Content-Length:[ \t]*(\d+)[ \t]*$/i.exec(lengths[0]) : null;
+        if (!match) throw new Error('Invalid or duplicate Content-Length header');
+        const length = Number(match[1]);
+        if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_FRAME_BYTES) {
+          throw new Error('Frame Content-Length must be between 1 and 33554432 bytes');
+        }
+        this.header = [];
+        // Allocate once; fragmented TCP reads must not recopy the entire prefix.
+        this.body = Buffer.allocUnsafe(length);
+        this.received = 0;
       }
-      const length = Number.parseInt(match[1], 10);
-      const bodyStart = headerEnd + 4;
-      if (this.buffer.length < bodyStart + length) return;
-      const body = this.buffer.subarray(bodyStart, bodyStart + length).toString('utf8');
-      this.buffer = this.buffer.subarray(bodyStart + length);
-      try {
-        this.onMessage(JSON.parse(body) as FramedMessage);
-      } catch {
-        // A frame we can't parse is dropped; the stream stays in sync because
-        // Content-Length already told us exactly how far to skip.
+      const count = Math.min(chunk.length - offset, this.body.length - this.received);
+      chunk.copy(this.body, this.received, offset, offset + count);
+      offset += count;
+      this.received += count;
+      if (this.received !== this.body.length) continue;
+      const body = this.body;
+      this.body = null;
+      this.received = 0;
+      let message: unknown;
+      try { message = JSON.parse(this.utf8.decode(body)); }
+      catch { throw new Error('Invalid UTF-8 or JSON in protocol frame'); }
+      if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+        throw new Error('Protocol frame must contain a JSON object');
       }
+      this.onMessage(message as FramedMessage);
     }
   }
 
   reset(): void {
-    this.buffer = Buffer.alloc(0);
+    this.header = [];
+    this.body = null;
+    this.received = 0;
   }
 }
 
@@ -73,7 +96,7 @@ export class FramedConnection {
   private connecting: Promise<net.Socket> | null = null;
   private decoder: FrameDecoder;
   private onMessageCb: (msg: FramedMessage) => void = () => {};
-  private onCloseCb: () => void = () => {};
+  private onCloseCb: (error?: Error) => void = () => {};
 
   constructor(
     private readonly host: string,
@@ -88,49 +111,75 @@ export class FramedConnection {
     this.onMessageCb = cb;
   }
 
-  onClose(cb: () => void): void {
+  onClose(cb: (error?: Error) => void): void {
     this.onCloseCb = cb;
   }
 
   isConnected(): boolean {
-    return this.socket !== null && !this.socket.destroyed;
+    return this.socket !== null && this.socket.readyState === 'open';
   }
 
   connect(): Promise<net.Socket> {
-    if (this.socket && !this.socket.destroyed) return Promise.resolve(this.socket);
     if (this.connecting) return this.connecting;
+    if (this.isConnected()) return Promise.resolve(this.socket!);
 
     this.connecting = new Promise<net.Socket>((resolve, reject) => {
       const socket = net.createConnection({ host: this.host, port: this.port });
-      // These protocols are many small request/response frames; Nagle's
-      // algorithm would add latency to every one.
+      this.socket = socket;
+      let connected = false;
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (!settled) {
+          settled = true;
+          reject(error ?? new Error('Connection closed before becoming ready'));
+        }
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.connecting = null;
+        this.decoder.reset();
+        this.onCloseCb(error);
+      };
       socket.setNoDelay(true);
       socket.once('connect', () => {
-        this.socket = socket;
+        if (this.socket !== socket || socket.destroyed) {
+          finish(new Error('Connection closed before becoming ready'));
+          return;
+        }
+        connected = true;
+        settled = true;
         this.connecting = null;
         resolve(socket);
       });
-      socket.once('error', (err) => {
-        this.connecting = null;
-        reject(new Error(`${this.unavailableHint} (${err.message})`));
+      socket.on('error', error => {
+        finish(connected ? error : new Error(`${this.unavailableHint} (${error.message})`));
       });
-      socket.on('data', (chunk) => this.decoder.push(chunk));
-      socket.on('close', () => {
-        this.socket = null;
-        this.decoder.reset();
-        this.onCloseCb();
+      socket.on('data', chunk => {
+        if (this.socket !== socket) return;
+        try { this.decoder.push(chunk); }
+        catch (error) { socket.destroy(error instanceof Error ? error : new Error(String(error))); }
       });
+      socket.on('close', () => finish());
     });
     return this.connecting;
   }
 
   async send(msg: FramedMessage): Promise<void> {
+    const frame = encodeFrame(msg);
     const socket = await this.connect();
-    socket.write(encodeFrame(msg));
+    if (this.socket !== socket || socket.destroyed) throw new Error('Connection closed before send');
+    await new Promise<void>((resolve, reject) => {
+      socket.write(frame, error => error ? reject(error) : resolve());
+    });
   }
 
   close(): void {
-    if (this.socket) this.socket.destroy();
+    const socket = this.socket;
     this.socket = null;
+    this.connecting = null;
+    this.decoder.reset();
+    if (socket) {
+      socket.destroy();
+      this.onCloseCb(new Error('Connection closed by client'));
+    }
   }
 }

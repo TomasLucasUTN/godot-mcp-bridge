@@ -10,6 +10,7 @@
  */
 
 import http from 'node:http';
+import { isBrowserOrigin } from './godot-bridge.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
 
@@ -142,6 +143,15 @@ export class PrimaryHttpServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     res.setHeader('Content-Type', 'application/json');
+    // A cross-site text/plain POST is a simple browser request: CORS alone
+    // does not prevent the mutation. Native proxy clients send no Origin.
+    if (isBrowserOrigin(req.headers)) {
+      req.resume();
+      res.writeHead(403);
+      res.end(JSON.stringify({ error: 'Browser origins cannot use internal proxy endpoints' }));
+      return;
+    }
+
 
     try {
       if (req.method === 'GET' && req.url === '/health') {
@@ -158,15 +168,31 @@ export class PrimaryHttpServer {
       if (req.method === 'POST' && req.url === '/tool') {
         this.lastActivityTime = Date.now();
         const body = await readBody(req);
-        const { name, args } = JSON.parse(body);
-
-        if (typeof name !== 'string') {
+        let payload: unknown;
+        try { payload = JSON.parse(body); }
+        catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Invalid JSON request body' }));
+          return;
+        }
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Expected a request object' }));
+          return;
+        }
+        const { name, args } = payload as { name?: unknown; args?: unknown };
+        if (typeof name !== 'string' || !name.trim()) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: 'Missing or invalid "name" field' }));
           return;
         }
+        if (args !== undefined && (!args || typeof args !== 'object' || Array.isArray(args))) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: '"args" must be an object' }));
+          return;
+        }
 
-        const result = await this.executeToolCall(name, args || {});
+        const result = await this.executeToolCall(name, (args ?? {}) as Record<string, unknown>);
         res.writeHead(200);
         res.end(JSON.stringify(result));
         return;

@@ -75,17 +75,11 @@ export function secretsMatch(expected: string, received: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/**
- * Canonical form of a project path for comparison: forward slashes, no trailing
- * separator, lowercased.
- *
- * Case-folding is not correct on a case-sensitive filesystem, but the failure
- * mode it prevents (Windows sending `C:/Users/...` where the server was told
- * `c:/users/...` and refusing a legitimate editor) is far more likely than two
- * projects whose paths differ only by case.
- */
+/** Preserve POSIX case while accepting Windows drive/UNC path spelling. */
 export function normalizeProjectPath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const slash = p.replace(/\\/g, '/');
+  const trimmed = slash.replace(/\/+$/, '') || (slash.startsWith('/') ? '/' : '');
+  return /^(?:[a-z]:|\/\/)/i.test(slash) ? trimmed.toLowerCase() : trimmed;
 }
 
 // Per-tool timeout overrides, in ms. Anything not listed here falls back to
@@ -164,6 +158,7 @@ export class GodotBridge {
   private editor: ConnSlot | null = null;
   private runtime: ConnSlot | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private authenticatedSockets = new WeakSet<WebSocket>();
   private pingInterval: NodeJS.Timeout | null = null;
   /** Injectable so the watchdog's behaviour can be tested in milliseconds. */
   private pingIntervalMs: number;
@@ -217,6 +212,8 @@ export class GodotBridge {
         });
         this.wss.on('listening', () => {
           this._listening = true;
+          const address = this.wss?.address();
+          if (address && typeof address !== 'string') this.port = address.port;
           this.log('info', `WebSocket server listening on port ${this.port}`);
           resolve();
         });
@@ -278,12 +275,14 @@ export class GodotBridge {
     // still count as connected. If the very first message is godot_ready with
     // role="runtime", we transfer the socket to the runtime slot instead.
     let assignedRole: 'editor' | 'runtime' | null = null;
+    let announcedRole: 'editor' | 'runtime' | null = null;
+    if (!this.expectedSecret && !this.expectedProjectPath) this.authenticatedSockets.add(ws);
 
     if (!this.editor) {
       this.editor = { ws, info: { connectedAt: new Date(), role: 'editor' }, lastPongAt: Date.now() };
       assignedRole = 'editor';
       this.startPingLoop();
-      this.notifyConnectionChange(true, this.editor.info);
+      if (this.authenticatedSockets.has(ws)) this.notifyConnectionChange(true, this.editor.info);
     } else {
       // Editor slot is taken — this might become the runtime slot via
       // godot_ready. Otherwise we close it below.
@@ -303,11 +302,30 @@ export class GodotBridge {
         // indication anything was even received — surface the raw length so a
         // future occurrence is diagnosable instead of looking like a hang.
         this.log('error', `Failed to parse message (${raw.length} bytes): ${err}`);
+        ws.close(1003, 'Invalid JSON message');
+        return;
+      }
+
+      if (!message || typeof message !== 'object' || Array.isArray(message) || typeof message.type !== 'string') {
+        ws.close(1003, 'Expected a message object with a type');
+        return;
+      }
+      if (message.type === 'tool_result' && (typeof message.id !== 'string' || typeof message.success !== 'boolean')) {
+        ws.close(1003, 'Invalid tool_result id or success');
         return;
       }
 
       if (message.type === 'godot_ready') {
+        if (typeof message.project_path !== 'string' ||
+            (message.role !== undefined && message.role !== 'editor' && message.role !== 'runtime')) {
+          ws.close(1003, 'Invalid godot_ready project_path or role');
+          return;
+        }
         const desiredRole: 'editor' | 'runtime' = (message.role === 'runtime') ? 'runtime' : 'editor';
+        if (announcedRole !== null && desiredRole !== announcedRole) {
+          ws.close(1008, 'Cannot change role on an established connection');
+          return;
+        }
 
         // Shared secret, when one is configured. Origin rejection already keeps
         // browsers out; this covers the remaining local case — any other process
@@ -358,6 +376,8 @@ export class GodotBridge {
           }
         }
 
+        const wasAuthenticated = this.authenticatedSockets.has(ws);
+        this.authenticatedSockets.add(ws);
         if (desiredRole === 'runtime') {
           if (this.runtime && this.runtime.ws !== ws) {
             this.log('warn', 'Rejecting runtime connection - runtime already connected');
@@ -371,6 +391,7 @@ export class GodotBridge {
           }
           this.runtime = { ws, info: { connectedAt: new Date(), projectPath: message.project_path, role: 'runtime' }, lastPongAt: Date.now() };
           assignedRole = 'runtime';
+          announcedRole = 'runtime';
           this.log('info', `Godot runtime connected (project=${message.project_path})`);
           this.sendRuntimeStatusToEditor();
           this.notifyRuntimeStatus(true);
@@ -404,12 +425,18 @@ export class GodotBridge {
           // which is all of them.
           this.editor.info.projectPath = message.project_path;
           this.editor.info.addonVersion = message.addon_version;
+          if (!wasAuthenticated) this.notifyConnectionChange(true, this.editor.info);
         }
+        announcedRole = 'editor';
         this.log('info', `Godot editor ready (project=${message.project_path}${message.addon_version ? `, addon ${message.addon_version}` : ''})`);
         this.sendRuntimeStatusToEditor();
         return;
       }
 
+      if (!this.authenticatedSockets.has(ws)) {
+        ws.close(CLOSE_BAD_SECRET, 'Complete godot_ready before sending other messages');
+        return;
+      }
       if (assignedRole === null) {
         // Never got a seat and never sent godot_ready. Close.
         ws.close(4000, 'Another Godot editor is already connected');
@@ -423,7 +450,7 @@ export class GodotBridge {
       if (assignedRole === 'editor' && this.editor?.ws === ws) {
         this.log('info', `Editor disconnected: ${code} ${reason.toString()}`);
         this.editor = null;
-        this.failPending('editor', new Error('Godot disconnected'));
+        this.failPending('editor', new Error(`Godot disconnected${reason.length ? ': ' + reason.toString() : ''}`));
         this.notifyConnectionChange(false);
         if (!this.runtime && this.pingInterval) {
           clearInterval(this.pingInterval);
@@ -432,7 +459,7 @@ export class GodotBridge {
       } else if (assignedRole === 'runtime' && this.runtime?.ws === ws) {
         this.log('info', `Runtime disconnected: ${code} ${reason.toString()}`);
         this.runtime = null;
-        this.failPending('runtime', new Error('Godot runtime disconnected'));
+        this.failPending('runtime', new Error(`Godot runtime disconnected${reason.length ? ': ' + reason.toString() : ''}`));
         this.sendRuntimeStatusToEditor();
         this.notifyRuntimeStatus(false);
       }
@@ -511,7 +538,7 @@ export class GodotBridge {
   private handleMessage(message: WebSocketMessage, role: 'editor' | 'runtime'): void {
     switch (message.type) {
       case 'tool_result':
-        this.handleToolResult(message);
+        this.handleToolResult(message, role);
         break;
       case 'pong':
         if (role === 'editor' && this.editor) this.editor.lastPongAt = Date.now();
@@ -530,10 +557,14 @@ export class GodotBridge {
     }
   }
 
-  private handleToolResult(message: ToolResultMessage): void {
+  private handleToolResult(message: ToolResultMessage, role: 'editor' | 'runtime'): void {
     const pending = this.pendingRequests.get(message.id);
     if (!pending) {
       this.log('warn', `Received result for unknown request: ${message.id}`);
+      return;
+    }
+    if (pending.target !== role) {
+      this.log('warn', `Ignored ${role} response for ${pending.target} request ${message.id}`);
       return;
     }
     clearTimeout(pending.timeout);
@@ -604,7 +635,7 @@ export class GodotBridge {
 
     const target: 'editor' | 'runtime' = this.routeIsRuntime(toolName, args) ? 'runtime' : 'editor';
     const slot = target === 'editor' ? this.editor : this.runtime;
-    if (!slot || slot.ws.readyState !== WebSocket.OPEN) {
+    if (!slot || slot.ws.readyState !== WebSocket.OPEN || !this.authenticatedSockets.has(slot.ws)) {
       if (target === 'runtime') {
         throw new Error(
           `Runtime helper is not connected. Tool '${toolName}' requires the game to be running with the MCPRuntime autoload registered. ` +
@@ -618,6 +649,10 @@ export class GodotBridge {
     const startTime = Date.now();
     const effectiveTimeout = TOOL_TIMEOUT_OVERRIDES[toolName] ?? this.timeout;
 
+    // Serialization can fail before there is a request or timer to clean up.
+    const message: ToolInvokeMessage = { type: 'tool_invoke', id, tool: toolName, args };
+    const serialized = JSON.stringify(message);
+
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
@@ -626,13 +661,17 @@ export class GodotBridge {
 
       this.pendingRequests.set(id, { resolve, reject, timeout, toolName, startTime, target });
 
-      const message: ToolInvokeMessage = {
-        type: 'tool_invoke',
-        id,
-        tool: toolName,
-        args,
+      const failSend = (error?: Error | null): void => {
+        if (!error || !this.pendingRequests.has(id)) return;
+        clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(error);
       };
-      this.sendTo(slot.ws, message);
+      try {
+        slot.ws.send(serialized, failSend);
+      } catch (error) {
+        failSend(error instanceof Error ? error : new Error(String(error)));
+      }
       this.log('debug', `Invoking tool: ${toolName} (${id}) on ${target}`);
     });
   }
@@ -658,8 +697,8 @@ export class GodotBridge {
   // --------------------------------------------------------------------------
 
   isListening(): boolean { return this._listening; }
-  isConnected(): boolean { return this.editor?.ws.readyState === WebSocket.OPEN; }
-  isRuntimeConnected(): boolean { return this.runtime?.ws.readyState === WebSocket.OPEN; }
+  isConnected(): boolean { return !!this.editor && this.editor.ws.readyState === WebSocket.OPEN && this.authenticatedSockets.has(this.editor.ws); }
+  isRuntimeConnected(): boolean { return !!this.runtime && this.runtime.ws.readyState === WebSocket.OPEN && this.authenticatedSockets.has(this.runtime.ws); }
 
   getStatus(): {
     connected: boolean;

@@ -21,6 +21,7 @@ function request(
   method: string,
   path: string,
   body?: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const opts: http.RequestOptions = {
@@ -28,9 +29,7 @@ function request(
       port,
       path,
       method,
-      headers: body
-        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-        : undefined,
+      headers: { ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}), ...extraHeaders },
     };
     const req = http.request(opts, (res) => {
       const chunks: Buffer[] = [];
@@ -276,4 +275,32 @@ describe('PrimaryHttpServer — endpoints', () => {
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('boom');
   });
+});
+
+
+describe('PrimaryHttpServer — rejects unsafe or malformed proxy requests', () => {
+  let server: PrimaryHttpServer;
+  afterEach(() => server?.stop());
+  it.each(['https://untrusted.example', 'null'])('blocks browser-origin POSTs (%s) before dispatch', async origin => {
+    const executor = vi.fn(async () => ({ content: [] }));
+    const port = getPort();
+    server = new PrimaryHttpServer(port, 'test', executor, 1);
+    await server.start();
+    const result = await request(port, 'POST', '/tool', JSON.stringify({ name: 'remove_node', args: {} }),
+      { Origin: origin, 'Content-Type': 'text/plain' });
+    expect(result.status).toBe(403);
+    expect(executor).not.toHaveBeenCalled();
+  });
+  it.each(['null', '[]', '{', '{"name":""}', '{"name":"read_scene","args":[]}',
+    '{"name":"read_scene","args":"scene"}', '{"name":"read_scene","args":null}'])(
+    'returns 400 without executing malformed request %s', async body => {
+      const executor = vi.fn(async () => ({ content: [] }));
+      const port = getPort();
+      server = new PrimaryHttpServer(port, 'test', executor, 1);
+      await server.start();
+      const result = await request(port, 'POST', '/tool', body);
+      expect(result.status).toBe(400);
+      expect(executor).not.toHaveBeenCalled();
+    },
+  );
 });

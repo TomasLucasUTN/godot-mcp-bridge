@@ -65,12 +65,12 @@ export class DapClient extends EventEmitter {
       `Open the project in the Godot editor and check Editor Settings → Network → Debug Adapter is enabled.`,
     );
     this.conn.onMessage((msg) => this.handleMessage(msg));
-    this.conn.onClose(() => {
+    this.conn.onClose((error) => {
       this.configured = false;
       this.state = 'terminated';
       for (const [, p] of this.pending) {
         clearTimeout(p.timer);
-        p.reject(new DapError(p.command, 'Debug adapter connection closed'));
+        p.reject(new DapError(p.command, error?.message ?? 'Debug adapter connection closed'));
       }
       this.pending.clear();
       this.emit('closed');

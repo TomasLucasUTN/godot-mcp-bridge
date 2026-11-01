@@ -90,13 +90,13 @@ export class LspClient extends EventEmitter {
       `Open the project in the Godot editor and check Editor Settings → Network → Language Server is enabled.`,
     );
     this.conn.onMessage((m) => this.handleMessage(m));
-    this.conn.onClose(() => {
+    this.conn.onClose((error) => {
       this.initialized = false;
       this.initializing = null;
       this.openDocuments.clear();
       for (const [, p] of this.pending) {
         clearTimeout(p.timer);
-        p.reject(new LspError(p.method, 'Language server connection closed'));
+        p.reject(new LspError(p.method, error?.message ?? 'Language server connection closed'));
       }
       this.pending.clear();
     });

@@ -150,3 +150,23 @@ describe('GodotBridge — project binding', () => {
     ws.close();
   });
 });
+
+
+describe('project identity case boundaries', () => {
+  it('does not collapse distinct POSIX projects or an explicit filesystem root', () => {
+    expect(normalizeProjectPath('/games/Project')).not.toBe(normalizeProjectPath('/games/project'));
+    expect(normalizeProjectPath('/')).toBe('/');
+    expect(normalizeProjectPath('')).toBe('');
+    expect(normalizeProjectPath('//SERVER/Share/Game/')).toBe('//server/share/game');
+  });
+  it('rejects the wrong POSIX project even if its path differs only by case', async () => {
+    const bridge = createBridge(0, SHORT_TIMEOUT, '/games/Project');
+    await bridge.start();
+    const ws = await connectClient(bridge.getStatus().port);
+    try {
+      sendReady(ws, '/games/project');
+      expect(await waitForClose(ws)).toBe(CLOSE_WRONG_PROJECT);
+      expect(bridge.isConnected()).toBe(false);
+    } finally { ws.close(); bridge.stop(); }
+  });
+});

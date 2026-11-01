@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createBridge, GodotBridge, slowCallNote } from '../godot-bridge.js';
 
@@ -552,4 +552,109 @@ describe('GodotBridge — addon version', () => {
     expect(bridge.getStatus().connected).toBe(true);
     expect(bridge.getStatus().addonVersion).toBeUndefined();
   });
+});
+
+
+describe('GodotBridge — failed sends release pending requests', () => {
+  let bridge: GodotBridge;
+  let client: WebSocket | null = null;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    client?.close();
+    bridge?.stop();
+  });
+  async function connectedSocket(): Promise<WebSocket> {
+    bridge = createBridge(TEST_PORT, SHORT_TIMEOUT);
+    await bridge.start();
+    client = await connectClient(TEST_PORT);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return (bridge as unknown as { editor: { ws: WebSocket } }).editor.ws;
+  }
+  it('rejects callback send errors immediately and clears the timeout', async () => {
+    const socket = await connectedSocket();
+    vi.spyOn(socket, 'send').mockImplementationOnce((...args: unknown[]) => {
+      const callback = args.at(-1) as (error: Error) => void;
+      if (typeof callback === 'function') queueMicrotask(() => callback(new Error('write failed')));
+    });
+    await expect(bridge.invokeTool('read_scene', {})).rejects.toThrow('write failed');
+    expect(bridge.getStatus().pendingRequests).toBe(0);
+  });
+  it('does not retain a request if send throws synchronously', async () => {
+    const socket = await connectedSocket();
+    vi.spyOn(socket, 'send').mockImplementationOnce(() => { throw new Error('socket failed'); });
+    await expect(bridge.invokeTool('read_scene', {})).rejects.toThrow('socket failed');
+    expect(bridge.getStatus().pendingRequests).toBe(0);
+  });
+  it('does not create a pending request when serialization fails', async () => {
+    await connectedSocket();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(bridge.invokeTool('read_scene', circular)).rejects.toThrow();
+    expect(bridge.getStatus().pendingRequests).toBe(0);
+  });
+});
+
+
+describe('GodotBridge — channel isolation and malformed messages', () => {
+  let bridge: GodotBridge;
+  const clients: WebSocket[] = [];
+  afterEach(() => { for (const client of clients) client.close(); bridge?.stop(); });
+  async function peer(role: 'editor' | 'runtime'): Promise<WebSocket> {
+    const client = await connectClient(bridge.getStatus().port);
+    clients.push(client);
+    client.send(JSON.stringify({ type: 'godot_ready', role, project_path: '/p' }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return client;
+  }
+  it('does not let a runtime result complete an editor request', async () => {
+    bridge = createBridge(0, SHORT_TIMEOUT);
+    await bridge.start();
+    const editor = await peer('editor');
+    const runtime = await peer('runtime');
+    const incoming = nextMessage(editor);
+    const answer = bridge.invokeTool('read_scene', {}).catch(error => ({ error: error.message }));
+    const request = await incoming;
+    runtime.send(JSON.stringify({ type: 'tool_result', id: request.id, success: true, result: { from: 'wrong-channel' } }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const stillPending = bridge.getStatus().pendingRequests;
+    editor.send(JSON.stringify({ type: 'tool_result', id: request.id, success: true, result: { from: 'editor' } }));
+    expect(await answer).toEqual({ from: 'editor' });
+    expect(stillPending).toBe(1);
+  });
+  it('refuses changing role on a socket and releases its original slot', async () => {
+    bridge = createBridge(0, SHORT_TIMEOUT);
+    await bridge.start();
+    const runtime = await peer('runtime');
+    runtime.send(JSON.stringify({ type: 'godot_ready', role: 'editor', project_path: '/p' }));
+    await new Promise(resolve => setTimeout(resolve, 40));
+    const closed = runtime.readyState === WebSocket.CLOSED;
+    runtime.close();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await peer('runtime');
+    expect(closed).toBe(true);
+    expect(bridge.isRuntimeConnected()).toBe(true);
+    expect(bridge.isConnected()).toBe(false);
+  });
+  it('reports protocol errors to the pending call without waiting for timeout', async () => {
+    bridge = createBridge(0, SHORT_TIMEOUT);
+    await bridge.start();
+    const editor = await peer('editor');
+    const incoming = nextMessage(editor);
+    const failure = bridge.invokeTool('read_scene', {}).catch(error => error.message);
+    await incoming;
+    editor.send('{');
+    expect(await failure).toContain('Invalid JSON message');
+    expect(bridge.getStatus().pendingRequests).toBe(0);
+  });
+  it.each(['null', '[]', '"text"', '{"type":"godot_ready","project_path":42}'])(
+    'closes an invalid envelope %s without crashing the server', async raw => {
+      bridge = createBridge(0, SHORT_TIMEOUT);
+      await bridge.start();
+      const client = await peer('editor');
+      client.send(raw);
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(client.readyState).toBe(WebSocket.CLOSED);
+      expect(bridge.isListening()).toBe(true);
+    },
+  );
 });
