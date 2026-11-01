@@ -30,7 +30,9 @@ export interface ToolDefinition {
 }
 
 export interface PropertySchema {
-  type?: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+  minimum?: number;
+  maximum?: number;
   description?: string;
   default?: unknown;
   enum?: string[];

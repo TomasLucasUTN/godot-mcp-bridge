@@ -801,6 +801,7 @@ async function executeToolCall(
       try {
         const integrityResult = await godotBridge!.invokeTool('validate_scene_integrity', {
           scene_path: toolArgs.scene_path,
+          use_live_tree: true,
         });
         resultPayload = { ...resultPayload, _integrity_check: integrityResult };
       } catch (integrityError) {

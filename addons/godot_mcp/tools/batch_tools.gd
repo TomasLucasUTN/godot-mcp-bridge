@@ -70,7 +70,6 @@ func batch_set_property(args: Dictionary) -> Dictionary:
 	var root: Node = acquired[0]
 	var is_live: bool = acquired[1]
 
-	var parsed_value = VariantCodec.parse_value(value)
 	var applied: Array = []
 	var failed: Array = []
 	var ctx := _begin_edit(is_live, "MCP: batch set %s" % property_name, root)
@@ -87,8 +86,23 @@ func batch_set_property(args: Dictionary) -> Dictionary:
 		if not (property_name in target):
 			failed.append({&"node_path": node_path, &"error": "No property '%s' on %s" % [property_name, target.get_class()]})
 			continue
+		if property_name in ["script", "owner", "scene_file_path"]:
+			failed.append({&"node_path": node_path, &"error": "Use the dedicated script/structural tool"})
+			continue
+		if property_name == "name":
+			var guard := _structural_edit_error(root, target)
+			if not guard.is_empty():
+				failed.append({&"node_path": node_path, &"error": guard[&"error"]})
+				continue
+		var parsed_value: Variant = _parse_typed_value(value, _property_type_map(target).get(property_name, -1))
 		var old_value = target.get(property_name)
-		_edit_set(ctx, target, StringName(property_name), parsed_value)
+		target.set(property_name, parsed_value)
+		if not _values_match(target.get(property_name), parsed_value):
+			target.set(property_name, old_value)
+			failed.append({&"node_path": node_path, &"error": "Property rejected or clamped the requested value"})
+			continue
+		_edit_record(ctx, target, &"set", [StringName(property_name), target.get(property_name)],
+			&"set", [StringName(property_name), old_value])
 		applied.append({&"node_path": node_path, &"old": VariantCodec.serialize_value(old_value), &"new": VariantCodec.serialize_value(parsed_value)})
 
 	if applied.is_empty():
@@ -166,13 +180,20 @@ func rename_symbol_project_wide(args: Dictionary) -> Dictionary:
 
 	var file_results: Array = []
 	var total_matches := 0
+	var changes: Dictionary = {}
+	var open_scenes: PackedStringArray = []
+	if not dry_run and _editor_plugin:
+		open_scenes = _editor_plugin.get_editor_interface().get_open_scenes()
 
 	for file_path: String in files:
 		var f := FileAccess.open(file_path, FileAccess.READ)
 		if not f:
-			continue
+			return {&"ok": false, &"error": "Cannot preflight file: " + file_path}
 		var content := f.get_as_text()
+		var read_error := f.get_error()
 		f.close()
+		if read_error != OK:
+			return {&"ok": false, &"error": "Failed to read file: " + file_path}
 
 		var matches := regex.search_all(content)
 		if matches.is_empty():
@@ -189,11 +210,24 @@ func rename_symbol_project_wide(args: Dictionary) -> Dictionary:
 
 		if not dry_run:
 			var new_content := regex.sub(content, new_name, true)
-			var wf := FileAccess.open(file_path, FileAccess.WRITE)
-			if not wf:
-				return {&"ok": false, &"error": "Failed to write file: " + file_path}
-			wf.store_string(new_content)
-			wf.close()
+			if new_content == content:
+				continue
+			if Array(open_scenes).any(func(open_path: String) -> bool: return _same_scene_path(open_path, file_path)):
+				return {&"ok": false, &"error": "Refusing to refactor an open scene: %s. Close its scene tab first; no files changed." % file_path}
+			changes[file_path] = new_content
+
+	# All candidates must pass preflight before the first disk write.
+	var written: Array = []
+	for file_path: String in changes:
+		var wf := FileAccess.open(file_path, FileAccess.WRITE)
+		if not wf:
+			return {&"ok": false, &"error": "Failed to write file: " + file_path, &"written_files": written}
+		wf.store_string(changes[file_path])
+		var write_error := wf.get_error()
+		wf.close()
+		if write_error != OK:
+			return {&"ok": false, &"error": "Failed to write file: " + file_path, &"written_files": written}
+		written.append(file_path)
 
 	if not dry_run and _editor_plugin:
 		_editor_plugin.get_editor_interface().get_resource_filesystem().scan()

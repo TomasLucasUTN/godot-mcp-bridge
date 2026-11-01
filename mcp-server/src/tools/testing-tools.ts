@@ -58,6 +58,7 @@ export const testingTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         scene_path: { type: 'string', description: 'res:// path to the .tscn file' },
+        use_live_tree: { type: 'boolean', default: false, description: 'Inspect unsaved editor state when the target is active (default false checks saved disk). Inactive open targets must be focused first.' },
       },
       required: ['scene_path'],
     },

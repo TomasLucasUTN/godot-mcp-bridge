@@ -399,6 +399,8 @@ const _DESTRUCTIVE_TOOLS := {
 	"duplicate_node": true, "set_anchor_preset": true,
 	"tilemap_set_cell": true, "tilemap_fill_rect": true, "tilemap_clear": true,
 	"tilemap_set_terrain_cells": true, "tilemap_autotile": true,
+	"create_sprite_animation": true, "create_sprite_frames": true, "add_bone": true, "set_bone_pose": true,
+	"mp_set_authority": true, "save_scene": true,
 	"create_animation": true, "add_animation_track": true, "set_animation_keyframe": true,
 	"remove_animation": true,
 	"add_audio_player": true, "add_audio_bus": true,
@@ -520,6 +522,8 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 	# version parses fine in the editor and turns tool_executor.gd into a broken
 	# script the moment it is loaded standalone — which is exactly how the
 	# headless suite loads it.
+	if "_scene_mutating" in node:
+		node._scene_mutating = _DESTRUCTIVE_TOOLS.has(tool_name)
 	var previews := dry_run and ("_dry_run" in node)
 	if previews:
 		node._dry_run = true
@@ -542,6 +546,8 @@ func execute_tool(tool_name: String, args: Dictionary) -> Dictionary:
 	else:
 		result = node.call(method, args)
 
+	if "_scene_mutating" in node:
+		node._scene_mutating = true
 	var skipped_write: bool = previews and node._dry_run_skipped_write
 	if previews:
 		node._dry_run = false

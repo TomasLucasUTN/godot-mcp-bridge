@@ -62,6 +62,18 @@ export const sceneTools: ToolDefinition[] = [
           items: { type: 'string' },
           description: 'Return exactly these properties on every node, e.g. ["position"] to get the whole layout of a 2D scene in one call. Overrides include_properties. A name the node does not have is reported under missing_properties rather than silently omitted, so a typo is visible.'
         },
+        format: {
+          type: 'string', enum: ['tree', 'compact'], default: 'tree',
+          description: 'compact returns root_name, columns and rows instead of nested dictionaries. Same node paths, types, properties, instance/script links and truncation markers with less repeated JSON. Default tree is unchanged.'
+        },
+        child_offset: {
+          type: 'integer', minimum: 0, default: 0,
+          description: 'Skip direct children of the requested node_path. Use next_child_offset from a budget-limited response to page wide branches; inspect nested children_truncated branches separately.'
+        },
+        max_nodes: {
+          type: 'integer', minimum: 1, maximum: 10000, default: 500,
+          description: 'Maximum nodes returned (default 500). Response reports truncation explicitly. Read node_path branches to inspect a larger scene without flooding context.'
+        },
         max_depth: {
           type: 'number',
           description: 'Max tree depth to expand (root is 0). Omit or -1 for the full tree. Use 1-2 for a cheap overview of a big scene.'
@@ -667,14 +679,14 @@ export const sceneTools: ToolDefinition[] = [
   {
     name: 'save_resource_to_file',
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    description: 'Save a Resource currently held by a node (or sub-resource) to a standalone .tres file so it can be referenced by other scenes / shared / committed. The node\'s property is then re-pointed to the loaded-from-disk version, so future set_resource_property calls write through to that file. Works for any Resource subclass: Material, Mesh, Shape, Curve, Gradient, etc.',
+    description: 'Save a Resource currently held by a node (or sub-resource) to a standalone .tres file so it can be referenced by other scenes / shared / committed. Existing destinations are rejected. The scene link is undoable; the new exported file remains after undo. Future set_resource_property calls edit an inline copy in the scene. Works for any Resource subclass: Material, Mesh, Shape, Curve, Gradient, etc.',
     inputSchema: {
       type: 'object',
       properties: {
         scene_path: { type: 'string' },
         node_path: { type: 'string' },
         resource_path: { type: 'string', description: 'Path from node to the resource (e.g. "shape", "material")' },
-        save_to: { type: 'string', description: 'Destination path (res://.../foo.tres)' },
+        save_to: { type: 'string', description: 'New destination path (.tres or .res); must not already exist' },
         dry_run: { type: 'boolean', description: 'Preview only: do the work, report it, write nothing. Default false.' }
       },
       required: ['scene_path', 'resource_path', 'save_to']

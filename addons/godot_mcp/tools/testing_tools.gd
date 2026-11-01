@@ -274,19 +274,23 @@ func validate_scene_integrity(args: Dictionary) -> Dictionary:
 	if scene_path.strip_edges() == "res://":
 		return {&"ok": false, &"error": "Missing 'scene_path'"}
 
-	var result := _load_scene(scene_path)
-	if not result[1].is_empty():
-		return result[1]
+	var use_live := bool(args.get(&"use_live_tree", false))
+	var result := _acquire_scene(scene_path) if use_live else _load_scene(scene_path)
+	var error: Dictionary = result[2] if use_live else result[1]
+	if not error.is_empty():
+		return error
 	var root: Node = result[0]
+	var is_live: bool = result[1] if use_live else false
 
 	var issues: Array = []
 	_walk_for_issues(root, issues)
-	root.queue_free()
+	_discard_scene(root, is_live)
 
 	return {
 		&"ok": true,
 		&"scene_path": scene_path,
 		&"issue_count": issues.size(),
+		&"source": "live" if is_live else "disk",
 		&"issues": issues,
 	}
 

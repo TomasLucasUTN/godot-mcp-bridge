@@ -53,16 +53,14 @@ func _ensure_res_path(path: String) -> String:
 ## tree (ideally via _get_undo_redo) is undo-safe and does NOT clobber unsaved
 ## changes — unlike the disk load→save path, which overwrites whatever wasn't saved.
 func _edited_root_if_open(scene_path: String) -> Node:
-	# A preview must not touch the open scene at all: editing the live tree
-	# marks it unsaved and pushes an undo entry, which is a change the caller
-	# did not ask for. Dry runs therefore always take the disk path, where the
-	# work happens on a throwaway copy.
+	# Legacy callers cannot receive the live root for preview; _acquire_scene
+	# snapshots the active tree and isolates mutable resources instead.
 	if _dry_run:
 		return null
 	if not _editor_plugin:
 		return null
 	var edited = _editor_plugin.get_editor_interface().get_edited_scene_root()
-	if edited and edited.scene_file_path == scene_path:
+	if edited and _same_scene_path(edited.scene_file_path, scene_path):
 		return edited
 	return null
 
@@ -79,7 +77,7 @@ func _load_scene(scene_path: String) -> Array:
 		return [null, PathGuard.error_for(scene_path, "scene_path")]
 	if not FileAccess.file_exists(scene_path):
 		return [null, {&"ok": false, &"error": "Scene does not exist: " + scene_path}]
-	var packed = load(scene_path) as PackedScene
+	var packed = ResourceLoader.load(scene_path, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
 	if not packed:
 		return [null, {&"ok": false, &"error": "Failed to load scene: " + scene_path}]
 	var root = _instantiate_packed_scene_for_edit(packed)
@@ -111,6 +109,10 @@ func _instantiate_packed_scene_for_edit(packed: PackedScene, as_instance: bool =
 ## tool that edits a scene previews correctly, including ones written later.
 var _dry_run := false
 
+# The executor sets this for reads; direct mutating handler calls remain safe.
+var _scene_mutating := true
+var _resource_copies_by_root: Dictionary = {}
+
 ## True when the current call previewed instead of writing. The executor reads
 ## it to label the answer, so a tool cannot forget to say it did nothing.
 var _dry_run_skipped_write := false
@@ -125,8 +127,11 @@ func _save_scene(scene_root: Node, scene_path: String) -> Dictionary:
 		# throwing it away here is what makes the preview free. The scene file
 		# is never opened for writing, so its bytes cannot change.
 		_dry_run_skipped_write = true
+		_resource_copies_by_root.erase(scene_root.get_instance_id())
 		scene_root.queue_free()
 		return {}
+	_restore_unchanged_resources(scene_root)
+	_resource_copies_by_root.erase(scene_root.get_instance_id())
 	var packed = PackedScene.new()
 	var pack_result = packed.pack(scene_root)
 	if pack_result != OK:
@@ -144,7 +149,7 @@ func _find_node(scene_root: Node, node_path: String) -> Node:
 		return scene_root
 	var found := scene_root.get_node_or_null(node_path)
 	if found != null:
-		return found
+		return found if _editable_node_error(scene_root, found).is_empty() else null
 	# Callers routinely write the path the way a scene dump prints it, rooted at
 	# the root's own name ("Player" or "Player/Sprite2D") rather than relative to
 	# it. Godot resolves neither. Accept both, but only after the literal lookup
@@ -153,7 +158,8 @@ func _find_node(scene_root: Node, node_path: String) -> Node:
 	if node_path == root_name:
 		return scene_root
 	if node_path.begins_with(root_name + "/"):
-		return scene_root.get_node_or_null(node_path.substr(root_name.length() + 1))
+		var relative := scene_root.get_node_or_null(node_path.substr(root_name.length() + 1))
+		return relative if relative != null and _editable_node_error(scene_root, relative).is_empty() else null
 	return null
 
 ## Standard error for a node path that did not resolve.
@@ -163,6 +169,11 @@ func _find_node(scene_root: Node, node_path: String) -> Node:
 ## answers with the paths that DO exist, so one failed call is enough.
 ## `label` distinguishes which argument was bad ("Parent node", "from_node").
 func _node_not_found(scene_root: Node, node_path: String, label: String = "Node") -> Dictionary:
+	var actual := scene_root.get_node_or_null(node_path)
+	if actual != null:
+		var edit_error := _editable_node_error(scene_root, actual)
+		if not edit_error.is_empty():
+			return edit_error
 	var available := _node_paths_in(scene_root)
 	var near: Array[String] = []
 	for candidate in available:
@@ -337,13 +348,201 @@ func _property_type_map(node: Object) -> Dictionary:
 ## This is the single choke point that makes scene-editing tools stop clobbering
 ## unsaved edits when the target scene is open.
 func _acquire_scene(scene_path: String) -> Array:
-	var live := _edited_root_if_open(scene_path)
-	if live != null:
-		return [live, true, {}]
+	var actual_live: Node = null
+	if _editor_plugin:
+		var ei := _editor_plugin.get_editor_interface()
+		actual_live = ei.get_edited_scene_root()
+		if actual_live == null or not _same_scene_path(actual_live.scene_file_path, scene_path):
+			actual_live = null
+			for open_path in ei.get_open_scenes():
+				if _same_scene_path(open_path, scene_path):
+					return [null, false, {&"ok": false, &"error": "Scene is open in an inactive tab. Focus it before editing or reading its live state: " + scene_path}]
+	if actual_live != null:
+		if not _dry_run:
+			return [actual_live, true, {}]
+		var preview := actual_live.duplicate(Node.DUPLICATE_SIGNALS | Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS)
+		if preview == null:
+			return [null, false, {&"ok": false, &"error": "Could not snapshot the open scene for preview"}]
+		var preview_error := _isolate_scene_resources(preview)
+		if not preview_error.is_empty():
+			_discard_scene(preview, false)
+			return [null, false, {&"ok": false, &"error": preview_error}]
+		return [preview, false, {}]
 	var r := _load_scene(scene_path)
 	if not r[1].is_empty():
 		return [null, false, r[1]]
+	if _dry_run or _scene_mutating:
+		var copy_error := _isolate_scene_resources(r[0])
+		if not copy_error.is_empty():
+			_discard_scene(r[0], false)
+			return [null, false, {&"ok": false, &"error": copy_error}]
 	return [r[0], false, {}]
+
+# Scene copies must not mutate Resources still referenced by an open editor tab.
+# Private copies also serialize into the scene instead of losing edits to .tres.
+func _isolate_scene_resources(root: Node) -> String:
+	var copies := {&"originals": {}, &"error": ""}
+	_isolate_node_resources(root, copies)
+	_resource_copies_by_root[root.get_instance_id()] = copies[&"originals"]
+	return copies[&"error"]
+
+func _isolate_node_resources(node: Node, copies: Dictionary) -> void:
+	for prop in node.get_property_list():
+		var name: StringName = prop[&"name"]
+		if name == &"script" or not (int(prop.get(&"usage", 0)) & PROPERTY_USAGE_STORAGE):
+			continue
+		var value: Variant = node.get(name)
+		if value is Resource or value is Array or value is Dictionary:
+			node.set(name, _private_resource_value(value, copies))
+	for child in node.get_children():
+		_isolate_node_resources(child, copies)
+
+func _private_resource_value(value: Variant, copies: Dictionary) -> Variant:
+	if value is Script:
+		return value # Never instantiate a second copy of a registered global class.
+	if value is Resource:
+		var id: int = value.get_instance_id()
+		if copies.has(id):
+			return copies[id]
+		var copy: Resource = ClassDB.instantiate(value.get_class()) as Resource if value.get_script() == null else value.duplicate(false)
+		if copy != null and value.get_script() != null and copy.has_method(&"reset_state"):
+			copy.call(&"reset_state")
+		if copy == null:
+			copies[&"error"] = "Cannot isolate resource safely: " + value.get_class()
+			return value
+		copies[id] = copy
+		copies[&"originals"][copy.get_instance_id()] = value
+		for prop in value.get_property_list():
+			var name: StringName = prop[&"name"]
+			if name == &"script" or name == &"resource_path" or not (int(prop.get(&"usage", 0)) & PROPERTY_USAGE_STORAGE):
+				continue
+			var nested: Variant = value.get(name)
+			copy.set(name, _private_resource_value(nested, copies))
+		return copy
+	if value is Array:
+		var result: Array = value.duplicate()
+		for i in range(result.size()):
+			result[i] = _private_resource_value(result[i], copies)
+		return result
+	if value is Dictionary:
+		var result: Dictionary = value.duplicate()
+		for key in result:
+			result[key] = _private_resource_value(result[key], copies)
+		return result
+	return value
+
+# Keep unchanged external dependencies external; only edited copies become local.
+func _restore_unchanged_resources(root: Node) -> void:
+	var originals: Dictionary = _resource_copies_by_root.get(root.get_instance_id(), {})
+	if not originals.is_empty():
+		_restore_node_resources(root, originals, {})
+
+func _restore_node_resources(node: Node, originals: Dictionary, restored: Dictionary) -> void:
+	for prop in node.get_property_list():
+		var name: StringName = prop[&"name"]
+		if name != &"script" and (int(prop.get(&"usage", 0)) & PROPERTY_USAGE_STORAGE):
+			var value: Variant = node.get(name)
+			if value is Resource or value is Array or value is Dictionary:
+				node.set(name, _restore_resource_value(value, originals, restored))
+	for child in node.get_children():
+		_restore_node_resources(child, originals, restored)
+
+func _restore_resource_value(value: Variant, originals: Dictionary, restored: Dictionary) -> Variant:
+	if value is Resource:
+		var id: int = value.get_instance_id()
+		if restored.has(id):
+			return restored[id]
+		if not originals.has(id):
+			return value
+		if _resource_values_equal(value, originals[id], {}):
+			restored[id] = originals[id]
+			return originals[id]
+		restored[id] = value
+		return value
+	if value is Array:
+		var result: Array = value.duplicate()
+		for i in range(result.size()):
+			result[i] = _restore_resource_value(result[i], originals, restored)
+		return result
+	if value is Dictionary:
+		var result: Dictionary = value.duplicate()
+		for key in result:
+			result[key] = _restore_resource_value(result[key], originals, restored)
+		return result
+	return value
+
+func _resource_values_equal(a: Variant, b: Variant, visited: Dictionary) -> bool:
+	if typeof(a) != typeof(b):
+		return false
+	if a is Resource:
+		if a == b:
+			return true
+		if b == null or a.get_class() != b.get_class() or a.get_script() != b.get_script():
+			return false
+		var pair := str(a.get_instance_id()) + "/" + str(b.get_instance_id())
+		if visited.has(pair):
+			return true
+		visited[pair] = true
+		if _stored_resource_names(a) != _stored_resource_names(b):
+			return false
+		for prop in a.get_property_list():
+			var name: StringName = prop[&"name"]
+			if name in [&"resource_path", &"resource_scene_unique_id"] or not (int(prop.get(&"usage", 0)) & PROPERTY_USAGE_STORAGE):
+				continue
+			if not _resource_values_equal(a.get(name), b.get(name), visited):
+				return false
+		return true
+	if a is Array or a is Dictionary:
+		if a.size() != b.size():
+			return false
+		for key in (range(a.size()) if a is Array else a.keys()):
+			if a is Dictionary and not b.has(key):
+				return false
+			if not _resource_values_equal(a[key], b[key], visited):
+				return false
+		return true
+	return a == b
+
+func _stored_resource_names(resource: Resource) -> Array:
+	var names: Array = []
+	for prop in resource.get_property_list():
+		var name: StringName = prop[&"name"]
+		if name not in [&"resource_path", &"resource_scene_unique_id"] and (int(prop.get(&"usage", 0)) & PROPERTY_USAGE_STORAGE):
+			names.append(name)
+	names.sort()
+	return names
+
+func _editable_node_error(root: Node, node: Node) -> Dictionary:
+	if not _scene_mutating:
+		return {}
+	var owner := node.owner
+	while owner != null and owner != root:
+		if not root.is_editable_instance(owner):
+			return {&"ok": false, &"error": "Node belongs to a non-editable scene instance. Enable Editable Children explicitly before editing: " + str(root.get_path_to(node))}
+		owner = owner.owner
+	return {}
+
+func _structural_edit_error(root: Node, node: Node) -> Dictionary:
+	# Renaming the derived root is a serializable override. Callers separately
+	# reject removing/reparenting the root.
+	if node == root:
+		return {}
+	if node.owner != root:
+		return {&"ok": false, &"error": "Cannot remove, rename or reparent a node supplied by a scene instance; edit its source scene instead"}
+	if not root.scene_file_path.is_empty():
+		var packed := load(root.scene_file_path) as PackedScene
+		var state: SceneState = packed.get_state().get_base_scene_state() if packed else null
+		while state != null:
+			for i in range(state.get_node_count()):
+				if str(state.get_node_path(i)).trim_prefix("./") == str(root.get_path_to(node)).trim_prefix("./"):
+					return {&"ok": false, &"error": "Cannot remove, rename or reparent a node inherited from the base scene; edit the base instead"}
+			state = state.get_base_scene_state()
+	return {}
+
+func _same_scene_path(a: String, b: String) -> bool:
+	var left := ProjectSettings.globalize_path(a).simplify_path()
+	var right := ProjectSettings.globalize_path(b).simplify_path()
+	return left.nocasecmp_to(right) == 0 if OS.has_feature("windows") else left == right
 
 ## Finish a scene edit started with _acquire_scene. Disk copy → pack+save (frees
 ## root). Live tree → mark the edited scene unsaved so the user sees the dirty
@@ -368,6 +567,7 @@ func _finish_scene_edit(root: Node, scene_path: String, is_live: bool) -> Dictio
 ## `root.queue_free()` error cleanup by swapping in `_discard_scene(root, is_live)`.
 func _discard_scene(root: Node, is_live: bool) -> void:
 	if not is_live and is_instance_valid(root):
+		_resource_copies_by_root.erase(root.get_instance_id())
 		root.queue_free()
 
 # ---------------------------------------------------------------------------
@@ -394,123 +594,82 @@ func _discard_scene(root: Node, is_live: bool) -> void:
 # On the disk path (is_live false) every helper degrades to the direct call, so
 # one code path covers both.
 
-## Open an edit batch. Everything until _edit_commit lands as one undo entry.
-##
-## `context` MUST be a node belonging to the edited scene (the root, or the node
-## being changed). It is not optional decoration: EditorUndoRedoManager keeps a
-## separate undo history per scene, and with no explicit context it infers one
-## from the FIRST object registered. Register a Resource first — a material, an
-## AnimationLibrary — and the entry can land in a history that Ctrl+Z on the
-## scene never reaches, so the edit looks undoable and isn't. That exact bug
-## shipped in add_node, whose first registered object was the tool node itself.
+## Stage inverses while applying changes immediately. Only a successful commit
+## publishes an editor action, so abort cannot replace an existing redo tail.
+## The explicit scene context keeps Resource edits in the correct history.
 func _begin_edit(is_live: bool, action_name: String, context: Object) -> Dictionary:
-	var ur: EditorUndoRedoManager = _get_undo_redo() if is_live else null
-	if ur:
-		ur.create_action(action_name, UndoRedo.MERGE_DISABLE, context)
-	return {&"ur": ur, &"dirty": false}
+	return {&"ur": _get_undo_redo() if is_live else null, &"dirty": false,
+		&"action_name": action_name, &"context": context, &"do": [], &"undo": [],
+		&"references": [], &"committed": false}
 
-## Set a property now, and record how to put it back.
 func _edit_set(ctx: Dictionary, obj: Object, prop: StringName, value: Variant) -> void:
 	if not is_instance_valid(obj):
 		return
 	var old: Variant = obj.get(prop)
+	if typeof(old) == typeof(value) and old == value:
+		return
 	obj.set(prop, value)
-	var ur: EditorUndoRedoManager = ctx.get(&"ur")
-	if ur:
-		ur.add_do_property(obj, prop, value)
-		ur.add_undo_property(obj, prop, old)
-		ctx[&"dirty"] = true
+	_edit_record(ctx, obj, &"set", [prop, value], &"set", [prop, old])
 
-## Apply a {name: value} batch, parsing each value the way tool args arrive.
 func _edit_set_many(ctx: Dictionary, obj: Object, properties: Dictionary) -> void:
 	for prop_name: String in properties:
 		_edit_set(ctx, obj, StringName(prop_name), _parse_value(properties[prop_name]))
 
-## Parent a node now, and record how to detach it.
-##
-## `owner` is set as part of the same action on purpose: a redo that re-adds the
-## node without restoring its owner produces a node the scene dock shows but that
-## never gets written to the .tscn — a corrupted-looking scene with no error.
 func _edit_add_child(ctx: Dictionary, parent: Node, node: Node, root: Node) -> void:
 	parent.add_child(node, true)
 	node.owner = root
-	var ur: EditorUndoRedoManager = ctx.get(&"ur")
-	if ur:
-		ur.add_do_method(parent, &"add_child", node, true)
-		ur.add_do_property(node, &"owner", root)
-		# Without this the node is freed once the action is undone, and redo
-		# resurrects a dangling reference.
-		ur.add_do_reference(node)
-		ur.add_undo_method(parent, &"remove_child", node)
-		ctx[&"dirty"] = true
+	_edit_record(ctx, parent, &"add_child", [node, true], &"remove_child", [node])
+	# Restoring owner belongs to redo, but must not run after undo detached it.
+	ctx[&"do"].append([node, &"set", [&"owner", root]])
+	_edit_reference(ctx, node, true)
 
-## Record an edit whose inverse is another method call, for changes that aren't
-## property writes: adding an animation track, inserting a keyframe, painting a
-## tilemap cell. The call itself has already been made — this only teaches the
-## undo stack how to replay and reverse it.
-##
-## Example, after `var idx := anim.add_track(type)`:
-##     _edit_record(ctx, anim, &"add_track", [type], &"remove_track", [idx])
+func _edit_reference(ctx: Dictionary, obj: Object, for_do: bool) -> void:
+	ctx[&"references"].append([obj, for_do])
+
 func _edit_record(ctx: Dictionary, obj: Object, do_method: StringName, do_args: Array,
 		undo_method: StringName, undo_args: Array) -> void:
-	var ur: EditorUndoRedoManager = ctx.get(&"ur")
-	if ur == null or not is_instance_valid(obj):
+	if not is_instance_valid(obj):
 		return
-	# callv because add_do_method is variadic and the argument list is dynamic.
-	ur.callv(&"add_do_method", [obj, do_method] + do_args)
-	ur.callv(&"add_undo_method", [obj, undo_method] + undo_args)
+	ctx[&"do"].append([obj, do_method, do_args])
+	ctx[&"undo"].append([obj, undo_method, undo_args])
 	ctx[&"dirty"] = true
 
-## Abandon an edit that has ALREADY written to the scene, putting it back.
-##
-## This is the structural answer to a bug shape this codebase has produced six
-## times: a tool applies some properties, validates a later argument, fails, and
-## calls `_discard_scene` — which is a no-op on an open scene, because the target
-## IS the editor's live node rather than a copy. The tool then reports total
-## failure with half its writes still applied.
-##
-## Validating everything before the first write avoids it and is still the better
-## habit. But it isn't always possible (a value may only be checkable after an
-## earlier one is set), and "remember the rule" is exactly what failed six times.
-## With undo recorded for every live edit, the batch can simply be committed and
-## immediately undone, which reverts it through the same machinery Ctrl+Z uses.
-##
-## Use this instead of `_discard_scene` on any error path reached after the first
-## `_edit_*` call. Before the first write, `_discard_scene` is still correct and
-## cheaper.
 func _abort_edit(ctx: Dictionary, root: Node, is_live: bool) -> void:
-	if not is_live:
-		_edit_commit(ctx)
-		_discard_scene(root, is_live)
-		return
+	# Failed calls never become an undo action (or erase the user's redo tail).
+	if is_live and not bool(ctx.get(&"committed", false)):
+		var inverses: Array = ctx.get(&"undo", [])
+		for i in range(inverses.size() - 1, -1, -1):
+			var op: Array = inverses[i]
+			if is_instance_valid(op[0]):
+				op[0].callv(op[1], op[2])
+		# Detached newly created nodes have no history to own their lifetime.
+		for entry in ctx.get(&"references", []):
+			if entry[1] and is_instance_valid(entry[0]) and entry[0] is Node and entry[0].get_parent() == null:
+				entry[0].queue_free()
+	ctx[&"ur"] = null
+	_discard_scene(root, is_live)
 
-	# Nothing was written, so there is nothing to take back. Undoing anyway would
-	# pop the PREVIOUS entry off the history and destroy unrelated work — caught
-	# by the live harness, where an aborted tool silently deleted a node an
-	# earlier test had added.
-	var wrote_something := bool(ctx.get(&"dirty", false))
-	_edit_commit(ctx)
-	if not wrote_something:
-		return
-
-	var manager: EditorUndoRedoManager = ctx.get(&"ur")
-	if manager == null or not is_instance_valid(root):
-		return
-	var ur: UndoRedo = manager.get_history_undo_redo(manager.get_object_history_id(root))
-	if ur and ur.has_undo():
-		ur.undo()
-
-## Close the batch. `false` = the writes already happened; don't replay them.
 func _edit_commit(ctx: Dictionary) -> void:
+	if bool(ctx.get(&"committed", false)):
+		return
+	ctx[&"committed"] = true
 	var ur: EditorUndoRedoManager = ctx.get(&"ur")
-	if ur:
-		ur.commit_action(false)
+	if ur == null or not bool(ctx.get(&"dirty", false)):
+		return
+	# No editor action exists until validation and mutation have both succeeded.
+	ur.create_action(ctx[&"action_name"], UndoRedo.MERGE_DISABLE, ctx[&"context"])
+	for op in ctx[&"do"]:
+		ur.callv(&"add_do_method", [op[0], op[1]] + op[2])
+	var inverses: Array = ctx[&"undo"]
+	for i in range(inverses.size() - 1, -1, -1):
+		var op: Array = inverses[i]
+		ur.callv(&"add_undo_method", [op[0], op[1]] + op[2])
+	for entry in ctx[&"references"]:
+		if entry[1]:
+			ur.add_do_reference(entry[0])
+		else:
+			ur.add_undo_reference(entry[0])
+	ur.commit_action(false)
 
-## Abandon a batch that ended up writing nothing (a validation failure before the
-## first write). Committing an empty action would put a no-op entry on the user's
-## undo stack, so Ctrl+Z would appear to do nothing once.
 func _edit_abort(ctx: Dictionary) -> void:
-	var ur: EditorUndoRedoManager = ctx.get(&"ur")
-	if ur and not bool(ctx.get(&"dirty", false)):
-		ur.commit_action(false)
 	ctx[&"ur"] = null

@@ -1060,7 +1060,7 @@ func scene_diff(args: Dictionary) -> Dictionary:
 
 	var current := _snapshot_scene(scene_path, include_properties)
 	if current.is_empty():
-		return {&"ok": false, &"error": "Could not read scene: " + scene_path}
+		return {&"ok": false, &"error": "Could not read scene (focus its tab first if it is open): " + scene_path}
 
 	var new_id := _store_snapshot(scene_path, current)
 
@@ -1114,21 +1114,13 @@ func scene_diff(args: Dictionary) -> Dictionary:
 ## path -> {type, script, props}. Property values are serialized so a Vector2
 ## compares by value rather than by reference.
 func _snapshot_scene(scene_path: String, include_properties: bool) -> Dictionary:
-	var root: Node = _edited_root_if_open(scene_path)
-	var owns_root := false
-	if root == null:
-		var packed := ResourceLoader.load(scene_path, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
-		if packed == null:
-			return {}
-		root = _instantiate_packed_scene_for_edit(packed)
-		if root == null:
-			return {}
-		owns_root = true
-
+	var acquired := _acquire_scene(scene_path)
+	if not acquired[2].is_empty():
+		return {}
+	var root: Node = acquired[0]
 	var out: Dictionary = {}
 	_walk_snapshot(root, root, out, include_properties)
-	if owns_root:
-		root.queue_free()
+	_discard_scene(root, acquired[1])
 	return out
 
 func _walk_snapshot(node: Node, root: Node, out: Dictionary, include_properties: bool) -> void:
