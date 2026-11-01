@@ -21,13 +21,19 @@ func _get_animation_player(root: Node, node_path: String) -> Array:
 		return [null, "Node '%s' is %s, expected AnimationPlayer" % [node_path, target.get_class()]]
 	return [target, ""]
 
-## Get (or lazily create) the default AnimationLibrary on an AnimationPlayer.
-func _get_or_create_default_library(player: AnimationPlayer) -> AnimationLibrary:
-	if player.has_animation_library(_DEFAULT_LIB):
-		return player.get_animation_library(_DEFAULT_LIB)
-	var lib := AnimationLibrary.new()
-	player.add_animation_library(_DEFAULT_LIB, lib)
-	return lib
+## Looking up an animation must not create a library, even on failed edits.
+func _get_default_library(player: AnimationPlayer) -> AnimationLibrary:
+	return player.get_animation_library(_DEFAULT_LIB) if player.has_animation_library(_DEFAULT_LIB) else null
+
+
+func _add_configured_track(anim: Animation, track_type: int, path: NodePath) -> void:
+	var index := anim.add_track(track_type)
+	anim.track_set_path(index, path)
+
+
+func _remove_animation_track(anim: Animation, index: int) -> void:
+	anim.remove_track(index)
+
 
 const _TRACK_TYPES := {
 	"value": Animation.TYPE_VALUE,
@@ -100,16 +106,27 @@ func create_animation(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": player_result[1]}
 	var player: AnimationPlayer = player_result[0]
 
-	var lib := _get_or_create_default_library(player)
-	if lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib != null and lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation already exists: " + animation_name}
 
 	var anim := Animation.new()
 	anim.length = length
 	anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+
+	var created_library := lib == null
+	if created_library:
+		lib = AnimationLibrary.new()
+	var add_error := lib.add_animation(animation_name, anim)
+	if add_error != OK:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Invalid animation name: " + animation_name}
 	var ctx := _begin_edit(is_live, "MCP: create animation '%s'" % animation_name, root)
-	lib.add_animation(animation_name, anim)
+	if created_library:
+		player.add_animation_library(_DEFAULT_LIB, lib)
+		_edit_record(ctx, player, &"add_animation_library", [_DEFAULT_LIB, lib],
+			&"remove_animation_library", [_DEFAULT_LIB])
 	_edit_record(ctx, lib, &"add_animation", [animation_name, anim],
 		&"remove_animation", [animation_name])
 	_edit_commit(ctx)
@@ -156,8 +173,8 @@ func add_animation_track(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": player_result[1]}
 	var player: AnimationPlayer = player_result[0]
 
-	var lib := _get_or_create_default_library(player)
-	if not lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib == null or not lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation not found: " + animation_name}
 	var anim := lib.get_animation(animation_name)
@@ -171,11 +188,9 @@ func add_animation_track(args: Dictionary) -> Dictionary:
 	var ctx := _begin_edit(is_live, "MCP: add %s track" % track_type, root)
 	var track_idx := anim.add_track(_TRACK_TYPES[track_type])
 	anim.track_set_path(track_idx, np)
-	# add_track appends, so the inverse is removing the index it landed on.
-	_edit_record(ctx, anim, &"add_track", [_TRACK_TYPES[track_type]],
-		&"remove_track", [track_idx])
-	_edit_record(ctx, anim, &"track_set_path", [track_idx, np],
-		&"track_set_path", [track_idx, np])
+	# Replay creation and configuration together; undo only removes the track.
+	_edit_record(ctx, self, &"_add_configured_track", [anim, _TRACK_TYPES[track_type], np],
+		&"_remove_animation_track", [anim, track_idx])
 	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
@@ -249,8 +264,8 @@ func set_animation_keyframe(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": player_result[1]}
 	var player: AnimationPlayer = player_result[0]
 
-	var lib := _get_or_create_default_library(player)
-	if not lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib == null or not lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation not found: " + animation_name}
 	var anim := lib.get_animation(animation_name)
@@ -261,6 +276,15 @@ func set_animation_keyframe(args: Dictionary) -> Dictionary:
 
 	var track_type := anim.track_get_type(track_index)
 	var parsed_value = _parse_keyframe_value(root, anim, track_index, value)
+
+	var previous_index := anim.track_find_key(track_index, time, Animation.FIND_MODE_APPROX)
+	var previous_time := 0.0
+	var previous_value: Variant
+	var previous_transition := 1.0
+	if previous_index >= 0:
+		previous_time = anim.track_get_key_time(track_index, previous_index)
+		previous_value = anim.track_get_key_value(track_index, previous_index)
+		previous_transition = anim.track_get_key_transition(track_index, previous_index)
 
 	var key_index: int
 	if track_type == Animation.TYPE_METHOD:
@@ -282,8 +306,13 @@ func set_animation_keyframe(args: Dictionary) -> Dictionary:
 	# engine places it by time — and the failure above must not leave an action
 	# open on the undo stack.
 	var ctx := _begin_edit(is_live, "MCP: keyframe at %ss" % time, root)
-	_edit_record(ctx, anim, &"track_insert_key", [track_index, time, anim.track_get_key_value(track_index, key_index)],
-		&"track_remove_key", [track_index, key_index])
+	var inserted_value = anim.track_get_key_value(track_index, key_index)
+	if previous_index >= 0:
+		_edit_record(ctx, anim, &"track_insert_key", [track_index, time, inserted_value],
+			&"track_insert_key", [track_index, previous_time, previous_value, previous_transition])
+	else:
+		_edit_record(ctx, anim, &"track_insert_key", [track_index, time, inserted_value],
+			&"track_remove_key", [track_index, key_index])
 	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
@@ -320,8 +349,8 @@ func get_animation_info(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": player_result[1]}
 	var player: AnimationPlayer = player_result[0]
 
-	var lib := _get_or_create_default_library(player)
-	if not lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib == null or not lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation not found: " + animation_name}
 	var anim := lib.get_animation(animation_name)
@@ -373,8 +402,8 @@ func remove_animation(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": player_result[1]}
 	var player: AnimationPlayer = player_result[0]
 
-	var lib := _get_or_create_default_library(player)
-	if not lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib == null or not lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation not found: " + animation_name}
 
@@ -524,16 +553,14 @@ func create_sprite_animation(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Node '%s' is %s, expected Sprite2D. For an AnimatedSprite2D use create_sprite_frames instead." % [sprite_path, sprite.get_class()]}
 
-	var lib := _get_or_create_default_library(player)
-	if lib.has_animation(animation_name):
+	var lib := _get_default_library(player)
+	if lib != null and lib.has_animation(animation_name):
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "Animation already exists: %s. remove_animation first — tracks cannot be reordered, so rebuilding is the only way to change frame order." % animation_name}
 
 	var anim := Animation.new()
 	anim.length = indices.size() / fps
 	anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
-
-	var ctx := _begin_edit(is_live, "MCP: sprite animation '%s'" % animation_name, root)
 
 	# ORDER MATTERS. An AnimationPlayer applies value tracks by index, so the
 	# sheet layout has to be set before the frame index that indexes into it.
@@ -557,7 +584,18 @@ func create_sprite_animation(args: Dictionary) -> Dictionary:
 	for i in range(indices.size()):
 		anim.track_insert_key(frame_track, i / fps, int(indices[i]))
 
-	lib.add_animation(animation_name, anim)
+	var created_library := lib == null
+	if created_library:
+		lib = AnimationLibrary.new()
+	var add_error := lib.add_animation(animation_name, anim)
+	if add_error != OK:
+		_discard_scene(root, is_live)
+		return {&"ok": false, &"error": "Invalid animation name: " + animation_name}
+	var ctx := _begin_edit(is_live, "MCP: sprite animation '%s'" % animation_name, root)
+	if created_library:
+		player.add_animation_library(_DEFAULT_LIB, lib)
+		_edit_record(ctx, player, &"add_animation_library", [_DEFAULT_LIB, lib],
+			&"remove_animation_library", [_DEFAULT_LIB])
 	_edit_record(ctx, lib, &"add_animation", [animation_name, anim],
 		&"remove_animation", [animation_name])
 	_edit_commit(ctx)
@@ -585,6 +623,9 @@ func create_sprite_frames(args: Dictionary) -> Dictionary:
 		return {&"ok": false, &"error": "Missing or rejected 'path' (where to save the .tres, e.g. res://player_frames.tres)"}
 	if not res_path.ends_with(".tres") and not res_path.ends_with(".res"):
 		return {&"ok": false, &"error": "'path' must end in .tres or .res (got %s)" % res_path}
+
+	if FileAccess.file_exists(res_path) or DirAccess.dir_exists_absolute(res_path):
+		return {&"ok": false, &"error": "Destination already exists: " + res_path}
 
 	var anims = args.get(&"animations", [])
 	if not (anims is Array) or (anims as Array).is_empty():

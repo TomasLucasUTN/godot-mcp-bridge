@@ -571,18 +571,23 @@ func add_bone(args: Dictionary) -> Dictionary:
 				_discard_scene(root, is_live)
 				return {&"ok": false, &"error": "Parent bone not found: %s. Existing: %s" % [parent_bone, sk.get_concatenated_bone_names()]}
 
+		if ":" in bone_name or "/" in bone_name:
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "Bone name cannot contain ':' or '/'"}
+		var parsed_rest: Variant = _parse_value(rest) if rest != null else Transform3D.IDENTITY
+		if not (parsed_rest is Transform3D):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'rest' must be a Transform3D for a 3D skeleton"}
+
+		var before := _snapshot_bones(sk)
 		var ctx := _begin_edit(is_live, "MCP: add bone '%s'" % bone_name, root)
 		sk.add_bone(bone_name)
 		var idx := sk.find_bone(bone_name)
 		if parent_idx != -1:
 			sk.set_bone_parent(idx, parent_idx)
-		if rest != null:
-			var parsed = _parse_value(rest)
-			if parsed is Transform3D:
-				sk.set_bone_rest(idx, parsed)
-		# Skeleton3D bones are internal state, not nodes, so the inverse is
-		# clearing and rebuilding — there is no remove_bone in the public API.
-		# Record the property so at least the scene is marked dirty coherently.
+		sk.set_bone_rest(idx, parsed_rest)
+		_edit_record(ctx, self, &"_restore_bones", [sk, _snapshot_bones(sk)],
+			&"_restore_bones", [sk, before])
 		_edit_commit(ctx)
 
 		var err := _finish_scene_edit(root, scene_path, is_live)
@@ -674,28 +679,32 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Bone not found: %s. Existing: %s" % [bone_name, sk.get_concatenated_bone_names()]}
 
+		var p: Variant = _parse_typed_value(position, TYPE_VECTOR3) if position is Array else _parse_value(position)
+		var r: Variant = _parse_value(rotation)
+		var s: Variant = _parse_typed_value(scale, TYPE_VECTOR3) if scale is Array else _parse_value(scale)
+		if position != null and not (p is Vector3):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'position' must be a {x,y,z} Vector3 for a 3D skeleton"}
+		if rotation != null:
+			if r is Vector3:
+				r = Quaternion.from_euler(r)
+			elif not (r is Quaternion):
+				_discard_scene(root, is_live)
+				return {&"ok": false, &"error": "'rotation' must be a Vector3 (euler radians) or a Quaternion"}
+		if rotation != null and not r.is_normalized():
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'rotation' Quaternion must be normalized"}
+		if scale != null and not (s is Vector3):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'scale' must be a {x,y,z} Vector3"}
+
 		var ctx := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
 		if position != null:
-			var p = _parse_typed_value(position, TYPE_VECTOR3) if position is Array else _parse_value(position)
-			if not (p is Vector3):
-				_abort_edit(ctx, root, is_live)
-				return {&"ok": false, &"error": "'position' must be a {x,y,z} Vector3 for a 3D skeleton"}
-			sk.set_bone_pose_position(idx, p)
+			_edit_set(ctx, sk, StringName("bones/%d/position" % idx), p)
 		if rotation != null:
-			var r = _parse_value(rotation)
-			if r is Quaternion:
-				sk.set_bone_pose_rotation(idx, r)
-			elif r is Vector3:
-				sk.set_bone_pose_rotation(idx, Quaternion.from_euler(r))
-			else:
-				_abort_edit(ctx, root, is_live)
-				return {&"ok": false, &"error": "'rotation' must be a Vector3 (euler radians) or a Quaternion"}
+			_edit_set(ctx, sk, StringName("bones/%d/rotation" % idx), r)
 		if scale != null:
-			var s = _parse_typed_value(scale, TYPE_VECTOR3) if scale is Array else _parse_value(scale)
-			if not (s is Vector3):
-				_abort_edit(ctx, root, is_live)
-				return {&"ok": false, &"error": "'scale' must be a {x,y,z} Vector3"}
-			sk.set_bone_pose_scale(idx, s)
+			_edit_set(ctx, sk, StringName("bones/%d/scale" % idx), s)
 		_edit_commit(ctx)
 
 		var err := _finish_scene_edit(root, scene_path, is_live)
@@ -715,20 +724,24 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 			_discard_scene(root, is_live)
 			return {&"ok": false, &"error": "Bone2D '%s' not found under %s" % [bone_name, node_path]}
 
+		var p2: Variant = _parse_typed_value(position, TYPE_VECTOR2) if position is Array else _parse_value(position)
+		var s2: Variant = _parse_typed_value(scale, TYPE_VECTOR2) if scale is Array else _parse_value(scale)
+		if position != null and not (p2 is Vector2):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'position' must be a {x,y} Vector2 for a 2D skeleton"}
+		if scale != null and not (s2 is Vector2):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'scale' must be a {x,y} Vector2"}
+		if rotation != null and not (rotation is float or rotation is int):
+			_discard_scene(root, is_live)
+			return {&"ok": false, &"error": "'rotation' must be a number (radians) for a 2D skeleton"}
+
 		var ctx2 := _begin_edit(is_live, "MCP: pose bone '%s'" % bone_name, root)
 		if position != null:
-			var p2 = _parse_typed_value(position, TYPE_VECTOR2) if position is Array else _parse_value(position)
-			if not (p2 is Vector2):
-				_abort_edit(ctx2, root, is_live)
-				return {&"ok": false, &"error": "'position' must be a {x,y} Vector2 for a 2D skeleton"}
 			_edit_set(ctx2, bone, &"position", p2)
 		if rotation != null:
 			_edit_set(ctx2, bone, &"rotation", float(rotation))
 		if scale != null:
-			var s2 = _parse_typed_value(scale, TYPE_VECTOR2) if scale is Array else _parse_value(scale)
-			if not (s2 is Vector2):
-				_abort_edit(ctx2, root, is_live)
-				return {&"ok": false, &"error": "'scale' must be a {x,y} Vector2"}
 			_edit_set(ctx2, bone, &"scale", s2)
 		_edit_commit(ctx2)
 
@@ -741,3 +754,23 @@ func set_bone_pose(args: Dictionary) -> Dictionary:
 
 	_discard_scene(root, is_live)
 	return {&"ok": false, &"error": "Node '%s' is %s, expected Skeleton2D or Skeleton3D" % [node_path, target.get_class()]}
+
+
+func _snapshot_bones(skeleton: Skeleton3D) -> Dictionary:
+	var snapshot: Dictionary = {}
+	for property in skeleton.get_property_list():
+		var name: String = property[&"name"]
+		if name.begins_with("bones/") and int(property[&"usage"]) & PROPERTY_USAGE_STORAGE:
+			snapshot[name] = skeleton.get(name)
+	return snapshot
+
+
+func _restore_bones(skeleton: Skeleton3D, snapshot: Dictionary) -> void:
+	# There is no single-bone removal API. Preserve the skeleton node and every
+	# serialized bone property (including metadata) while rebuilding its bones.
+	skeleton.clear_bones()
+	for name in snapshot:
+		if str(name).ends_with("/name"):
+			skeleton.add_bone(snapshot[name])
+	for name in snapshot:
+		skeleton.set(name, snapshot[name])

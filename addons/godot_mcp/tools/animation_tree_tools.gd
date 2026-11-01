@@ -44,11 +44,14 @@ func create_animation_tree(args: Dictionary) -> Dictionary:
 	# by an early return would sit unclosed on the editor's undo stack.
 	var ctx := _begin_edit(is_live, "MCP: add %s" % tree.name, root)
 	_edit_add_child(ctx, parent, tree, root)
-	_edit_commit(ctx)
 
 	_edit_set(ctx, tree, &"anim_player", NodePath(anim_player_path))
 	_edit_set(ctx, tree, &"tree_root", AnimationNodeStateMachine.new())
 	_edit_set(ctx, tree, &"active", true)
+	if Engine.is_editor_hint():
+		# Keep the runtime active flag without running a new mixer on editor data.
+		tree.set_process_internal(false)
+		tree.set_physics_process_internal(false)
 	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
@@ -226,14 +229,16 @@ func remove_state_machine_state(args: Dictionary) -> Dictionary:
 		_discard_scene(root, is_live)
 		return {&"ok": false, &"error": "State '%s' does not exist" % state_name}
 
-	# Capture the node and its layout position first: without them undo could
-	# only recreate an empty state in the wrong place.
 	var removed_node := state_machine.get_node(state_name)
 	var removed_pos := state_machine.get_node_position(state_name)
+	var transitions: Array = []
+	for i in range(state_machine.get_transition_count()):
+		transitions.append([state_machine.get_transition_from(i),
+			state_machine.get_transition_to(i), state_machine.get_transition(i)])
 	var ctx := _begin_edit(is_live, "MCP: remove state '%s'" % state_name, root)
 	state_machine.remove_node(state_name)
-	_edit_record(ctx, state_machine, &"remove_node", [state_name],
-		&"add_node", [state_name, removed_node, removed_pos])
+	_edit_record(ctx, self, &"_remove_state", [state_machine, state_name],
+		&"_restore_state", [state_machine, state_name, removed_node, removed_pos, transitions])
 	_edit_commit(ctx)
 
 	var err := _finish_scene_edit(root, scene_path, is_live)
@@ -404,3 +409,17 @@ func remove_state_machine_transition(args: Dictionary) -> Dictionary:
 
 	return {&"ok": true, &"scene_path": scene_path, &"node_path": node_path,
 		&"from": from, &"to": to, &"message": "Removed transition '%s' -> '%s'" % [from, to]}
+
+
+func _remove_state(machine: AnimationNodeStateMachine, state_name: String) -> void:
+	machine.remove_node(state_name)
+
+
+func _restore_state(machine: AnimationNodeStateMachine, state_name: String,
+		node: AnimationNode, position: Vector2, transitions: Array) -> void:
+	machine.add_node(state_name, node, position)
+	# Rebuild the ordered list, including unaffected edges, to retain priority.
+	for i in range(machine.get_transition_count() - 1, -1, -1):
+		machine.remove_transition_by_index(i)
+	for edge in transitions:
+		machine.add_transition(edge[0], edge[1], edge[2])
