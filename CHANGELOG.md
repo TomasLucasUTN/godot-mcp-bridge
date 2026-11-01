@@ -5,6 +5,37 @@ This project started as a fork of [tomyud1/godot-mcp](https://github.com/tomyud1
 surface. Versioning restarts at 1.0.0 for this repository; it does not carry
 over upstream's version numbers or issue/PR history.
 
+## [Unreleased]
+
+`read_scene` optionally returns compact columns/rows with the same selected fields
+and pagination as tree output. `find_tools` recognizes common Spanish domain terms,
+normalizes accents and ignores repeated query terms when scoring.
+
+WebSocket replies are confined to their editor/runtime channel; malformed envelopes
+and role changes close the connection. Project binding preserves POSIX path case.
+The internal HTTP tool endpoint rejects browser origins and malformed arguments
+before dispatch. DAP/LSP framing copies fragmented bodies once, bounds headers and
+bodies (8 KiB / 32 MiB), rejects invalid UTF-8/JSON and propagates protocol failures
+to pending calls. Closing or replacing a connection no longer leaves a stale socket
+able to reset the replacement.
+
+Scene editing uses isolated previews of unsaved editor state, rejects inactive
+open targets and unsupported edits of inherited/instanced children, and stages
+undo operations until a call succeeds. Animation keys, state transitions, script
+exports and bones retain their previous state through undo. Consecutive edits of
+a closed scene also preserve earlier changes when an older PackedScene remains
+cached. Creators and resource export refuse silent overwrites.
+
+`read_scene` defaults to a 500-node budget with explicit truncation and direct-child
+pagination. `validate_scene_integrity` can inspect the live tree; automatic checks
+after edits use that mode. See [Scene editing](docs/scene-editing.md) for the changed
+contracts, resource ownership policy and measured payload reduction.
+
+Failed WebSocket sends release pending requests immediately. Bound connections
+must complete their handshake before receiving tool calls. Editor integration
+tests use private ports and credentials, and the Windows GDScript runner waits
+for the actual process and propagates failures.
+
 ## [1.2.1] - 2026-09-04
 
 See [`release-notes/v1.2.1.md`](./release-notes/v1.2.1.md).

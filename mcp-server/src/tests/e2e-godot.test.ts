@@ -25,15 +25,12 @@
  * "[Godot MCP] Plugin loading..." / "[MCP] Connected to server" in stdout.
  * So this test uses that mode directly.
  *
- * The addon's WebSocket client (mcp_client.gd) hardcodes ws://127.0.0.1:6505
- * with no override, so the bridge in this test must also listen on the
- * real DEFAULT_PORT rather than a private test port — that's the one way
- * this test can collide with a real godot-mcp-server already running on
- * this machine. If port 6505 is already taken, the test skips instead of
- * failing.
+ * A private ephemeral port, per-run secret and project binding keep this
+ * suite isolated from the developer's bridge and other Godot editor sessions.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, cpSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -50,26 +47,10 @@ const SCENE_PATH = 'res://e2e_test_scene.tscn';
 const SCENE_FILE = join(FIXTURE_PROJECT, 'e2e_test_scene.tscn');
 
 const CONNECT_TIMEOUT_MS = 30000;
-const BRIDGE_PORT = 6505; // hardcoded in addons/godot_mcp/mcp_client.gd — not configurable
+let BRIDGE_PORT = 0; // OS-assigned, never the user's live bridge port.
+const TEST_SECRET = randomUUID();
 
 const godotAvailable = existsSync(GODOT_BIN);
-
-/**
- * Port 6505 is hardcoded into the addon and can't be overridden, so if a
- * real godot-mcp-server (e.g. the user's own editor session) already owns
- * it, we can't bind our test bridge there. Rather than fail the suite in
- * that case, we detect it up front and skip with a clear reason.
- */
-async function isPortFree(port: number): Promise<boolean> {
-  const probe = createBridge(port);
-  try {
-    await probe.start();
-    probe.stop();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Copy the repo's addon over the fixture's own copy before the editor starts.
@@ -95,8 +76,7 @@ function syncAddonIntoFixture(): void {
   });
 }
 
-const portFree = godotAvailable ? await isPortFree(BRIDGE_PORT) : false;
-const canRun = godotAvailable && portFree;
+const canRun = godotAvailable;
 
 describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
   let bridge: GodotBridge;
@@ -104,15 +84,20 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
 
   beforeAll(async () => {
     if (existsSync(SCENE_FILE)) rmSync(SCENE_FILE);
+    // The editor reopens the tabs of its previous session. A scene left open by
+    // an aborted run would come back as an inactive tab, which scene tools now
+    // refuse to edit behind the user's back.
+    rmSync(join(FIXTURE_PROJECT, '.godot', 'editor', 'editor_layout.cfg'), { force: true });
     syncAddonIntoFixture();
 
-    bridge = createBridge(BRIDGE_PORT);
+    bridge = createBridge(0, undefined, FIXTURE_PROJECT, TEST_SECRET);
     await bridge.start();
+    BRIDGE_PORT = bridge.getStatus().port;
 
     godotProcess = spawn(
       GODOT_BIN,
       ['--headless', '--editor', '--path', FIXTURE_PROJECT],
-      { stdio: 'ignore' }
+      { stdio: 'ignore', windowsHide: true, env: { ...process.env, GODOT_MCP_PORT: String(BRIDGE_PORT), GODOT_MCP_SECRET: TEST_SECRET } }
     );
 
     await new Promise<void>((resolve, reject) => {
@@ -129,17 +114,7 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       }, 250);
     });
 
-    // CRITICAL: confirm we're talking to the fixture project and not to
-    // somebody's real one.
-    //
-    // The addon hardcodes port 6505, so ANY Godot editor already open on this
-    // machine will reconnect to whatever is listening there — including the
-    // bridge this test just started. The isPortFree() check above only proves
-    // the port was free when the suite loaded; it cannot stop an existing
-    // editor from attaching a moment later. Without this guard the mutation
-    // tests below run `create_scene`/`add_node`/`remove_node` against that
-    // editor's project. That has actually happened, and it wrote a scene file
-    // into a real game project.
+    // Keep an explicit identity assertion in addition to handshake binding.
     const connectedPath = bridge.getStatus().projectPath ?? '';
     const expected = FIXTURE_PROJECT.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     const actual = connectedPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -252,7 +227,7 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
       // method, so the probe script declares it and is attached to the receiver.
       await bridge.invokeTool('create_script', {
         path: 'res://e2e_clobber_probe.gd',
-        content: 'extends Node2D\nfunc _on_body_ready() -> void:\n\tpass\n',
+        content: 'extends Node2D\n@export var health: int = 10\nfunc _on_body_ready() -> void:\n\tpass\n',
       });
       await bridge.invokeTool('attach_script', {
         scene_path: LIVE_SCENE, node_path: '.', script_path: 'res://e2e_clobber_probe.gd',
@@ -323,6 +298,113 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
 
       const dump = JSON.stringify(await bridge.invokeTool('scene_tree_dump', { scene_path: LIVE_SCENE }));
       expect(dump).not.toContain('LiveRay');
+    }, 20000);
+
+    it('previews an unsaved-only node without creating an undo action', async () => {
+      const before = readFileSync(LIVE_FILE, 'utf8');
+      await bridge.invokeTool('add_node', {
+        scene_path: LIVE_SCENE, parent_path: '.', node_name: 'PreviewOnly', node_type: 'Node2D',
+      });
+      const result = await bridge.invokeTool('batch_set_property', {
+        scene_path: LIVE_SCENE, node_paths: ['PreviewOnly'], property_name: 'visible', value: false, dry_run: true,
+      }) as Record<string, unknown>;
+      expect(result.failed).toEqual([]);
+      expect(result.written).toBe(false);
+      const node = await bridge.invokeTool('read_scene', {
+        scene_path: LIVE_SCENE, node_path: 'PreviewOnly', properties: ['visible'],
+      });
+      expect(JSON.stringify(node)).toContain('"visible":true');
+      await bridge.invokeTool('undo_last', {});
+      const tree = await bridge.invokeTool('read_scene', { scene_path: LIVE_SCENE });
+      expect(JSON.stringify(tree)).not.toContain('PreviewOnly');
+      expect(readFileSync(LIVE_FILE, 'utf8')).toBe(before);
+    }, 20000);
+
+    it('reads unsaved state in compact format without changing disk or undo', async () => {
+      const before = readFileSync(LIVE_FILE, 'utf8');
+      await bridge.invokeTool('add_node', {
+        scene_path: LIVE_SCENE, parent_path: '.', node_name: 'CompactOnly', node_type: 'Node2D',
+      });
+      const args = { scene_path: LIVE_SCENE, node_path: 'CompactOnly', properties: ['visible'] };
+      const tree = await bridge.invokeTool('read_scene', args) as { root: { type: string; properties: unknown } };
+      const compact = await bridge.invokeTool('read_scene', { ...args, format: 'compact' }) as {
+        root_name: string; columns: string[]; rows: unknown[][];
+      };
+      expect(compact.root_name).toBe('CompactOnly');
+      expect(compact.rows).toHaveLength(1);
+      expect(compact.rows[0][compact.columns.indexOf('type')]).toBe(tree.root.type);
+      expect(compact.rows[0][compact.columns.indexOf('properties')]).toEqual(tree.root.properties);
+      expect(readFileSync(LIVE_FILE, 'utf8')).toBe(before);
+      await bridge.invokeTool('undo_last', {});
+      const after = await bridge.invokeTool('read_scene', { scene_path: LIVE_SCENE });
+      expect(JSON.stringify(after)).not.toContain('CompactOnly');
+    }, 20000);
+
+    it.skipIf(process.platform !== 'win32')('recognizes an open Windows scene through a differently cased path', async () => {
+      const before = readFileSync(LIVE_FILE, 'utf8');
+      await bridge.invokeTool('modify_node_property', {
+        scene_path: LIVE_SCENE.toUpperCase().replace('RES://', 'res://'),
+        node_path: 'Sprite', property_name: 'visible', value: false,
+      });
+      expect(readFileSync(LIVE_FILE, 'utf8')).toBe(before);
+      const node = await bridge.invokeTool('read_scene', {
+        scene_path: LIVE_SCENE, node_path: 'Sprite', properties: ['visible'],
+      });
+      expect(JSON.stringify(node)).toContain('"visible":false');
+      await bridge.invokeTool('undo_last', {});
+    }, 20000);
+
+    it('restores unsaved script exports when undoing detach', async () => {
+      await bridge.invokeTool('modify_node_property', {
+        scene_path: LIVE_SCENE, node_path: '.', property_name: 'health', value: 99,
+      });
+      const before = readFileSync(LIVE_FILE, 'utf8');
+      await bridge.invokeTool('detach_script', { scene_path: LIVE_SCENE, node_path: '.' });
+      await bridge.invokeTool('undo_last', {});
+      const node = await bridge.invokeTool('read_scene', {
+        scene_path: LIVE_SCENE, node_path: '.', properties: ['health'],
+      });
+      expect(JSON.stringify(node)).toContain('"health":99');
+      expect(readFileSync(LIVE_FILE, 'utf8')).toBe(before);
+    }, 20000);
+
+    it('checks unsaved integrity instead of silently reading the old file', async () => {
+      await bridge.invokeTool('add_node', {
+        scene_path: LIVE_SCENE, parent_path: '.', node_name: 'UnsavedShape', node_type: 'CollisionShape2D',
+      });
+      const live = await bridge.invokeTool('validate_scene_integrity', {
+        scene_path: LIVE_SCENE, use_live_tree: true,
+      }) as Record<string, unknown>;
+      const disk = await bridge.invokeTool('validate_scene_integrity', {
+        scene_path: LIVE_SCENE,
+      }) as Record<string, unknown>;
+      expect(live.source).toBe('live');
+      expect(JSON.stringify(live.issues)).toContain('UnsavedShape');
+      expect(disk.source).toBe('disk');
+      expect(JSON.stringify(disk.issues)).not.toContain('UnsavedShape');
+      await bridge.invokeTool('undo_last', {});
+    }, 20000);
+
+    it('preserves prior redo without exposing failed batch work', async () => {
+      await bridge.invokeTool('add_node', {
+        scene_path: LIVE_SCENE, parent_path: '.', node_name: 'RedoSentinel', node_type: 'Node2D',
+      });
+      await bridge.invokeTool('undo_last', {});
+      await expect(bridge.invokeTool('batch_scene_edit', {
+        scene_path: LIVE_SCENE, operations: [
+          { op: 'set_properties', node_path: 'Sprite', properties: { visible: false } },
+          { op: 'add_node', parent_path: 'MissingParent', node_name: 'Fail', node_type: 'Node2D' },
+        ],
+      })).rejects.toThrow();
+      const redone = await bridge.invokeTool('redo_last', {}) as Record<string, unknown>;
+      expect(redone.steps_applied).toBe(1);
+      const tree = await bridge.invokeTool('read_scene', { scene_path: LIVE_SCENE });
+      expect(JSON.stringify(tree)).toContain('RedoSentinel');
+      const node = await bridge.invokeTool('read_scene', {
+        scene_path: LIVE_SCENE, node_path: 'Sprite', properties: ['visible'],
+      });
+      expect(JSON.stringify(node)).toContain('"visible":true');
+      await bridge.invokeTool('remove_node', { scene_path: LIVE_SCENE, node_path: 'RedoSentinel' });
     }, 20000);
 
     // The regression net for the six-times bug. Each case takes several settable
@@ -913,11 +995,10 @@ describe.skipIf(!canRun)('E2E — real Godot editor process', () => {
 });
 
 describe.skipIf(canRun)('E2E — real Godot editor process (skipped)', () => {
-  it('skips: Godot binary missing or port 6505 already in use', () => {
+  it('skips: Godot binary missing', () => {
     if (!godotAvailable) {
       console.log(`[e2e-godot] Skipped: Godot binary not found at ${GODOT_BIN}`);
-    } else if (!portFree) {
-      console.log(`[e2e-godot] Skipped: port ${BRIDGE_PORT} is already in use by another process (likely a real godot-mcp-server).`);
+
     }
     expect(canRun).toBe(false);
   });

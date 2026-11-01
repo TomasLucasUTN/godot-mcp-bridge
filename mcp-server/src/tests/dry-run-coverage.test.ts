@@ -46,13 +46,27 @@ function toolsCoveredByCentralDryRun(): Set<string> {
     const file = varToFile.get(handlerVar);
     if (!file) continue;
     const src = readFileSync(join(TOOLS_DIR, file), 'utf8');
-    const body = new RegExp(`func ${method}\\(args: Dictionary\\)[\\s\\S]*?(?=\\nfunc |$)`).exec(src)?.[0] ?? '';
-    const guardedSave = sceneToolFiles.has(file)
-      && (body.includes('_save_scene(') || body.includes('_finish_scene_edit('));
-    // The file-writing tools are not scene tools and have no shared save
-    // point, so they read the flag themselves. Both count as covered.
-    const honoursItself = body.includes('_dry_run');
-    if (guardedSave || honoursItself) covered.add(tool);
+    const functions = new Map<string, string>();
+    const starts = [...src.matchAll(/^func ([a-z_0-9]+)\(/gm)];
+    starts.forEach((entry, index) => {
+      functions.set(entry[1], src.slice(entry.index, starts[index + 1]?.index ?? src.length));
+    });
+    const seen = new Set<string>();
+    const guarded = (name: string): boolean => {
+      if (seen.has(name)) return false;
+      seen.add(name);
+      const body = functions.get(name) ?? '';
+      if (body.includes('_dry_run')) return true;
+      if (sceneToolFiles.has(file) && /_(?:save_scene|finish_scene_edit)\(/.test(body)) return true;
+      // Only transparent wrappers inherit a guard. A scaffold that calls one
+      // guarded edit can still write other files, so following every call lies.
+      const statements = body.split('\n').slice(1)
+        .filter(line => line.trim() && !line.trimStart().startsWith('#'));
+      const delegate = statements.length === 1
+        ? /^\s*return ([a-z_0-9]+)\(/.exec(statements[0])?.[1] : undefined;
+      return delegate !== undefined && functions.has(delegate) && guarded(delegate);
+    };
+    if (guarded(method)) covered.add(tool);
   }
   return covered;
 }
@@ -84,6 +98,7 @@ describe('dry_run coverage', () => {
       // Delegates to batch_scene_edit, which is where the guarded save is;
       // its own body never touches the helpers.
       'modify_node_property',
+
     ]);
     const unbacked = [...advertised].filter(name => !covered.has(name) && !OWN_IMPLEMENTATION.has(name));
     expect(unbacked).toEqual([]);

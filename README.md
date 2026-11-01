@@ -494,6 +494,12 @@ everything goes through Godot's undo history and Ctrl+Z works, including over a 
 `batch_scene_edit`. When it is closed there is no history to write to — use version
 control. Many destructive tools take `dry_run: true` to preview first.
 
+Open **inactive** scene tabs are rejected rather than edited through disk. Focus
+the target tab before retrying. Resource edits, inherited nodes, preview behavior
+and undo guarantees are described in [Scene editing](docs/scene-editing.md).
+`read_scene` now has a default 500-node budget, explicit truncation and
+`child_offset` pagination for large branches; use `node_path` for focused reads.
+
 **Enabling a toolset mid-session may not reach your client.** Only `core` (37 tools) is
 on by default. `enable_toolset` flips it server-side and the server does send
 `notifications/tools/list_changed`, but several clients cache the tool list for the

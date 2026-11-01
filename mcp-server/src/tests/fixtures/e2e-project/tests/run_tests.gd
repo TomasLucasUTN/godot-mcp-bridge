@@ -118,6 +118,8 @@ func _initialize() -> void:
 	_test_vectors_take_the_array_form_everywhere()
 	_test_shader_param_lands_or_says_why_not()
 	_test_authority_write_is_checked()
+	await _test_scene_preservation_regressions()
+	_test_scene_node_budget()
 	print("\n=== RESULT: %d passed, %d failed ===" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -1131,6 +1133,7 @@ func _test_export_log_is_readable() -> void:
 	_check("Done" in condensed, "and so is the outcome")
 	_check(not ("res://a.gd" in condensed), "while per-file progress is dropped")
 	_check("2 per-file progress line(s) omitted" in condensed, "and the count is reported, not hidden")
+	_check(pt._condense_export_log(noisy.replace("\n", "\r\n")) == condensed, "export condensation is independent of Windows line endings")
 
 # The map excludes addon scripts from its nodes by default, but emitted a preload
 # edge for any .gd reference — so every preload into res://addons/ became an edge
@@ -4359,3 +4362,135 @@ func _ready() -> void:
 	_rm(script)
 	_rm(script2)
 	nc.free()
+
+
+func _test_scene_preservation_regressions() -> void:
+	print("\n[scene preservation regressions]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var ex = preload("res://addons/godot_mcp/tool_executor.gd").new()
+	root.add_child(ex)
+	ex._init_tools()
+	var scene := "res://__gdtest_preservation.tscn"
+	var material_path := "res://__gdtest_preservation_material.tres"
+	var exported := "res://__gdtest_preservation_export.tres"
+	_rm(scene)
+	_rm(material_path)
+	_rm(exported)
+	var material := StandardMaterial3D.new()
+	ResourceSaver.save(material, material_path)
+	var held := load(material_path) as StandardMaterial3D
+	var fixture := Node3D.new()
+	var mesh := MeshInstance3D.new()
+	mesh.name = "Mesh"
+	mesh.material_override = held
+	fixture.add_child(mesh)
+	mesh.owner = fixture
+	var packed := PackedScene.new()
+	packed.pack(fixture)
+	ResourceSaver.save(packed, scene)
+	fixture.free()
+	var scene_hash := FileAccess.get_md5(scene)
+	var asset_hash := FileAccess.get_md5(material_path)
+	var preview = await ex.execute_tool("set_material_3d", {"scene_path": scene, "node_path": "Mesh", "roughness": 0.25, "dry_run": true})
+	_check(preview.get("ok", false), "external material preview succeeds")
+	_check(held.roughness == 1.0, "preview does not mutate another holder of the cached resource")
+	_check(FileAccess.get_md5(scene) == scene_hash and FileAccess.get_md5(material_path) == asset_hash, "preview preserves scene and external asset bytes")
+	var changed = await ex.execute_tool("set_material_3d", {"scene_path": scene, "node_path": "Mesh", "roughness": 0.25})
+	_check(changed.get("ok", false), "closed external resource edit succeeds")
+	var reread := ResourceLoader.load(scene, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	var saved_root := reread.instantiate()
+	var saved_mesh := saved_root.get_node("Mesh") as MeshInstance3D
+	_check(is_equal_approx(saved_mesh.material_override.roughness, 0.25), "closed edit survives a fresh load, not just a cache read")
+	_check(held.roughness == 1.0 and FileAccess.get_md5(material_path) == asset_hash, "scene edit leaves the external shared asset unchanged")
+	saved_root.free()
+	var export_preview = await ex.execute_tool("save_resource_to_file", {"scene_path": scene, "node_path": "Mesh", "resource_path": "material_override", "save_to": exported, "dry_run": true})
+	_check(export_preview.get("ok", false) and not FileAccess.file_exists(exported), "resource export preview writes no file")
+	var rejected = await ex.execute_tool("save_resource_to_file", {"scene_path": scene, "node_path": "Mesh", "resource_path": "material_override", "save_to": material_path})
+	_check(not rejected.get("ok", true) and FileAccess.get_md5(material_path) == asset_hash, "resource export refuses overwriting an existing asset")
+	var invalid_shape = await ex.execute_tool("set_collision_shape", {"scene_path": scene, "node_path": "Mesh", "shape_type": "Node"})
+	_check(not invalid_shape.get("ok", true), "Node is rejected as a collision shape before allocation")
+	var cached_scene := load(scene) as PackedScene
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "Node3D", "node_name": "CacheFirst"})
+	st.add_node({"scene_path": scene, "parent_path": ".", "node_type": "Node3D", "node_name": "CacheSecond"})
+	var fresh_scene := ResourceLoader.load(scene, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	var fresh_root := fresh_scene.instantiate()
+	_check(cached_scene != null and fresh_root.has_node("CacheFirst") and fresh_root.has_node("CacheSecond"), "successive closed edits preserve earlier work even while an older PackedScene is held in cache")
+	fresh_root.free()
+	var inherited_scene := "res://__gdtest_preservation_inherited.tscn"
+	_rm(inherited_scene)
+	var inherited_file := FileAccess.open(inherited_scene, FileAccess.WRITE)
+	inherited_file.store_string('[gd_scene load_steps=2 format=3]\n[ext_resource type="PackedScene" path="%s" id="1"]\n[node name="Inherited" instance=ExtResource("1")]\n' % scene)
+	inherited_file.close()
+	var inherited_hash := FileAccess.get_md5(inherited_scene)
+	for tool in ["remove_node", "rename_node", "move_node"]:
+		var guarded = await ex.execute_tool(tool, {"scene_path": inherited_scene, "node_path": "Mesh", "new_name": "Renamed", "new_parent_path": "."})
+		_check(not guarded.get("ok", true) and FileAccess.get_md5(inherited_scene) == inherited_hash, "inherited origin prevents " + tool)
+	var renamed_root = await ex.execute_tool("rename_node", {"scene_path": inherited_scene, "node_path": ".", "new_name": "RenamedRoot"})
+	_check(renamed_root.get("ok", false), "derived root rename remains available as a serializable override")
+	for class_name_value in ["Object", "RefCounted", "Resource", "Texture2D"]:
+		var rejected_class = await ex.execute_tool("get_node_properties", {"node_type": class_name_value})
+		_check(not rejected_class.get("ok", true), "node introspection rejects non-Node class " + class_name_value)
+	var paths := [scene, material_path, exported, inherited_scene]
+	for path in paths: _rm(path)
+	var previous_readonly := OS.get_environment("GODOT_MCP_READ_ONLY")
+	OS.set_environment("GODOT_MCP_READ_ONLY", "true")
+	for tool in ["save_scene", "mp_set_authority", "add_bone", "create_sprite_animation"]:
+		var blocked = await ex.execute_tool(tool, {})
+		_check(not blocked.get("ok", true) and "read-only" in str(blocked.get("error", "")), "read-only gate covers " + tool)
+	OS.set_environment("GODOT_MCP_READ_ONLY", previous_readonly)
+	st.free()
+	ex.free()
+
+
+func _test_scene_node_budget() -> void:
+	print("\n[bounded scene responses]")
+	var st = preload("res://addons/godot_mcp/tools/scene_tools.gd").new()
+	var path := "res://__gdtest_budget.tscn"
+	_rm(path)
+	var specs: Array = []
+	for i in range(100):
+		specs.append({"name": "Child%d" % i, "type": "Node3D"})
+	st.create_scene({"scene_path": path, "root_node_type": "Node3D", "nodes": specs})
+	var full := st.read_scene({"scene_path": path})
+	var limited := st.read_scene({"scene_path": path, "max_nodes": 10})
+	_check(full.get("root", {}).get("children", []).size() == 100, "small scenes keep their complete default response")
+	_check(limited.get("truncated", false) and limited.get("nodes_returned") == 10, "node budget is global and truncation is explicit")
+	_check(limited.get("root", {}).get("children_truncated") == 91, "response says how many direct children were omitted")
+	_check(JSON.stringify(limited).length() < JSON.stringify(full).length() / 3, "bounded response materially reduces context size")
+	var branch := st.read_scene({"scene_path": path, "node_path": "Child99", "max_nodes": 1})
+	_check(branch.get("ok", false) and not branch.get("truncated", false), "omitted branches remain accessible by node_path")
+	var page := st.read_scene({"scene_path": path, "max_nodes": 10, "child_offset": 50})
+	_check(page.root.children[0].name == "Child50" and page.get("next_child_offset") == 59, "wide branches can be paged without losing siblings")
+	var last := st.read_scene({"scene_path": path, "max_nodes": 10, "child_offset": 99})
+	_check(last.root.children.size() == 1 and not last.has("next_child_offset"), "last page terminates without a false continuation")
+	var compact := st.read_scene({"scene_path": path, "max_nodes": 10, "format": "compact", "properties": ["visible", "missing_probe"]})
+	var same_tree := st.read_scene({"scene_path": path, "max_nodes": 10, "properties": ["visible", "missing_probe"]})
+	var flat: Array = [same_tree.root]
+	flat.append_array(same_tree.root.children)
+	var equivalent: bool = compact.rows.size() == flat.size()
+	for i in range(flat.size()):
+		for column in range(compact.columns.size()):
+			if compact.rows[i][column] != flat[i].get(compact.columns[column]): equivalent = false
+	_check(equivalent and compact.root_name == same_tree.root.name, "compact rows preserve every node field and truncation marker")
+	_check(not compact.has("root") and compact.get("next_child_offset") == same_tree.get("next_child_offset"), "compact avoids duplicate tree payload and keeps pagination")
+	_check(JSON.stringify(compact).length() < JSON.stringify(same_tree).length(), "compact reduces JSON for equivalent information")
+	_check(not st.read_scene({"scene_path": path, "format": "unsupported"}).get("ok", true), "unknown response formats fail before acquisition")
+	var child_path := "res://__gdtest_compact_child.tscn"
+	var script_path := "res://__gdtest_compact_script.gd"
+	_rm(child_path)
+	_write_text(script_path, "extends Node3D\n")
+	st.create_scene({"scene_path": child_path, "root_node_type": "Node3D"})
+	st.attach_script({"scene_path": child_path, "node_path": ".", "script_path": script_path})
+	st.instance_scene({"scene_path": path, "instance_path": child_path, "parent_path": ".", "node_name": "InstanceProbe"})
+	var instance_read := st.read_scene({"scene_path": path, "node_path": "InstanceProbe", "format": "compact"})
+	var instance_column: int = instance_read.columns.find("instance")
+	var script_column: int = instance_read.columns.find("script")
+	_check(instance_column >= 0 and instance_read.rows[0][instance_column] == child_path, "compact preserves instance source paths")
+	_check(script_column >= 0 and instance_read.rows[0][script_column] == script_path, "compact preserves script source paths")
+	_rm(child_path)
+	_rm(script_path)
+
+
+
+	_rm(path)
+	st.free()
